@@ -24,6 +24,9 @@ class CalyxWindow: NSWindow {
 
         styleMask.insert(.fullSizeContentView)
         tabbingMode = .disallowed
+
+        isOpaque = false
+        backgroundColor = .clear
     }
 
     override var canBecomeKey: Bool { true }
