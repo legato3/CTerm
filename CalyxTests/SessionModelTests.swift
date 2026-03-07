@@ -717,7 +717,7 @@ final class SessionModelTests: XCTestCase {
         let session = WindowSession(initialTab: tab)
 
         XCTAssertEqual(session.groups.count, 1)
-        XCTAssertEqual(session.groups.first?.name, "Default")
+        XCTAssertEqual(session.groups.first?.name, "Group 1")
         XCTAssertEqual(session.groups.first?.tabs.count, 1)
         XCTAssertEqual(session.groups.first?.activeTabID, tab.id)
         XCTAssertEqual(session.activeGroupID, session.groups.first?.id)

@@ -38,7 +38,7 @@ class WindowSession: Identifiable {
     }
 
     convenience init(initialTab: Tab) {
-        let group = TabGroup(name: "Default", tabs: [initialTab], activeTabID: initialTab.id)
+        let group = TabGroup(name: "Group 1", tabs: [initialTab], activeTabID: initialTab.id)
         self.init(groups: [group], activeGroupID: group.id)
     }
 
