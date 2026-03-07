@@ -551,9 +551,14 @@ enum GhosttyActionRouter {
         target: ghostty_target_s,
         direction: ghostty_action_goto_split_e
     ) -> Bool {
-        // Phase 1: stub, actual split navigation handled by window controller.
-        logger.debug("Goto split: \(direction.rawValue) (stub)")
-        return false
+        guard let surfaceView = surfaceView(from: target) else { return false }
+
+        NotificationCenter.default.post(
+            name: .ghosttyGotoSplit,
+            object: surfaceView,
+            userInfo: ["direction": direction]
+        )
+        return true
     }
 
     private static func handleResizeSplit(
@@ -561,18 +566,27 @@ enum GhosttyActionRouter {
         target: ghostty_target_s,
         resize: ghostty_action_resize_split_s
     ) -> Bool {
-        // Phase 1: stub
-        logger.debug("Resize split (stub)")
-        return false
+        guard let surfaceView = surfaceView(from: target) else { return false }
+
+        NotificationCenter.default.post(
+            name: .ghosttyResizeSplit,
+            object: surfaceView,
+            userInfo: ["resize": resize]
+        )
+        return true
     }
 
     private static func handleEqualizeSplits(
         _ app: ghostty_app_t,
         target: ghostty_target_s
     ) -> Bool {
-        // Phase 1: stub
-        logger.debug("Equalize splits (stub)")
-        return false
+        let surfaceView = surfaceView(from: target)
+
+        NotificationCenter.default.post(
+            name: .ghosttyEqualizeSplits,
+            object: surfaceView
+        )
+        return true
     }
 
     // MARK: - Helpers
