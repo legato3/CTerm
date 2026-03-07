@@ -15,6 +15,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private var hostingView: NSHostingView<MainContentView>?
     private let commandRegistry = CommandRegistry()
     private var closingTabIDs: Set<UUID> = []
+    private var focusRequestID: UInt64 = 0
 
     // MARK: - Computed Properties
 
@@ -255,9 +256,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         rebuildSplitContainer()
         updateLayout()
 
-        if let surfaceView = tab.registry.view(for: surfaceID) {
-            window.makeFirstResponder(surfaceView)
-        }
+        restoreFocus()
     }
 
     private func closeTab(id tabID: UUID) {
@@ -308,12 +307,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         rebuildSplitContainer()
         updateLayout()
 
-        // Restore focus
-        if let tab = activeTab,
-           let focusedID = tab.splitTree.focusedLeafID,
-           let focusView = tab.registry.view(for: focusedID) {
-            window?.makeFirstResponder(focusView)
-        }
+        restoreFocus()
     }
 
     func switchToGroup(id groupID: UUID) {
@@ -333,12 +327,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         rebuildSplitContainer()
         updateLayout()
 
-        // Restore focus
-        if let tab = activeTab,
-           let focusedID = tab.splitTree.focusedLeafID,
-           let focusView = tab.registry.view(for: focusedID) {
-            window?.makeFirstResponder(focusView)
-        }
+        restoreFocus()
     }
 
     // MARK: - Group Operations
@@ -377,9 +366,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         rebuildSplitContainer()
         updateLayout()
 
-        if let surfaceView = tab.registry.view(for: surfaceID) {
-            window.makeFirstResponder(surfaceView)
-        }
+        restoreFocus()
     }
 
     private func closeActiveGroup() {
@@ -398,22 +385,18 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             }
         }
 
+        let result = windowSession.removeGroup(id: group.id)
+
         for tabID in tabIDs {
             closingTabIDs.remove(tabID)
         }
-
-        let result = windowSession.removeGroup(id: group.id)
 
         switch result {
         case .switchedTab(_, _), .switchedGroup(_, _):
             activeTab?.registry.resumeAll()
             rebuildSplitContainer()
             updateLayout()
-            if let tab = activeTab,
-               let focusedID = tab.splitTree.focusedLeafID,
-               let focusView = tab.registry.view(for: focusedID) {
-                window?.makeFirstResponder(focusView)
-            }
+            restoreFocus()
         case .windowShouldClose:
             window?.close()
         }
@@ -459,10 +442,20 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func restoreFocus() {
-        if let tab = activeTab,
-           let focusedID = tab.splitTree.focusedLeafID,
-           let focusView = tab.registry.view(for: focusedID) {
-            window?.makeFirstResponder(focusView)
+        focusRequestID &+= 1
+        let requestID = focusRequestID
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard requestID == self.focusRequestID else { return }
+            guard let tab = self.activeTab,
+                  let focusedID = tab.splitTree.focusedLeafID,
+                  let focusView = tab.registry.view(for: focusedID) else { return }
+
+            if self.window?.makeFirstResponder(focusView) != true {
+                self.splitContainerView?.layoutSubtreeIfNeeded()
+                self.window?.makeFirstResponder(focusView)
+            }
         }
     }
 

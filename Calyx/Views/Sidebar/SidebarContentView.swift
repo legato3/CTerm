@@ -100,8 +100,10 @@ private struct GroupSectionView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
+                .contentShape(Rectangle())
                 .modifier(GroupHeaderBackgroundModifier(
                     isActiveGroup: isActiveGroup,
                     reduceTransparency: reduceTransparency,

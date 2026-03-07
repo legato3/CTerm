@@ -47,7 +47,7 @@ struct MainContentView: View {
 
                 ZStack {
                     VStack(spacing: 0) {
-                        if activeTabs.count > 1 {
+                        if !activeTabs.isEmpty {
                             TabBarContentView(
                                 tabs: activeTabs,
                                 activeTabID: activeTabID,

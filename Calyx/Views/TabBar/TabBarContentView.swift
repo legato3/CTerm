@@ -40,6 +40,8 @@ struct TabBarContentView: View {
         }
         .padding(.horizontal, 4)
         .frame(height: 32)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { onNewTab?() }
         .modifier(TabBarBackgroundModifier(reduceTransparency: reduceTransparency))
     }
 }
@@ -73,31 +75,40 @@ private struct TabItemButton: View {
     let isActive: Bool
     var onSelected: (() -> Void)?
     var onClose: (() -> Void)?
+    @State private var isHovering = false
 
     var body: some View {
-        Button(action: { onSelected?() }) {
-            HStack(spacing: 4) {
+        HStack(spacing: 0) {
+            Button(action: { onSelected?() }) {
                 Text(tab.title)
                     .lineLimit(1)
                     .font(.callout)
-                    .padding(.leading, 8)
-
-                Button(action: { onClose?() }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .padding(.trailing, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 10)
+                    .padding(.trailing, 4)
+                    .contentShape(Rectangle())
             }
-            .padding(.vertical, 6)
-            .padding(.horizontal, 4)
-            .background(
-                isActive
-                    ? RoundedRectangle(cornerRadius: 4).fill(Color.accentColor.opacity(0.12))
-                    : RoundedRectangle(cornerRadius: 4).fill(Color.clear)
-            )
+            .buttonStyle(.plain)
+
+            Button(action: { onClose?() }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 6)
+            .opacity(isHovering || isActive ? 1 : 0)
+            .allowsHitTesting(isHovering || isActive)
         }
-        .buttonStyle(.plain)
+        .frame(minWidth: 96, idealWidth: 140, maxWidth: 180)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 4).fill(
+                isActive ? Color.accentColor.opacity(0.12) :
+                isHovering ? Color.white.opacity(0.06) : Color.clear
+            )
+        )
+        .onHover { isHovering = $0 }
     }
 }
