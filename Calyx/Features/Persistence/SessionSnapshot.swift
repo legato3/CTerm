@@ -6,7 +6,7 @@
 import Foundation
 
 struct SessionSnapshot: Codable, Equatable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     let schemaVersion: Int
     let windows: [WindowSnapshot]
@@ -63,12 +63,14 @@ struct TabSnapshot: Codable, Equatable {
     let title: String
     let pwd: String?
     let splitTree: SplitTree
+    let browserURL: URL?
 
-    init(id: UUID = UUID(), title: String = "Terminal", pwd: String? = nil, splitTree: SplitTree = SplitTree()) {
+    init(id: UUID = UUID(), title: String = "Terminal", pwd: String? = nil, splitTree: SplitTree = SplitTree(), browserURL: URL? = nil) {
         self.id = id
         self.title = title
         self.pwd = pwd
         self.splitTree = splitTree
+        self.browserURL = browserURL
     }
 }
 
@@ -107,11 +109,31 @@ extension TabGroup {
 
 extension Tab {
     func snapshot() -> TabSnapshot {
-        TabSnapshot(
+        let url: URL? = switch content {
+        case .terminal: nil
+        case .browser(url: let url): url
+        }
+        return TabSnapshot(
             id: id,
             title: title,
             pwd: pwd,
-            splitTree: splitTree
+            splitTree: splitTree,
+            browserURL: url
+        )
+    }
+
+    convenience init(snapshot: TabSnapshot) {
+        let content: TabContent = if let url = snapshot.browserURL {
+            .browser(url: url)
+        } else {
+            .terminal
+        }
+        self.init(
+            id: snapshot.id,
+            title: snapshot.title,
+            pwd: snapshot.pwd,
+            splitTree: snapshot.splitTree,
+            content: content
         )
     }
 }

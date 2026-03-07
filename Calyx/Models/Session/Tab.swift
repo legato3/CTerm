@@ -7,6 +7,7 @@ import Foundation
 
 enum TabContent: Sendable {
     case terminal
+    case browser(url: URL)
 }
 
 @MainActor @Observable
