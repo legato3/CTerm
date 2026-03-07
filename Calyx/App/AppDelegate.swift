@@ -105,12 +105,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Window Management
 
     @objc func createNewWindow() {
-        let wc = CalyxWindowController()
+        let windowSession = WindowSession()
+        appSession.addWindow(windowSession)
+
+        let wc = CalyxWindowController(windowSession: windowSession)
         windowControllers.append(wc)
         wc.showWindow(nil)
     }
 
     func removeWindowController(_ controller: CalyxWindowController) {
+        if let sessionID = controller.windowSessionID {
+            appSession.removeWindow(id: sessionID)
+        }
         windowControllers.removeAll { $0 === controller }
     }
 
@@ -200,8 +206,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Actions
 
     @objc private func openPreferences(_ sender: Any?) {
-        if let app = GhosttyAppController.shared.app {
-            ghostty_app_open_config(app)
-        }
+        SettingsWindowController.shared.showSettings()
     }
 }

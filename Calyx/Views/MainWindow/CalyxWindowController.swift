@@ -12,8 +12,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private(set) var splitTree: SplitTree = SplitTree()
     private let registry = SurfaceRegistry()
     private var splitContainerView: SplitContainerView?
+    private(set) var windowSessionID: UUID?
 
-    convenience init() {
+    convenience init(windowSession: WindowSession? = nil) {
         let window = CalyxWindow(
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -21,6 +22,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             defer: false
         )
         self.init(window: window)
+        self.windowSessionID = windowSession?.id
         window.delegate = self
         window.center()
         setupTerminalSurface()
