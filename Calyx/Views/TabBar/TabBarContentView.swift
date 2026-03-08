@@ -201,7 +201,7 @@ private struct TabBarBackgroundModifier: ViewModifier {
         if reduceTransparency {
             content.background(Color(nsColor: .windowBackgroundColor))
         } else {
-            content.glassEffect(.regular, in: .rect)
+            content.glassEffect(.clear.tint(.black.opacity(0.25)), in: .rect)
         }
     }
 }

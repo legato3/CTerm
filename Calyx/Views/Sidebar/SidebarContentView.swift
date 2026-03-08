@@ -36,7 +36,10 @@ struct SidebarContentView: View {
                 .padding(.vertical, 4)
             }
 
-            Divider()
+            Rectangle()
+                .fill(Color.white.opacity(reduceTransparency ? 0.14 : 0.10))
+                .frame(height: 1)
+                .padding(.horizontal, 8)
 
             Button(action: { onNewGroup?() }) {
                 Label("New Group", systemImage: "folder.badge.plus")
@@ -70,7 +73,7 @@ private struct SidebarBackgroundModifier: ViewModifier {
         if reduceTransparency {
             content.background(Color(nsColor: .controlBackgroundColor))
         } else {
-            content.background(Color.black.opacity(0.3))
+            content.glassEffect(.clear.tint(.black.opacity(0.25)), in: .rect)
         }
     }
 }
