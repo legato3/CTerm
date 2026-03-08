@@ -181,6 +181,13 @@ class SurfaceView: NSView {
         return result
     }
 
+    /// Reset the focus tracking state without notifying the controller.
+    /// Used by SurfaceRegistry.pauseAll() to keep SurfaceView.focused in sync
+    /// when the controller's focus is set directly.
+    func resetFocusState() {
+        focused = false
+    }
+
     private func focusDidChange(_ newFocused: Bool) {
         guard focused != newFocused else { return }
         focused = newFocused
