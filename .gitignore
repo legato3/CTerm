@@ -17,6 +17,10 @@ GhosttyKit.xcframework/
 ghostty/.zig-cache/
 ghostty/zig-out/
 
+# Profiling
+*.profraw
+*.profdata
+
 # macOS
 .DS_Store
 *.swp
