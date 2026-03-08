@@ -573,14 +573,8 @@ class SurfaceView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        var x = event.scrollingDeltaX
-        var y = event.scrollingDeltaY
-
-        if event.hasPreciseScrollingDeltas {
-            // 2x speed multiplier for trackpad scrolling.
-            x *= 2
-            y *= 2
-        }
+        let x = event.scrollingDeltaX
+        let y = event.scrollingDeltaY
 
         let mods = EventTranslator.translateScrollMods(event)
         surfaceController?.sendMouseScroll(x: x, y: y, mods: mods)
