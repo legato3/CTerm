@@ -69,6 +69,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Last-window close path already persists synchronously in windowWillClose.
+        // Avoid overwriting with an empty snapshot during app teardown.
+        if windowControllers.isEmpty || appSession.windows.isEmpty {
+            return
+        }
+
         let snapshot = buildSnapshot()
         var done = false
         Task {
@@ -132,6 +138,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func removeWindowController(_ controller: CalyxWindowController) {
         appSession.removeWindow(id: controller.windowSession.id)
         windowControllers.removeAll { $0 === controller }
+        if !windowControllers.isEmpty {
+            requestSave()
+        }
+    }
+
+    func isClosingLastManagedWindow(_ controller: CalyxWindowController) -> Bool {
+        windowControllers.count == 1 && windowControllers.first === controller
     }
 
     func applyCurrentGhosttyConfigToAllWindows() {
@@ -270,6 +283,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let snapshot = buildSnapshot()
         Task {
             await SessionPersistenceActor.shared.save(snapshot)
+        }
+    }
+
+    func saveImmediately() {
+        let snapshot = buildSnapshot()
+        var done = false
+        Task {
+            await SessionPersistenceActor.shared.saveImmediately(snapshot)
+            done = true
+        }
+        let deadline = Date().addingTimeInterval(1.0)
+        while !done, Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.01))
         }
     }
 

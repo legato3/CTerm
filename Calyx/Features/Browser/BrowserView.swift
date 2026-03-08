@@ -14,6 +14,7 @@ class BrowserView: NSView {
     private let downloadManager: DownloadManager
     private var redirectCounts: [ObjectIdentifier: Int] = [:]
     var onTitleChanged: ((String) -> Void)?
+    var onURLChanged: ((URL) -> Void)?
 
     init(state: BrowserState, downloadManager: DownloadManager = DownloadManager()) {
         self.state = state
@@ -39,6 +40,7 @@ class BrowserView: NSView {
 
     func loadURL(_ url: URL) {
         state.url = url
+        onURLChanged?(url)
         webView.load(URLRequest(url: url))
     }
 
@@ -113,6 +115,7 @@ extension BrowserView: WKNavigationDelegate {
         onTitleChanged?(state.title)
         if let currentURL = webView.url {
             state.url = currentURL
+            onURLChanged?(currentURL)
         }
     }
 
@@ -135,6 +138,7 @@ extension BrowserView: WKNavigationDelegate {
         onTitleChanged?(state.title)
         if let currentURL = webView.url {
             state.url = currentURL
+            onURLChanged?(currentURL)
         }
     }
 

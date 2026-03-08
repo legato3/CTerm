@@ -39,11 +39,20 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         guard let tab = windowSession.groups.flatMap(\.tabs).first(where: { $0.id == tabID }),
               case .browser(let url) = tab.content else { return nil }
         let controller = BrowserTabController(url: url)
+        wireBrowserCallbacks(controller: controller, tab: tab)
+        browserControllers[tabID] = controller
+        return controller
+    }
+
+    private func wireBrowserCallbacks(controller: BrowserTabController, tab: Tab) {
         controller.browserView.onTitleChanged = { [weak tab] title in
             tab?.title = title
         }
-        browserControllers[tabID] = controller
-        return controller
+        controller.browserView.onURLChanged = { [weak self, weak tab] url in
+            guard let tab else { return }
+            tab.content = .browser(url: url)
+            self?.requestSave()
+        }
     }
 
     // MARK: - Initialization
@@ -352,9 +361,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         group.activeTabID = tab.id
 
         let controller = BrowserTabController(url: url)
-        controller.browserView.onTitleChanged = { [weak tab] title in
-            tab?.title = title
-        }
+        wireBrowserCallbacks(controller: controller, tab: tab)
         browserControllers[tab.id] = controller
 
         refreshHostingView()
@@ -436,15 +443,19 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func switchToTab(id tabID: UUID) {
-        guard let group = windowSession.activeGroup else { return }
-        guard group.tabs.contains(where: { $0.id == tabID }) else {
+        guard let targetGroup = windowSession.groups.first(where: { group in
+            group.tabs.contains(where: { $0.id == tabID })
+        }) else {
             logger.warning("Attempted to switch to non-existent tab: \(tabID)")
             return
         }
-        guard group.activeTabID != tabID else { return }
+        let sameGroup = windowSession.activeGroupID == targetGroup.id
+        let sameTab = sameGroup && targetGroup.activeTabID == tabID
+        guard !sameTab else { return }
 
         deactivateCurrentTab()
-        group.activeTabID = tabID
+        windowSession.activeGroupID = targetGroup.id
+        targetGroup.activeTabID = tabID
         activateCurrentTab()
     }
 
@@ -952,13 +963,38 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     func windowSnapshot() -> WindowSnapshot {
         let frame = window?.frame ?? .zero
-        let snap = windowSession.snapshot()
+        let groups = windowSession.groups.map { group in
+            let tabs = group.tabs.map { tab -> TabSnapshot in
+                let browserURL: URL?
+                switch tab.content {
+                case .terminal:
+                    browserURL = nil
+                case .browser(let configuredURL):
+                    browserURL = browserControllers[tab.id]?.browserState.url ?? configuredURL
+                }
+                return TabSnapshot(
+                    id: tab.id,
+                    title: tab.title,
+                    pwd: tab.pwd,
+                    splitTree: tab.splitTree,
+                    browserURL: browserURL
+                )
+            }
+            return TabGroupSnapshot(
+                id: group.id,
+                name: group.name,
+                color: group.color.rawValue,
+                tabs: tabs,
+                activeTabID: group.activeTabID,
+                isCollapsed: group.isCollapsed
+            )
+        }
         return WindowSnapshot(
-            id: snap.id,
+            id: windowSession.id,
             frame: frame,
-            groups: snap.groups,
-            activeGroupID: snap.activeGroupID,
-            showSidebar: snap.showSidebar
+            groups: groups,
+            activeGroupID: windowSession.activeGroupID,
+            showSidebar: windowSession.showSidebar
         )
     }
 
@@ -1024,6 +1060,12 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        if let appDelegate = NSApp.delegate as? AppDelegate,
+           appDelegate.isClosingLastManagedWindow(self) {
+            // Persist current session before this final window is removed from AppDelegate.
+            appDelegate.saveImmediately()
+        }
+
         // Mark all tabs as closing to prevent notification handler interference
         for group in windowSession.groups {
             for tab in group.tabs {
