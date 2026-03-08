@@ -252,8 +252,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Cmd+1-9 tab selection
         for i in 1...9 {
-            let selector = Selector("selectTab\(i):")
-            let item = NSMenuItem(title: "Select Tab \(i)", action: selector, keyEquivalent: "\(i)")
+            let item = NSMenuItem(title: "Select Tab \(i)", action: #selector(selectTabByNumber(_:)), keyEquivalent: "\(i)")
+            item.target = self
+            item.tag = i - 1
             windowMenu.addItem(item)
         }
 
@@ -444,11 +445,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     return nil // consume the event
                 }
             }
+
+            if mods == [.command],
+               let chars = event.charactersIgnoringModifiers,
+               let scalar = chars.unicodeScalars.first,
+               chars.count == 1,
+               scalar.value >= 49 && scalar.value <= 57 {
+                let index = Int(scalar.value - 49)
+                if let wc = self?.windowControllers.first(where: { $0.window?.isKeyWindow == true }) {
+                    wc.selectTab(at: index)
+                    return nil // consume the event
+                }
+            }
             return event
         }
     }
 
     @objc private func openPreferences(_ sender: Any?) {
         SettingsWindowController.shared.showSettings()
+    }
+
+    @objc private func selectTabByNumber(_ sender: NSMenuItem) {
+        guard let wc = windowControllers.first(where: { $0.window?.isKeyWindow == true }) else { return }
+        wc.selectTab(at: sender.tag)
     }
 }

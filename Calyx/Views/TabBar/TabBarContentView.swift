@@ -60,6 +60,7 @@ struct TabBarContentView: View {
         .frame(height: 32)
         .contentShape(Rectangle())
         .modifier(TabBarBackgroundModifier(reduceTransparency: reduceTransparency))
+        .clipped(antialiased: false)
     }
 
     private func scrollToActiveTab(proxy: ScrollViewProxy, animated: Bool) {

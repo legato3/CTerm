@@ -40,6 +40,7 @@ struct MainContentView: View {
                         onCloseTab: onCloseTab
                     )
                     .frame(width: 220)
+                    .clipped(antialiased: false)
 
                     if reduceTransparency {
                         Divider()

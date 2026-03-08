@@ -278,6 +278,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     private func activateCurrentTab() {
         guard let tab = activeTab else { return }
+        refreshHostingView()
         switch tab.content {
         case .terminal:
             tab.registry.resumeAll()
@@ -287,7 +288,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 restoreFocus()
             }
         case .browser:
-            refreshHostingView()
             DispatchQueue.main.async { [weak self] in
                 if let bv = self?.browserController(for: tab.id)?.browserView {
                     self?.window?.makeFirstResponder(bv)
@@ -922,7 +922,12 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     @objc func selectTab8(_ sender: Any?) { selectTabByIndex(7) }
     @objc func selectTab9(_ sender: Any?) { selectTabByIndex(8) }
 
+    func selectTab(at index: Int) {
+        selectTabByIndex(index)
+    }
+
     private func selectTabByIndex(_ index: Int) {
+        guard index >= 0 else { return }
         deactivateCurrentTab()
         windowSession.selectTab(at: index)
         activateCurrentTab()
@@ -932,17 +937,17 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     func activateRestoredSession() {
         isRestoring = false
-        // Pause all tabs except the active one
+        // Pause all non-active terminal tabs
         for group in windowSession.groups {
             for tab in group.tabs {
                 if tab.id != windowSession.activeGroup?.activeTabID {
-                    tab.registry.pauseAll()
+                    if case .terminal = tab.content {
+                        tab.registry.pauseAll()
+                    }
                 }
             }
         }
-        rebuildSplitContainer()
-        updateLayout()
-        restoreFocus()
+        activateCurrentTab()
     }
 
     func windowSnapshot() -> WindowSnapshot {
