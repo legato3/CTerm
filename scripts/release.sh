@@ -63,9 +63,18 @@ echo "Push complete."
 
 # 9. Create GitHub release
 echo "Creating GitHub release v$VERSION..."
+git fetch --tags
+PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+if [ -n "$PREV_TAG" ]; then
+  NOTES=$(git log --pretty=format:"- %s" "$PREV_TAG"..HEAD)
+else
+  NOTES=$(git log --pretty=format:"- %s")
+fi
+RELEASE_BODY="## What's Changed
+$NOTES"
 gh release create "v$VERSION" "$ZIP_PATH" \
   --title "Calyx v$VERSION" \
-  --generate-notes
+  --notes "$RELEASE_BODY"
 echo "GitHub release v$VERSION created."
 
 echo "=== Release v$VERSION complete ==="
