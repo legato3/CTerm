@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-VERSION=$(grep 'MARKETING_VERSION' project.yml | sed 's/.*"\(.*\)"/\1/')
+VERSION=$(grep 'MARKETING_VERSION' project.yml | grep -v '\$(' | sed 's/.*"\(.*\)"/\1/')
 APP_PATH="/tmp/CalyxRelease/Build/Products/Release/Calyx.app"
 ZIP_PATH="/tmp/Calyx.zip"
 
