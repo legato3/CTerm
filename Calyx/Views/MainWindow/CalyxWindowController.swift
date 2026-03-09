@@ -293,9 +293,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             tab.registry.resumeAll()
             rebuildSplitContainer()
             updateTerminalLayout()
-            if !focusActiveTabImmediately() {
-                restoreFocus()
-            }
+            focusActiveTabImmediately()  // best-effort synchronous focus
+            restoreFocus()               // async safety net (handles post-layout focus loss)
         case .browser:
             DispatchQueue.main.async { [weak self] in
                 if let bv = self?.browserController(for: tab.id)?.browserView {

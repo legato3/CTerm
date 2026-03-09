@@ -52,18 +52,22 @@ class SplitContainerView: NSView {
         // resizeSubviews/layout will handle it when we get proper bounds.
         guard bounds.width > 0 && bounds.height > 0 else { return }
 
-        subviews.forEach { $0.removeFromSuperview() }
-        guard let root = tree.root else { return }
+        removeDividers()
+        guard let root = tree.root else {
+            subviews.forEach { $0.removeFromSuperview() }
+            return
+        }
         layoutNode(root, in: bounds)
+        removeOrphanedSurfaces()
     }
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {
         super.resizeSubviews(withOldSize: oldSize)
         guard bounds.width > 0 && bounds.height > 0 else { return }
         guard let root = currentTree.root else { return }
-
-        subviews.forEach { $0.removeFromSuperview() }
+        removeDividers()
         layoutNode(root, in: bounds)
+        removeOrphanedSurfaces()
     }
 
     override func layout() {
@@ -72,8 +76,10 @@ class SplitContainerView: NSView {
         guard let root = currentTree.root else { return }
 
         // Deferred layout: surface views haven't been added yet
-        if subviews.isEmpty {
+        if subviews.isEmpty || subviews.allSatisfy({ !($0 is SplitDividerView) }) {
+            removeDividers()
             layoutNode(root, in: bounds)
+            removeOrphanedSurfaces()
             let callback = onDeferredLayoutComplete
             onDeferredLayoutComplete = nil
             callback?()
@@ -182,5 +188,24 @@ class SplitContainerView: NSView {
             }
         }
         addSubview(divider)
+    }
+
+    private func removeDividers() {
+        for subview in subviews where subview is SplitDividerView {
+            subview.removeFromSuperview()
+        }
+    }
+
+    /// Remove SurfaceView subviews not present in the current tree.
+    /// Treats views with unknown IDs (registry.id returns nil) as orphans.
+    private func removeOrphanedSurfaces() {
+        let treeIDs = Set(currentTree.allLeafIDs())
+        for subview in subviews {
+            guard let surface = subview as? SurfaceView else { continue }
+            let id = registry.id(for: surface)
+            if id == nil || !treeIDs.contains(id!) {
+                subview.removeFromSuperview()
+            }
+        }
     }
 }
