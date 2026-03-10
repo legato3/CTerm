@@ -48,7 +48,15 @@ class SurfaceView: NSView {
     private var mouseDownPosition: NSPoint?
 
     /// Drag threshold in points — below this, mouseDragged won't send position updates.
-    private static let dragThreshold: CGFloat = 3
+    static let dragThreshold: CGFloat = 3
+
+    /// Returns true if the distance between two points exceeds the drag threshold,
+    /// meaning the user intends to drag/select rather than click.
+    static func isDragBeyondThreshold(from start: NSPoint, to current: NSPoint, threshold: CGFloat = dragThreshold) -> Bool {
+        let dx = current.x - start.x
+        let dy = current.y - start.y
+        return sqrt(dx * dx + dy * dy) >= threshold
+    }
 
     // MARK: - NSView Overrides
 
@@ -574,10 +582,7 @@ class SurfaceView: NSView {
     override func mouseDragged(with event: NSEvent) {
         if let downPos = mouseDownPosition {
             let currentPos = convert(event.locationInWindow, from: nil)
-            let dx = currentPos.x - downPos.x
-            let dy = currentPos.y - downPos.y
-            let distance = sqrt(dx * dx + dy * dy)
-            if distance < Self.dragThreshold {
+            if !Self.isDragBeyondThreshold(from: downPos, to: currentPos) {
                 return  // Don't send position until drag threshold exceeded
             }
             // Clear threshold — all future drags go through
