@@ -14,6 +14,18 @@ private let logger = Logger(subsystem: "com.calyx.terminal", category: "GhosttyC
 @MainActor
 final class GhosttyConfigManager {
 
+    static let glassPresetTemplate: String = """
+    # --- Calyx Glass Preset (managed) ---
+    background-opacity = 0.82
+    # --- End Calyx Glass Preset ---
+    """
+
+    static func removeCursorClickToMoveLine(from text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("cursor-click-to-move") }
+            .joined(separator: "\n")
+    }
+
     /// The underlying ghostty configuration handle.
     nonisolated(unsafe) private(set) var config: ghostty_config_t? = nil {
         didSet {
@@ -106,12 +118,6 @@ final class GhosttyConfigManager {
 
         let presetStart = "# --- Calyx Glass Preset (managed) ---"
         let presetEnd = "# --- End Calyx Glass Preset ---"
-        let presetBlock = """
-        \(presetStart)
-        background-opacity = 0.82
-        cursor-click-to-move = true
-        \(presetEnd)
-        """
 
         let includeStart = "# --- Calyx Include (managed) ---"
         let includeEnd = "# --- End Calyx Include ---"
@@ -126,7 +132,13 @@ final class GhosttyConfigManager {
             try fm.createDirectory(at: effectiveConfigURL.deletingLastPathComponent(), withIntermediateDirectories: true)
 
             if !fm.fileExists(atPath: presetConfigURL.path) {
-                try (presetBlock + "\n").write(to: presetConfigURL, atomically: true, encoding: .utf8)
+                try (glassPresetTemplate + "\n").write(to: presetConfigURL, atomically: true, encoding: .utf8)
+            } else {
+                let existing = try String(contentsOf: presetConfigURL, encoding: .utf8)
+                let migrated = removeCursorClickToMoveLine(from: existing)
+                if migrated != existing {
+                    try migrated.write(to: presetConfigURL, atomically: true, encoding: .utf8)
+                }
             }
 
             let existingMain = (try? String(contentsOf: effectiveConfigURL, encoding: .utf8)) ?? ""

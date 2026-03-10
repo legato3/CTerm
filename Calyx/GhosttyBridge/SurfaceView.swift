@@ -44,20 +44,6 @@ class SurfaceView: NSView {
     /// Timestamp of the last performKeyEquivalent event for command-key handling.
     private var lastPerformKeyEvent: TimeInterval?
 
-    /// Mouse position at the start of a click, for drag threshold.
-    private var mouseDownPosition: NSPoint?
-
-    /// Drag threshold in points — below this, mouseDragged won't send position updates.
-    static let dragThreshold: CGFloat = 3
-
-    /// Returns true if the distance between two points exceeds the drag threshold,
-    /// meaning the user intends to drag/select rather than click.
-    static func isDragBeyondThreshold(from start: NSPoint, to current: NSPoint, threshold: CGFloat = dragThreshold) -> Bool {
-        let dx = current.x - start.x
-        let dy = current.y - start.y
-        return sqrt(dx * dx + dy * dy) >= threshold
-    }
-
     // MARK: - NSView Overrides
 
     override var acceptsFirstResponder: Bool { true }
@@ -494,7 +480,6 @@ class SurfaceView: NSView {
     // MARK: - Mouse Input
 
     override func mouseDown(with event: NSEvent) {
-        mouseDownPosition = convert(event.locationInWindow, from: nil)
         let mods = EventTranslator.translateModifiers(event.modifierFlags)
         surfaceController?.sendMouseButton(
             state: GHOSTTY_MOUSE_PRESS,
@@ -504,7 +489,6 @@ class SurfaceView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        mouseDownPosition = nil
         prevPressureStage = 0
         let mods = EventTranslator.translateModifiers(event.modifierFlags)
         surfaceController?.sendMouseButton(
@@ -580,14 +564,6 @@ class SurfaceView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        if let downPos = mouseDownPosition {
-            let currentPos = convert(event.locationInWindow, from: nil)
-            if !Self.isDragBeyondThreshold(from: downPos, to: currentPos) {
-                return  // Don't send position until drag threshold exceeded
-            }
-            // Clear threshold — all future drags go through
-            mouseDownPosition = nil
-        }
         mouseMoved(with: event)
     }
 
