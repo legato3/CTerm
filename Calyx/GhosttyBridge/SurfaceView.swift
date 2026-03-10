@@ -595,15 +595,25 @@ class SurfaceView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        // Pass raw deltas to ghostty. With precision=true (bit 0 of scroll mods),
-        // ghostty treats values as pixels and converts to lines internally.
-        // With precision=false, ghostty treats values as wheel ticks.
+        var x = event.scrollingDeltaX
+        var y = event.scrollingDeltaY
+
+        // Mouse wheels reporting precise deltas (phase/momentumPhase both empty)
+        // send a fixed pixel value per tick that may not match cell_height,
+        // causing fractional-line scrolling. Normalize to cell_height for 1 line/tick.
+        // Trackpad gestures (phase != []) and momentum pass raw for smooth scrolling.
+        if event.hasPreciseScrollingDeltas,
+           event.phase == [],
+           event.momentumPhase == [] {
+            let ch = cachedCellSize.height
+            if ch > 0 {
+                if y != 0 { y = copysign(ch, y) }
+                if x != 0 { x = copysign(cachedCellSize.width, x) }
+            }
+        }
+
         let mods = EventTranslator.translateScrollMods(event)
-        surfaceController?.sendMouseScroll(
-            x: event.scrollingDeltaX,
-            y: event.scrollingDeltaY,
-            mods: mods
-        )
+        surfaceController?.sendMouseScroll(x: x, y: y, mods: mods)
     }
 
     override func pressureChange(with event: NSEvent) {
