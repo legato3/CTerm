@@ -17,7 +17,7 @@ A macOS 26+ native terminal application built on [libghostty](https://github.com
 - **Scrollback Search** -- `Cmd+F` to search terminal scrollback with match highlighting, `Cmd+G`/`Cmd+Shift+G` to navigate matches
 - **Native Scrollbar** -- system overlay scrollbar for terminal scrollback
 - **Cursor Click-to-Move** -- click on a prompt line to reposition cursor (requires shell integration)
-- **Claude Code IPC** -- MCP server for inter-pane communication between Claude Code instances
+- **Claude Code IPC** -- MCP server for communication between Claude Code instances across tabs and panes
 - **Ghostty config compatibility** -- reads `~/.config/ghostty/config`
 
 ## Keyboard Shortcuts
@@ -66,7 +66,7 @@ A macOS 26+ native terminal application built on [libghostty](https://github.com
 
 ## IPC (Inter-Pane Communication)
 
-Multiple Claude Code instances running in different Calyx panes can communicate with each other via a built-in MCP server.
+Multiple Claude Code instances running in different Calyx tabs or panes can communicate with each other via a built-in MCP server.
 
 1. Open the command palette (`Cmd+Shift+P`) and run **Enable Claude Code IPC**
 2. Start Claude Code in two or more terminal panes
