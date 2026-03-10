@@ -9,6 +9,14 @@ import os
 
 private let logger = Logger(subsystem: "com.calyx.terminal", category: "GhosttySurface")
 
+// MARK: - SearchQuerySender Protocol
+
+@MainActor
+protocol SearchQuerySender: AnyObject {
+    @discardableResult func performSearch(query: String) -> Bool
+    @discardableResult func performAction(_ action: String) -> Bool
+}
+
 // MARK: - GhosttySurfaceController
 
 @MainActor
@@ -294,6 +302,22 @@ final class GhosttySurfaceController: Identifiable {
         }
     }
 
+    // MARK: - Search
+
+    /// Sanitize a search query by stripping control characters (< 0x20).
+    static func sanitizeSearchQuery(_ query: String) -> String {
+        String(query.unicodeScalars.filter { $0.value >= 0x20 })
+    }
+
+    /// Send a search query safely. Strips control characters, logs failures.
+    @discardableResult
+    func performSearch(query: String) -> Bool {
+        let sanitized = Self.sanitizeSearchQuery(query)
+        let ok = performAction("search:" + sanitized)
+        if !ok { logger.warning("performSearch failed for query") }
+        return ok
+    }
+
     // MARK: - IME
 
     /// Get the IME candidate window position.
@@ -321,6 +345,10 @@ final class GhosttySurfaceController: Identifiable {
         return GhosttyFFI.surfaceInheritedConfig(surface)
     }
 }
+
+// MARK: - SearchQuerySender Conformance
+
+extension GhosttySurfaceController: SearchQuerySender {}
 
 // MARK: - NSScreen Extension
 

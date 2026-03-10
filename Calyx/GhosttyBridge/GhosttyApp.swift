@@ -427,4 +427,8 @@ extension Notification.Name {
     static let ghosttyResizeSplit = Notification.Name("com.calyx.ghostty.resizeSplit")
     static let ghosttyEqualizeSplits = Notification.Name("com.calyx.ghostty.equalizeSplits")
     static let ghosttyDesktopNotification = Notification.Name("com.calyx.ghostty.desktopNotification")
+    static let ghosttyStartSearch = Notification.Name("com.calyx.ghostty.startSearch")
+    static let ghosttyEndSearch = Notification.Name("com.calyx.ghostty.endSearch")
+    static let ghosttySearchTotal = Notification.Name("com.calyx.ghostty.searchTotal")
+    static let ghosttySearchSelected = Notification.Name("com.calyx.ghostty.searchSelected")
 }

@@ -6,7 +6,7 @@ A macOS 26+ native terminal application built on [libghostty](https://github.com
 
 ## Features
 
-- **libghostty terminal engine** -- Metal GPU-accelerated rendering via Ghostty v1.2.3 submodule
+- **libghostty terminal engine** -- Metal GPU-accelerated rendering via Ghostty v1.3.0 submodule
 - **Liquid Glass UI** -- native macOS 26 Tahoe design language
 - **Tab Groups** -- 10 color presets, collapsible sections, hierarchical organization
 - **Split Panes** -- horizontal and vertical splits with directional focus navigation
@@ -14,6 +14,9 @@ A macOS 26+ native terminal application built on [libghostty](https://github.com
 - **Session Persistence** -- tabs, splits, and working directories auto-saved and restored on restart
 - **Desktop Notifications** -- OSC 9/99/777 support with rate limiting
 - **Browser Integration** -- WKWebView tabs alongside terminal tabs (http/https only, non-persistent storage, popup blocking)
+- **Scrollback Search** -- `Cmd+F` to search terminal scrollback with match highlighting, `Cmd+G`/`Cmd+Shift+G` to navigate matches
+- **Native Scrollbar** -- system overlay scrollbar for terminal scrollback
+- **Cursor Click-to-Move** -- click on a prompt line to reposition cursor (requires shell integration)
 - **Ghostty config compatibility** -- reads `~/.config/ghostty/config`
 
 ## Keyboard Shortcuts
@@ -44,6 +47,15 @@ A macOS 26+ native terminal application built on [libghostty](https://github.com
 | `Cmd+D` | Split right |
 | `Cmd+Shift+D` | Split down |
 | `Cmd+Option+Arrow` | Focus between splits |
+
+### Search
+
+| Shortcut | Action |
+|---|---|
+| `Cmd+F` | Find in terminal |
+| `Cmd+G` | Next match |
+| `Cmd+Shift+G` | Previous match |
+| `Escape` | Close search bar |
 
 ### Global
 
@@ -98,7 +110,7 @@ Calyx uses AppKit for window, tab, and focus management with SwiftUI for view re
 
 ## Known Limitations
 
-- **Option+Click cursor movement on full-width text** -- cursor placement may be offset on Japanese/full-width text lines because Ghostty's cursor-click-to-move internally translates clicks into arrow-key steps over terminal cells.
+- **Cursor click-to-move on full-width text** -- cursor placement may be offset on Japanese/full-width text lines because Ghostty's cursor-click-to-move internally translates clicks into arrow-key steps over terminal cells.
 
 ## License
 

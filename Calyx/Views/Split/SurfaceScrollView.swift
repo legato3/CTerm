@@ -70,6 +70,12 @@ class SurfaceScrollView: NSView {
     private var cellSizeObserver: NSObjectProtocol?
     private var configChangeObserver: NSObjectProtocol?
 
+    private var searchBar: SearchBarView?
+    private var startSearchObserver: NSObjectProtocol?
+    private var endSearchObserver: NSObjectProtocol?
+    private var searchTotalObserver: NSObjectProtocol?
+    private var searchSelectedObserver: NSObjectProtocol?
+
     // MARK: - Init
 
     init(surfaceView: SurfaceView) {
@@ -77,6 +83,7 @@ class SurfaceScrollView: NSView {
         super.init(frame: .zero)
         setupScrollView()
         setupObservers()
+        setupSearchObservers()
         surfaceView.scrollbarUpdateHandler = { [weak self] state in
             self?.handleScrollbarUpdate(state)
         }
@@ -93,6 +100,10 @@ class SurfaceScrollView: NSView {
             pendingScrollRow = nil
             if let obs = cellSizeObserver { NotificationCenter.default.removeObserver(obs) }
             if let obs = configChangeObserver { NotificationCenter.default.removeObserver(obs) }
+            if let obs = startSearchObserver { NotificationCenter.default.removeObserver(obs) }
+            if let obs = endSearchObserver { NotificationCenter.default.removeObserver(obs) }
+            if let obs = searchTotalObserver { NotificationCenter.default.removeObserver(obs) }
+            if let obs = searchSelectedObserver { NotificationCenter.default.removeObserver(obs) }
             NotificationCenter.default.removeObserver(self)
         }
     }
@@ -218,6 +229,8 @@ class SurfaceScrollView: NSView {
         // Position surface to track visible rect
         let visibleOrigin = scrollView.contentView.documentVisibleRect.origin
         surfaceView.frame.origin = visibleOrigin
+
+        layoutSearchBar()
     }
 
     // MARK: - Scrollbar Update (Core → UI)
@@ -323,5 +336,100 @@ class SurfaceScrollView: NSView {
         lastSentRow = row
 
         surfaceView.surfaceController?.performAction("scroll_to_row:\(row)")
+    }
+
+    // MARK: - Search Bar Integration
+
+    private func setupSearchObservers() {
+        guard startSearchObserver == nil,
+              endSearchObserver == nil,
+              searchTotalObserver == nil,
+              searchSelectedObserver == nil else { return }
+
+        startSearchObserver = NotificationCenter.default.addObserver(
+            forName: .ghosttyStartSearch,
+            object: surfaceView,
+            queue: .main
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let needle = notification.userInfo?["needle"] as? String ?? ""
+                self.showSearchBar(needle: needle)
+            }
+        }
+
+        endSearchObserver = NotificationCenter.default.addObserver(
+            forName: .ghosttyEndSearch,
+            object: surfaceView,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.hideSearchBar()
+            }
+        }
+
+        searchTotalObserver = NotificationCenter.default.addObserver(
+            forName: .ghosttySearchTotal,
+            object: surfaceView,
+            queue: .main
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let self, let total = notification.userInfo?["total"] as? Int else { return }
+                self.searchBar?.updateMatchTotal(total)
+            }
+        }
+
+        searchSelectedObserver = NotificationCenter.default.addObserver(
+            forName: .ghosttySearchSelected,
+            object: surfaceView,
+            queue: .main
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let self, let selected = notification.userInfo?["selected"] as? Int else { return }
+                self.searchBar?.updateMatchSelected(selected)
+            }
+        }
+    }
+
+    private func showSearchBar(needle: String) {
+        if searchBar == nil {
+            let bar = SearchBarView(frame: .zero)
+            bar.sender = surfaceView.surfaceController
+            searchBar = bar
+            addSubview(bar)
+        }
+
+        guard let searchBar else { return }
+        searchBar.resetSearchState()
+
+        if !needle.isEmpty {
+            searchBar.setSearchText(needle)
+            searchBar.lastSubmittedQuery = needle
+            surfaceView.surfaceController?.performSearch(query: needle)
+        }
+
+        layoutSearchBar()
+        searchBar.focusSearchField()
+    }
+
+    private func hideSearchBar() {
+        searchBar?.resetSearchState()
+        searchBar?.setSearchText("")
+        searchBar?.removeFromSuperview()
+        searchBar = nil
+        window?.makeFirstResponder(surfaceView)
+    }
+
+    private func layoutSearchBar() {
+        guard let searchBar else { return }
+        let barHeight: CGFloat = 36
+        let padding: CGFloat = 8
+        let barWidth = min(bounds.width - padding * 2, 500)
+        searchBar.frame = NSRect(
+            x: bounds.width - barWidth - padding,
+            y: padding,  // top in flipped coordinates (isFlipped = true)
+            width: barWidth,
+            height: barHeight
+        )
     }
 }

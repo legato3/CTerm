@@ -152,6 +152,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 appDelegate.createNewWindow()
             }
         })
+        commandRegistry.register(Command(id: "edit.find", title: "Find in Terminal", shortcut: "Cmd+F", category: "Edit") { [weak self] in
+            guard let controller = self?.focusedController else { return }
+            controller.performAction("start_search")
+        })
         commandRegistry.register(Command(id: "browser.open", title: "Open Browser Tab", category: "Browser") { [weak self] in
             self?.promptAndOpenBrowserTab()
         })

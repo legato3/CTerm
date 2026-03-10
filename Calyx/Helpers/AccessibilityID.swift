@@ -23,6 +23,14 @@ enum AccessibilityID {
         static let searchField = "calyx.commandPalette.searchField"
         static let resultsTable = "calyx.commandPalette.resultsTable"
     }
+    enum Search {
+        static let container = "calyx.search"
+        static let searchField = "calyx.search.searchField"
+        static let matchCount = "calyx.search.matchCount"
+        static let previousButton = "calyx.search.previousButton"
+        static let nextButton = "calyx.search.nextButton"
+        static let closeButton = "calyx.search.closeButton"
+    }
     enum Browser {
         static let toolbar = "calyx.browser.toolbar"
         static let backButton = "calyx.browser.backButton"
