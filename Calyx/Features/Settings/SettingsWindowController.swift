@@ -58,7 +58,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         title.font = .systemFont(ofSize: 20, weight: .semibold)
         root.addArrangedSubview(title)
 
-        let subtitle = NSTextField(labelWithString: "These values are saved to Calyx's dedicated glass preset file.")
+        let subtitle = NSTextField(labelWithString: "These values are saved to ~/.config/calyx/calyx-glass.conf")
         subtitle.textColor = .secondaryLabelColor
         subtitle.font = .systemFont(ofSize: 13)
         root.addArrangedSubview(subtitle)
