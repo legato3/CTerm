@@ -11,7 +11,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     static let shared = SettingsWindowController()
     private let opacityLabel = NSTextField(labelWithString: "")
-    private let opacitySlider = NSSlider(value: 0.7, minValue: 0.1, maxValue: 1.0, target: nil, action: nil)
+    private let opacitySlider = NSSlider(value: 0.7, minValue: 0.0, maxValue: 1.0, target: nil, action: nil)
     private let saveButton = NSButton(title: "Save", target: nil, action: nil)
     private var lastLoadedOpacity = 0.7
 
@@ -121,8 +121,9 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func opacityDidChange(_ sender: Any?) {
         updateOpacityLabel()
-        let opacity = max(0.1, min(1.0, opacitySlider.doubleValue))
+        let opacity = max(0.0, min(1.0, opacitySlider.doubleValue))
         UserDefaults.standard.set(opacity, forKey: "terminalGlassOpacity")
+        applyOpacityToRunningSurfaces()
         fieldDidChange(sender)
     }
 
@@ -159,15 +160,23 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     private func loadPresetIntoUI() {
         let opacity = UserDefaults.standard.object(forKey: "terminalGlassOpacity") as? Double ?? 0.7
-        opacitySlider.doubleValue = max(0.1, min(1.0, opacity))
+        opacitySlider.doubleValue = max(0.0, min(1.0, opacity))
         updateOpacityLabel()
         snapshotCurrentAsLoaded()
         refreshSaveButtonState()
     }
 
     private func savePresetFromUI() {
-        let opacity = max(0.1, min(1.0, opacitySlider.doubleValue))
+        let opacity = max(0.0, min(1.0, opacitySlider.doubleValue))
         UserDefaults.standard.set(opacity, forKey: "terminalGlassOpacity")
+        applyOpacityToRunningSurfaces()
+    }
+
+    private func applyOpacityToRunningSurfaces() {
+        GhosttyAppController.shared.reloadConfig()
+        if let appDelegate = NSApp.delegate as? AppDelegate {
+            appDelegate.applyCurrentGhosttyConfigToAllWindows()
+        }
     }
 
     private func snapshotCurrentAsLoaded() {

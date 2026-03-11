@@ -107,7 +107,11 @@ struct MainContentView: View {
                                         Spacer()
                                     }
                                 case .success(let diff):
-                                    DiffGlassContentView(diff: diff, reduceTransparency: reduceTransparency)
+                                    DiffGlassContentView(
+                                        diff: diff,
+                                        reduceTransparency: reduceTransparency,
+                                        glassOpacity: glassOpacity
+                                    )
                                         .accessibilityIdentifier(AccessibilityID.Diff.content)
                                 case .error(let message):
                                     VStack(spacing: 12) {
@@ -122,15 +126,14 @@ struct MainContentView: View {
                                 }
                             }
                             .accessibilityIdentifier(AccessibilityID.Diff.container)
-                            .opacity(reduceTransparency ? 1.0 : glassOpacity)
                         } else if let browserController = activeBrowserController {
                             BrowserContainerView(controller: browserController)
                         } else {
                             TerminalContainerView(
                                 splitContainerView: splitContainerView,
-                                reduceTransparency: reduceTransparency
+                                reduceTransparency: reduceTransparency,
+                                glassOpacity: glassOpacity
                             )
-                            .opacity(reduceTransparency ? 1.0 : glassOpacity)
                         }
                     }
 
@@ -159,15 +162,22 @@ struct MainContentView: View {
 struct DiffGlassContentView: NSViewRepresentable {
     let diff: FileDiff
     let reduceTransparency: Bool
+    let glassOpacity: Double
 
     func makeNSView(context: Context) -> DiffGlassHostView {
-        let host = DiffGlassHostView(reduceTransparency: reduceTransparency)
+        let host = DiffGlassHostView(
+            reduceTransparency: reduceTransparency,
+            glassOpacity: glassOpacity
+        )
         host.diffView.display(diff: diff)
         return host
     }
 
     func updateNSView(_ nsView: DiffGlassHostView, context: Context) {
-        nsView.configureAppearance(reduceTransparency: reduceTransparency)
+        nsView.configureAppearance(
+            reduceTransparency: reduceTransparency,
+            glassOpacity: glassOpacity
+        )
         if nsView.diffView.currentDiff != diff {
             nsView.diffView.display(diff: diff)
         }
@@ -180,10 +190,10 @@ final class DiffGlassHostView: NSView {
     private let tintOverlay = NSView()
     let diffView = DiffView(frame: .zero)
 
-    init(reduceTransparency: Bool) {
+    init(reduceTransparency: Bool, glassOpacity: Double) {
         super.init(frame: .zero)
         setupViews()
-        configureAppearance(reduceTransparency: reduceTransparency)
+        configureAppearance(reduceTransparency: reduceTransparency, glassOpacity: glassOpacity)
     }
 
     @available(*, unavailable)
@@ -196,7 +206,7 @@ final class DiffGlassHostView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
 
         effectView.translatesAutoresizingMaskIntoConstraints = false
-        effectView.blendingMode = .withinWindow
+        effectView.blendingMode = .behindWindow
         effectView.state = .followsWindowActiveState
         addSubview(effectView)
         NSLayoutConstraint.activate([
@@ -227,16 +237,21 @@ final class DiffGlassHostView: NSView {
         ])
     }
 
-    func configureAppearance(reduceTransparency: Bool) {
+    func configureAppearance(reduceTransparency: Bool, glassOpacity: Double) {
         if reduceTransparency {
             effectView.isHidden = true
             tintOverlay.isHidden = true
+            effectView.alphaValue = 1.0
+            tintOverlay.alphaValue = 1.0
             layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
             return
         }
 
+        let clampedOpacity = CGFloat(max(0.0, min(1.0, glassOpacity)))
         effectView.isHidden = false
         tintOverlay.isHidden = false
+        effectView.alphaValue = clampedOpacity
+        tintOverlay.alphaValue = clampedOpacity
         layer?.backgroundColor = NSColor.clear.cgColor
         if #available(macOS 26.0, *) {
             effectView.material = .menu
@@ -249,17 +264,23 @@ final class DiffGlassHostView: NSView {
 struct TerminalContainerView: NSViewRepresentable {
     let splitContainerView: SplitContainerView
     let reduceTransparency: Bool
+    let glassOpacity: Double
 
     func makeNSView(context: Context) -> NSView {
         TerminalGlassHostView(
             splitContainerView: splitContainerView,
-            reduceTransparency: reduceTransparency
+            reduceTransparency: reduceTransparency,
+            glassOpacity: glassOpacity
         )
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         guard let host = nsView as? TerminalGlassHostView else { return }
-        host.update(splitContainerView: splitContainerView, reduceTransparency: reduceTransparency)
+        host.update(
+            splitContainerView: splitContainerView,
+            reduceTransparency: reduceTransparency,
+            glassOpacity: glassOpacity
+        )
     }
 }
 
@@ -268,10 +289,14 @@ private final class TerminalGlassHostView: NSView {
     private let effectView = NSVisualEffectView()
     private let tintOverlay = NSView()
 
-    init(splitContainerView: SplitContainerView, reduceTransparency: Bool) {
+    init(splitContainerView: SplitContainerView, reduceTransparency: Bool, glassOpacity: Double) {
         super.init(frame: .zero)
         setupViews()
-        update(splitContainerView: splitContainerView, reduceTransparency: reduceTransparency)
+        update(
+            splitContainerView: splitContainerView,
+            reduceTransparency: reduceTransparency,
+            glassOpacity: glassOpacity
+        )
     }
 
     @available(*, unavailable)
@@ -279,8 +304,8 @@ private final class TerminalGlassHostView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
-    func update(splitContainerView: SplitContainerView, reduceTransparency: Bool) {
-        configureAppearance(reduceTransparency: reduceTransparency)
+    func update(splitContainerView: SplitContainerView, reduceTransparency: Bool, glassOpacity: Double) {
+        configureAppearance(reduceTransparency: reduceTransparency, glassOpacity: glassOpacity)
 
         if splitContainerView.superview !== self {
             splitContainerView.removeFromSuperview()
@@ -300,7 +325,7 @@ private final class TerminalGlassHostView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
 
         effectView.translatesAutoresizingMaskIntoConstraints = false
-        effectView.blendingMode = .withinWindow
+        effectView.blendingMode = .behindWindow
         effectView.state = .followsWindowActiveState
         addSubview(effectView)
         NSLayoutConstraint.activate([
@@ -322,16 +347,21 @@ private final class TerminalGlassHostView: NSView {
         ])
     }
 
-    private func configureAppearance(reduceTransparency: Bool) {
+    private func configureAppearance(reduceTransparency: Bool, glassOpacity: Double) {
         if reduceTransparency {
             effectView.isHidden = true
             tintOverlay.isHidden = true
+            effectView.alphaValue = 1.0
+            tintOverlay.alphaValue = 1.0
             layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
             return
         }
 
+        let clampedOpacity = CGFloat(max(0.0, min(1.0, glassOpacity)))
         effectView.isHidden = false
         tintOverlay.isHidden = false
+        effectView.alphaValue = clampedOpacity
+        tintOverlay.alphaValue = clampedOpacity
         layer?.backgroundColor = NSColor.clear.cgColor
         if #available(macOS 26.0, *) {
             effectView.material = .menu

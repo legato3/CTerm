@@ -57,6 +57,7 @@ class SurfaceView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
     override var wantsUpdateLayer: Bool { true }
+    override var isOpaque: Bool { false }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -76,8 +77,8 @@ class SurfaceView: NSView {
     private func setupView() {
         wantsLayer = true
 
-        // Replace the default layer with a CAMetalLayer for GPU rendering.
-        let metalLayer = CAMetalLayer()
+        // Replace the default layer with a configured CAMetalLayer for GPU rendering.
+        let metalLayer = GhosttyMetalLayer()
         metalLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
         self.layer = metalLayer
     }

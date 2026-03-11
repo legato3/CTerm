@@ -17,6 +17,7 @@ final class GhosttyConfigManager {
     static let glassPresetTemplate: String = """
     # --- Calyx Glass Preset (managed) ---
     background-opacity = 0.82
+    background-blur = macos-glass-regular
     font-thicken = true
     minimum-contrast = 1.5
     # --- End Calyx Glass Preset ---
@@ -29,6 +30,10 @@ final class GhosttyConfigManager {
 
     private static var calyxGlassPresetURL: URL {
         calyxConfigDir.appendingPathComponent("calyx-glass.conf", isDirectory: false)
+    }
+
+    private static var calyxRuntimeOverrideURL: URL {
+        calyxConfigDir.appendingPathComponent("calyx-runtime.conf", isDirectory: false)
     }
 
     static func removeCursorClickToMoveLine(from text: String) -> String {
@@ -107,6 +112,9 @@ final class GhosttyConfigManager {
             GhosttyFFI.configLoadFile(cfg, path: presetPath)
         }
 
+        // Load runtime override last so UI slider state always wins.
+        applyRuntimeOverrides(cfg)
+
         // Finalize makes defaults available.
         GhosttyFFI.configFinalize(cfg)
 
@@ -122,6 +130,28 @@ final class GhosttyConfigManager {
         }
 
         return cfg
+    }
+
+    private static func applyRuntimeOverrides(_ cfg: ghostty_config_t) {
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: calyxConfigDir, withIntermediateDirectories: true)
+
+            let sliderOpacity = UserDefaults.standard.object(forKey: "terminalGlassOpacity") as? Double ?? 0.7
+            let clampedOpacity = max(0.0, min(1.0, sliderOpacity))
+            let text = """
+            # --- Calyx Runtime Override (managed) ---
+            background-opacity = \(String(format: "%.3f", clampedOpacity))
+            background-blur = macos-glass-regular
+            background-opacity-cells = false
+            # --- End Calyx Runtime Override ---
+            """
+
+            try (text + "\n").write(to: calyxRuntimeOverrideURL, atomically: true, encoding: .utf8)
+            GhosttyFFI.configLoadFile(cfg, path: calyxRuntimeOverrideURL.path)
+        } catch {
+            logger.warning("Failed to apply runtime overrides: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private static func applyCalyxGlassPresetIfPossible() {
