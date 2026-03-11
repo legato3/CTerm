@@ -17,6 +17,8 @@ final class GhosttyConfigManager {
     static let glassPresetTemplate: String = """
     # --- Calyx Glass Preset (managed) ---
     background-opacity = 0.82
+    font-thicken = true
+    minimum-contrast = 1.5
     # --- End Calyx Glass Preset ---
     """
 
