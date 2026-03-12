@@ -226,6 +226,17 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         hosting.autoresizingMask = [.width, .height]
         contentView.addSubview(hosting)
         self.hostingView = hosting
+
+        // Add Liquid Glass effect behind the title bar
+        let titleBarGlass = NSGlassEffectView()
+        titleBarGlass.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(titleBarGlass)
+        NSLayoutConstraint.activate([
+            titleBarGlass.topAnchor.constraint(equalTo: contentView.topAnchor),
+            titleBarGlass.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            titleBarGlass.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            titleBarGlass.bottomAnchor.constraint(equalTo: contentView.safeAreaLayoutGuide.topAnchor),
+        ])
     }
 
     private func setupTerminalSurface() {

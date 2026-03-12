@@ -17,7 +17,7 @@ class CalyxWindow: NSWindow {
 
     private func setupWindow() {
         title = "Calyx"
-        titlebarAppearsTransparent = false
+        titlebarAppearsTransparent = true
         titleVisibility = .hidden
         minSize = NSSize(width: 400, height: 300)
         isReleasedWhenClosed = false
