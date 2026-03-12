@@ -32,6 +32,15 @@ xcodebuild \
   clean build
 echo "Build succeeded."
 
+# 3.5. Re-sign Sparkle framework binaries with Developer ID + timestamp
+echo "Signing Sparkle framework binaries..."
+SIGN_IDENTITY="Developer ID Application: Yuuichi Eguchi (PQQBSRKD72)"
+SPARKLE_DIR="$APP_PATH/Contents/Frameworks/Sparkle.framework/Versions/B"
+find "$SPARKLE_DIR" -type f -perm +111 | while read -r binary; do
+  codesign --force --sign "$SIGN_IDENTITY" --timestamp --options runtime "$binary"
+done
+echo "Sparkle binaries signed."
+
 # 4. Zip for notarization
 echo "Creating zip for notarization..."
 ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
