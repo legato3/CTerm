@@ -215,7 +215,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }) { [weak self] in
             self?.disableIPC()
         })
-        commandRegistry.register(Command(id: "browser.enableScripting", title: "Enable Browser Scripting (Unsafe)", category: "Browser", isAvailable: {
+        commandRegistry.register(Command(id: "browser.enableScripting", title: "Enable Browser Scripting", category: "Browser", isAvailable: {
             !UserDefaults.standard.bool(forKey: "browserScriptingEnabled")
         }) { [weak self] in
             self?.enableBrowserScripting()
