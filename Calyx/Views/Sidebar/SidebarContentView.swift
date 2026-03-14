@@ -69,6 +69,8 @@ struct SidebarContentView: View {
                 Button(action: { onNewGroup?() }) {
                     Label("New Group", systemImage: "folder.badge.plus")
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
                 }
                 .modifier(GlassButtonModifier(reduceTransparency: reduceTransparency))
                 .padding(.horizontal, 12)
@@ -98,12 +100,19 @@ struct SidebarContentView: View {
 
 private struct GlassButtonModifier: ViewModifier {
     let reduceTransparency: Bool
+    @Environment(\.controlActiveState) private var controlActiveState
 
     func body(content: Content) -> some View {
         if reduceTransparency {
             content.buttonStyle(.plain)
         } else {
-            content.buttonStyle(.glass)
+            content
+                .buttonStyle(.plain)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.black.opacity(0.2))
+                )
+                .opacity(controlActiveState == .key ? 1.0 : 0.5)
         }
     }
 }
