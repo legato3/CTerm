@@ -42,31 +42,36 @@ struct MCPClient {
         ]
 
         let bodyData = try JSONSerialization.data(withJSONObject: requestBody)
-
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/mcp")!)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = bodyData
-
-        let semaphore = DispatchSemaphore(value: 0)
-        var responseData: Data?
-        var responseError: Error?
-
-        let task = URLSession.shared.dataTask(with: request) { data, _, error in
-            responseData = data
-            responseError = error
-            semaphore.signal()
-        }
-        task.resume()
-        semaphore.wait()
-
-        if let error = responseError {
-            throw CLIError.connectionFailed(error.localizedDescription)
+        guard let bodyStr = String(data: bodyData, encoding: .utf8) else {
+            throw CLIError.invalidResponse
         }
 
-        guard let data = responseData,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+        proc.arguments = [
+            "-s", "--connect-timeout", "5",
+            "-X", "POST",
+            "-H", "Authorization: Bearer \(token)",
+            "-H", "Content-Type: application/json",
+            "-d", bodyStr,
+            "http://127.0.0.1:\(port)/mcp",
+        ]
+
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        proc.standardOutput = outPipe
+        proc.standardError = errPipe
+
+        try proc.run()
+        proc.waitUntilExit()
+
+        guard proc.terminationStatus == 0 else {
+            throw CLIError.connectionFailed("curl exit code \(proc.terminationStatus)")
+        }
+
+        let data = outPipe.fileHandleForReading.readDataToEndOfFile()
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let result = json["result"] as? [String: Any],
               let content = result["content"] as? [[String: Any]],
               let first = content.first,
