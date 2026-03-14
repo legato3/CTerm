@@ -52,6 +52,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         CalyxMCPServer.shared.browserToolHandler = BrowserToolHandler(broker: browserTabBroker)
 
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
+        if isUITesting {
+            UserDefaults.standard.removeObject(forKey: "browserScriptingEnabled")
+        }
         if isUITesting || !restoreSession() {
             createNewWindow()
         }

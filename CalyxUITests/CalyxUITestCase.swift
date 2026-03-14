@@ -9,11 +9,14 @@ class CalyxUITestCase: XCTestCase {
     var app: XCUIApplication!
     private var sessionTempDir: String?
 
+    /// Override in subclasses to add extra launch arguments (e.g. UserDefaults overrides).
+    var additionalLaunchArguments: [String] { [] }
+
     override func setUp() {
         super.setUp()
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments = ["--uitesting", "-AppleLanguages", "(en)"]
+        app.launchArguments = ["--uitesting", "-AppleLanguages", "(en)"] + additionalLaunchArguments
 
         let tempDir = NSTemporaryDirectory() + "CalyxUITests-\(UUID().uuidString)"
         try? FileManager.default.createDirectory(

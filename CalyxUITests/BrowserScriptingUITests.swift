@@ -15,118 +15,97 @@ final class BrowserScriptingUITests: CalyxUITestCase {
         XCTAssertTrue(waitFor(searchField), "Command palette should appear")
     }
 
-    private func searchAndExecute(_ query: String) {
-        let searchField = app.descendants(matching: .any)
+    private func paletteSearchField() -> XCUIElement {
+        app.descendants(matching: .any)
             .matching(identifier: "calyx.commandPalette.searchField")
             .firstMatch
-        searchField.typeText(query)
-        Thread.sleep(forTimeInterval: 0.3)
-        searchField.typeKey(.enter, modifierFlags: [])
+    }
+
+    private func resultsTable() -> XCUIElement {
+        app.descendants(matching: .any)
+            .matching(identifier: "calyx.commandPalette.resultsTable")
+            .firstMatch
     }
 
     func test_enableBrowserScripting() {
-        // Open command palette and search for enable scripting
         openCommandPalette()
 
-        let searchField = app.descendants(matching: .any)
-            .matching(identifier: "calyx.commandPalette.searchField")
-            .firstMatch
-        searchField.typeText("Enable Browser Scripting")
-        Thread.sleep(forTimeInterval: 0.3)
+        let sf = paletteSearchField()
+        sf.typeText("Browser Scripting")
+        Thread.sleep(forTimeInterval: 0.5)
 
-        let resultsTable = app.descendants(matching: .any)
-            .matching(identifier: "calyx.commandPalette.resultsTable")
-            .firstMatch
-        XCTAssertTrue(resultsTable.exists, "Results should show")
-        XCTAssertGreaterThan(resultsTable.tableRows.count, 0, "Should find Enable Browser Scripting command")
+        let rt = resultsTable()
+        XCTAssertTrue(rt.exists)
+        XCTAssertGreaterThan(rt.tableRows.count, 0, "Should find Browser Scripting command")
 
-        // Execute it
-        searchField.typeKey(.enter, modifierFlags: [])
+        // Execute (first result should be "Enable Browser Scripting (Unsafe)")
+        sf.typeKey(.enter, modifierFlags: [])
 
-        // Warning dialog should appear
-        let warningDialog = app.dialogs.firstMatch
-        XCTAssertTrue(warningDialog.waitForExistence(timeout: 3), "Warning dialog should appear")
+        // Warning dialog
+        let dialog = app.dialogs.firstMatch
+        XCTAssertTrue(dialog.waitForExistence(timeout: 5), "Warning dialog should appear")
+        dialog.buttons["Enable"].click()
 
-        // Click Enable
-        warningDialog.buttons["Enable"].click()
-
-        // Now verify: open palette again and search — should find "Disable" not "Enable"
+        // Verify "Disable" now appears
         Thread.sleep(forTimeInterval: 0.5)
         openCommandPalette()
-        let searchField2 = app.descendants(matching: .any)
-            .matching(identifier: "calyx.commandPalette.searchField")
-            .firstMatch
-        searchField2.typeText("Disable Browser Scripting")
-        Thread.sleep(forTimeInterval: 0.3)
+        paletteSearchField().typeText("Disable Browser")
+        Thread.sleep(forTimeInterval: 0.5)
 
-        let resultsTable2 = app.descendants(matching: .any)
-            .matching(identifier: "calyx.commandPalette.resultsTable")
-            .firstMatch
-        XCTAssertGreaterThan(resultsTable2.tableRows.count, 0, "Should find Disable Browser Scripting after enabling")
-
-        // Dismiss
+        XCTAssertGreaterThan(resultsTable().tableRows.count, 0, "Disable command should appear after enabling")
         app.typeKey(.escape, modifierFlags: [])
     }
 
     func test_disableBrowserScripting() {
-        // First enable it through UI
+        // Enable first
         openCommandPalette()
-        searchAndExecute("Enable Browser Scripting")
+        paletteSearchField().typeText("Browser Scripting")
+        Thread.sleep(forTimeInterval: 0.5)
+        paletteSearchField().typeKey(.enter, modifierFlags: [])
 
         let enableDialog = app.dialogs.firstMatch
-        if enableDialog.waitForExistence(timeout: 3) {
+        if enableDialog.waitForExistence(timeout: 5) {
             enableDialog.buttons["Enable"].click()
         }
-
         Thread.sleep(forTimeInterval: 0.5)
 
-        // Now disable it through UI
+        // Now disable
         openCommandPalette()
-        searchAndExecute("Disable Browser Scripting")
+        paletteSearchField().typeText("Disable Browser")
+        Thread.sleep(forTimeInterval: 0.5)
+        paletteSearchField().typeKey(.enter, modifierFlags: [])
 
-        // Confirmation dialog should appear
-        let dialog = app.dialogs.firstMatch
-        XCTAssertTrue(dialog.waitForExistence(timeout: 3), "Confirmation dialog should appear")
-        dialog.buttons["OK"].click()
+        let disableDialog = app.dialogs.firstMatch
+        XCTAssertTrue(disableDialog.waitForExistence(timeout: 5), "Disable dialog should appear")
+        disableDialog.buttons["OK"].click()
 
-        // Verify: palette should now show Enable, not Disable
+        // Verify "Enable" is back
         Thread.sleep(forTimeInterval: 0.5)
         openCommandPalette()
-        let searchField = app.descendants(matching: .any)
-            .matching(identifier: "calyx.commandPalette.searchField")
-            .firstMatch
-        searchField.typeText("Enable Browser Scripting")
-        Thread.sleep(forTimeInterval: 0.3)
+        paletteSearchField().typeText("Enable Browser")
+        Thread.sleep(forTimeInterval: 0.5)
 
-        let resultsTable = app.descendants(matching: .any)
-            .matching(identifier: "calyx.commandPalette.resultsTable")
-            .firstMatch
-        XCTAssertGreaterThan(resultsTable.tableRows.count, 0, "Should find Enable Browser Scripting after disabling")
-
+        XCTAssertGreaterThan(resultsTable().tableRows.count, 0, "Enable command should reappear")
         app.typeKey(.escape, modifierFlags: [])
     }
 
     func test_browserTabWithScriptingEnabled() {
-        // Enable scripting first
+        // Enable scripting
         openCommandPalette()
-        let searchField = app.descendants(matching: .any)
-            .matching(identifier: "calyx.commandPalette.searchField")
-            .firstMatch
-        searchField.typeText("Enable Browser Scripting")
-        Thread.sleep(forTimeInterval: 0.3)
-        searchField.typeKey(.enter, modifierFlags: [])
+        paletteSearchField().typeText("Browser Scripting")
+        Thread.sleep(forTimeInterval: 0.5)
+        paletteSearchField().typeKey(.enter, modifierFlags: [])
 
-        let warningDialog = app.dialogs.firstMatch
-        if warningDialog.waitForExistence(timeout: 3) {
-            warningDialog.buttons["Enable"].click()
+        let dialog = app.dialogs.firstMatch
+        if dialog.waitForExistence(timeout: 5) {
+            dialog.buttons["Enable"].click()
         }
-
         Thread.sleep(forTimeInterval: 0.5)
 
-        // Open a browser tab
+        // Open browser tab
         menuAction("File", item: "New Browser Tab")
         let urlDialog = app.dialogs.firstMatch
-        XCTAssertTrue(urlDialog.waitForExistence(timeout: 5), "URL dialog should appear")
+        XCTAssertTrue(urlDialog.waitForExistence(timeout: 5))
 
         let textField = urlDialog.textFields.firstMatch
         if textField.waitForExistence(timeout: 2) {
@@ -135,7 +114,7 @@ final class BrowserScriptingUITests: CalyxUITestCase {
         }
         urlDialog.buttons["Open"].click()
 
-        // Verify browser toolbar appears
+        // Verify browser toolbar
         let toolbar = app.descendants(matching: .any)
             .matching(identifier: "calyx.browser.toolbar")
             .firstMatch
@@ -144,9 +123,10 @@ final class BrowserScriptingUITests: CalyxUITestCase {
 
     func test_enableIPCShowsDialog() {
         openCommandPalette()
-        searchAndExecute("Enable AI Agent IPC")
+        paletteSearchField().typeText("AI Agent IPC")
+        Thread.sleep(forTimeInterval: 0.5)
+        paletteSearchField().typeKey(.enter, modifierFlags: [])
 
-        // IPC enabled dialog should appear
         let dialog = app.dialogs.firstMatch
         XCTAssertTrue(dialog.waitForExistence(timeout: 5), "IPC dialog should appear")
         dialog.buttons["OK"].click()
