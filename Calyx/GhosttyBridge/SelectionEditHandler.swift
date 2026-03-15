@@ -168,35 +168,34 @@ enum SelectionEditHandler {
         // 3. Guard: non-empty, single line only
         guard !text.isEmpty, !text.contains("\n") else { return false }
 
-        // 4. Copy to clipboard if requested
-        if copyToClipboard {
-            clipboard?.copyToClipboard(text)
-        }
-
-        // 5. Get cell dimensions and cursor position
+        // 4. Get cell dimensions and cursor position
         guard let dims = reader.cellDimensions() else { return false }
         guard let cursorPos = reader.cursorPixelPosition() else { return false }
 
-        // 6-8. Calculate grid positions
+        // 5-7. Calculate grid positions
         let cursorCol = Int(cursorPos.x / dims.cellW)
-        let cursorRow = Int(cursorPos.y / dims.cellH)
         let selStartCol = Int(selection.tlPxX / dims.cellW)
-        let selStartRow = Int(selection.tlPxY / dims.cellH)
 
-        // 9. Guard: same row (multi-row selection not supported)
-        guard cursorRow == selStartRow else { return false }
+        // 8. Guard: same row — use pixel proximity (not grid row) to handle
+        //    subpixel offsets between IME point and selection coordinates.
+        guard abs(cursorPos.y - selection.tlPxY) < dims.cellH else { return false }
 
-        // 10. Calculate display width (accounts for wide CJK characters)
+        // 9. Calculate display width (accounts for wide CJK characters)
         let displayWidth = unicodeDisplayWidth(text)
 
-        // 11. Selection end column
+        // 10. Selection end column
         let selEndCol = selStartCol + displayWidth
 
-        // 12. Cell delta: how many arrow keys to move cursor to selection end
+        // 11. Cell delta: how many arrow keys to move cursor to selection end
         let cellDelta = selEndCol - cursorCol
 
-        // 13. Guard: reasonable delta
+        // 12. Guard: reasonable delta
         guard abs(cellDelta) < dims.cols else { return false }
+
+        // 13. All guards passed — copy to clipboard if requested
+        if copyToClipboard {
+            clipboard?.copyToClipboard(text)
+        }
 
         // 14. Send arrow keys to position cursor at end of selection
         if cellDelta > 0 {

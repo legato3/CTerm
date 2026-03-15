@@ -36,17 +36,17 @@ final class SelectionEditUITests: CalyxUITestCase {
         Thread.sleep(forTimeInterval: 0.5)
     }
 
-    private func pushPromptDown(lines: Int) {
-        for _ in 0..<lines {
-            app.typeKey(.return, modifierFlags: [])
-        }
-        Thread.sleep(forTimeInterval: 0.5)
+    /// Clear terminal so prompt is at row 0 of the visible viewport.
+    private func clearTerminal() {
+        pasteToTerminal("clear")
+        app.typeKey(.return, modifierFlags: [])
+        Thread.sleep(forTimeInterval: 1.0)
     }
 
     // MARK: - Tests
 
-    /// Paste "echo TESTWORD >/tmp/e1", select TESTWORD via debug select,
-    /// Cmd+X -> clipboard has TESTWORD, file output lacks it.
+    /// clear → paste "echo TESTWORD >/tmp/e1" → select TESTWORD at row 0 →
+    /// Cmd+X → clipboard has TESTWORD, file output lacks it.
     func test_cmdX_cutsSelectedText() {
         let outFile = "/tmp/e1"
         try? FileManager.default.removeItem(atPath: outFile)
@@ -54,34 +54,33 @@ final class SelectionEditUITests: CalyxUITestCase {
         waitFor(app.windows.firstMatch)
         Thread.sleep(forTimeInterval: 2)
 
-        pushPromptDown(lines: 3)
+        clearTerminal()
 
+        // After clear, prompt is at row 0.
         // Prompt ~32 chars + "echo " = 37 chars before TESTWORD.
-        // TESTWORD = 8 chars at cols 37-44. " >/tmp/e1" follows.
+        // TESTWORD = 8 chars at cols 37-44.
         let targetWord = "TESTWORD"
         pasteToTerminal("echo \(targetWord) >/tmp/e1")
-        Thread.sleep(forTimeInterval: 0.5)
+        Thread.sleep(forTimeInterval: 2.0)
 
-        // Select TESTWORD using debug select (row 3, cols 37-44)
-        selectTerminalText(fromCol: 37, toCol: 44, row: 3)
+        selectTerminalText(fromCol: 37, toCol: 45, row: 0)
 
         // Cut
         NSPasteboard.general.clearContents()
         app.typeKey("x", modifierFlags: .command)
         Thread.sleep(forTimeInterval: 0.3)
 
-        // Verify clipboard
         let clip = NSPasteboard.general.string(forType: .string) ?? ""
         XCTAssertEqual(clip, targetWord, "Clipboard should contain the cut word")
 
-        // Execute and verify
         app.typeKey(.return, modifierFlags: [])
         let output = pollFile(outFile)
         XCTAssertFalse(output.contains(targetWord),
                         "Output must NOT contain the cut word")
     }
 
-    /// Select+Delete: removes selected text from input.
+    /// clear → paste "echo DELETEME >/tmp/e2" → select DELETEME at row 0 →
+    /// Delete → file output lacks DELETEME.
     func test_delete_removesSelectedText() {
         let outFile = "/tmp/e2"
         try? FileManager.default.removeItem(atPath: outFile)
@@ -89,14 +88,13 @@ final class SelectionEditUITests: CalyxUITestCase {
         waitFor(app.windows.firstMatch)
         Thread.sleep(forTimeInterval: 2)
 
-        pushPromptDown(lines: 3)
+        clearTerminal()
 
         let targetWord = "DELETEME"
         pasteToTerminal("echo \(targetWord) >/tmp/e2")
-        Thread.sleep(forTimeInterval: 0.5)
+        Thread.sleep(forTimeInterval: 2.0)
 
-        // Select DELETEME using debug select (row 3, cols 37-44)
-        selectTerminalText(fromCol: 37, toCol: 44, row: 3)
+        selectTerminalText(fromCol: 37, toCol: 45, row: 0)
 
         app.typeKey(XCUIKeyboardKey.delete, modifierFlags: [])
         Thread.sleep(forTimeInterval: 0.3)
