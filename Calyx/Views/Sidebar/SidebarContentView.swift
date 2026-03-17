@@ -338,12 +338,15 @@ private struct GroupSectionView: View {
 
                     // Right: collapse toggle button
                     Button(action: {
-                        group.isCollapsed.toggle()
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            group.isCollapsed.toggle()
+                        }
                         onCollapseToggled?()
                     }) {
-                        Image(systemName: group.isCollapsed ? "chevron.right" : "chevron.down")
+                        Image(systemName: "chevron.right")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.secondary)
+                            .rotationEffect(group.isCollapsed ? .zero : .degrees(90))
                             .frame(width: 20, height: 20)
                             .contentShape(Rectangle())
                     }
