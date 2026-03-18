@@ -427,12 +427,6 @@ final class DiffLineNumberView: NSRulerView {
         let font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
         let lineNumberColor = NSColor.secondaryLabelColor
 
-        // Separator line (no background fill — Liquid Glass shows through)
-        NSColor.separatorColor.withAlphaComponent(0.15).setStroke()
-        let separatorX = bounds.maxX - 0.5
-        NSBezierPath.strokeLine(from: NSPoint(x: separatorX, y: rect.minY),
-                                to: NSPoint(x: separatorX, y: rect.maxY))
-
         let content = textView.string as NSString
         guard content.length > 0 else { return }
 

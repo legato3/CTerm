@@ -111,7 +111,6 @@ struct DiffToolbarView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .glassEffect(.regular.tint(.clear), in: .rect)
         .accessibilityIdentifier(AccessibilityID.Diff.toolbar)
     }
 
