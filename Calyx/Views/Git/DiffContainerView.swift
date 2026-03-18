@@ -76,6 +76,13 @@ struct DiffToolbarView: View {
                 Text(String(hash.prefix(7)))
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
+            case .untracked:
+                Text("untracked")
+                    .font(.caption)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.blue.opacity(0.2)))
+                    .foregroundStyle(.blue)
             }
 
             // Review buttons (only shown when comments exist)
@@ -113,6 +120,7 @@ struct DiffToolbarView: View {
         case .unstaged(let path, _): path
         case .staged(let path, _): path
         case .commit(_, let path, _): path
+        case .untracked(let path, _): path
         }
     }
 }

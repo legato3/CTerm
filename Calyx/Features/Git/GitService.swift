@@ -103,6 +103,8 @@ enum GitService {
             }
             args = ["show", "--format=", "--patch", hash, "--", path]
             workDir = wd
+        case .untracked(let path, let wd):
+            return try await untrackedFileDiff(path: path, workDir: wd)
         }
 
         let output = try await run(args: args, workDir: workDir)
@@ -113,6 +115,46 @@ enum GitService {
         }
 
         return output
+    }
+
+    /// Synthesize a unified diff for an untracked file by reading its content.
+    private static func untrackedFileDiff(path: String, workDir: String) async throws -> String {
+        let fullPath = (workDir as NSString).appendingPathComponent(path)
+        let url = URL(fileURLWithPath: fullPath)
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            throw GitError.commandFailed(exitCode: -1, stderr: "Cannot read file: \(path)", command: "diff")
+        }
+
+        // Binary check: look for null bytes in first 8KB
+        let checkSize = min(data.count, 8192)
+        if data.prefix(checkSize).contains(0) {
+            return "Binary files /dev/null and b/\(path) differ\n"
+        }
+
+        guard var content = String(data: data, encoding: .utf8) else {
+            return "Binary files /dev/null and b/\(path) differ\n"
+        }
+
+        if content.utf8.count > maxDiffSize {
+            let idx = content.utf8.index(content.utf8.startIndex, offsetBy: maxDiffSize)
+            content = String(content[..<idx])
+        }
+
+        let lines = content.components(separatedBy: "\n")
+        // Remove trailing empty element from split if file ends with newline
+        let effectiveLines = lines.last == "" ? Array(lines.dropLast()) : lines
+        let lineCount = effectiveLines.count
+
+        var result = "diff --git a/\(path) b/\(path)\nnew file mode 100644\n--- /dev/null\n+++ b/\(path)\n"
+        result += "@@ -0,0 +1,\(lineCount) @@\n"
+        for line in effectiveLines {
+            result += "+\(line)\n"
+        }
+        return result
     }
 
     // MARK: - Process Execution

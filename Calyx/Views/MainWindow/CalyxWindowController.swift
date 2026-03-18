@@ -1489,9 +1489,14 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         guard let workDir = findWorkDir(),
               let repoRoot = windowSession.repoRoots[workDir] else { return }
 
-        let source: DiffSource = entry.isStaged
-            ? .staged(path: entry.path, workDir: repoRoot)
-            : .unstaged(path: entry.path, workDir: repoRoot)
+        let source: DiffSource
+        if entry.isStaged {
+            source = .staged(path: entry.path, workDir: repoRoot)
+        } else if entry.status == .untracked {
+            source = .untracked(path: entry.path, workDir: repoRoot)
+        } else {
+            source = .unstaged(path: entry.path, workDir: repoRoot)
+        }
 
         openDiffTab(source: source)
     }
@@ -1519,7 +1524,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         let fileName: String
         switch source {
-        case .unstaged(let path, _), .staged(let path, _), .commit(_, let path, _):
+        case .unstaged(let path, _), .staged(let path, _), .commit(_, let path, _), .untracked(let path, _):
             fileName = (path as NSString).lastPathComponent
         }
 
@@ -1541,7 +1546,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
                 let path: String
                 switch source {
-                case .unstaged(let p, _), .staged(let p, _), .commit(_, let p, _):
+                case .unstaged(let p, _), .staged(let p, _), .commit(_, let p, _), .untracked(let p, _):
                     path = p
                 }
                 let parsed = DiffParser.parse(rawDiff, path: path)
@@ -1663,7 +1668,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
               case .diff(let source) = tab.content else { return }
         let filePath: String
         switch source {
-        case .unstaged(let p, _), .staged(let p, _), .commit(_, let p, _):
+        case .unstaged(let p, _), .staged(let p, _), .commit(_, let p, _), .untracked(let p, _):
             filePath = p
         }
 

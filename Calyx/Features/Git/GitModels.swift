@@ -94,4 +94,5 @@ enum DiffSource: Sendable, Equatable {
     case unstaged(path: String, workDir: String)
     case staged(path: String, workDir: String)
     case commit(hash: String, path: String, workDir: String)
+    case untracked(path: String, workDir: String)
 }
