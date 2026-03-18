@@ -8,7 +8,7 @@ import AppKit
 @MainActor
 final class DiffView: NSView {
     private let scrollView = NSScrollView()
-    private let textView = NSTextView()
+    private let textView = DiffTextView()
     private let lineNumberView = DiffLineNumberView()
     private(set) var currentDiff: FileDiff?
     var reviewStore: DiffReviewStore?
@@ -72,9 +72,18 @@ final class DiffView: NSView {
             name: NSView.frameDidChangeNotification, object: textView
         )
 
-        // Wire up line click callback
+        // Wire up line click callback (gutter)
         lineNumberView.onLineClicked = { [weak self] displayLineIndex, displayLine in
             self?.handleLineClicked(displayLineIndex: displayLineIndex, displayLine: displayLine)
+        }
+
+        // Wire up comment text click (💬 lines in text view)
+        textView.onCommentLineClicked = { [weak self] textLineIndex in
+            guard let self, textLineIndex < self.displayLines.count else { return }
+            let displayLine = self.displayLines[textLineIndex]
+            if case .commentBlock = displayLine {
+                self.handleLineClicked(displayLineIndex: textLineIndex, displayLine: displayLine)
+            }
         }
     }
 
@@ -335,6 +344,43 @@ final class DiffView: NSView {
     }
 }
 
+// MARK: - DiffTextView (click-on-comment support)
+
+@MainActor
+final class DiffTextView: NSTextView {
+    /// Called when a comment line (💬) is clicked. Parameter is the text line index.
+    var onCommentLineClicked: ((Int) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        // Check if click is on a comment line before passing to super
+        if let lineIndex = textLineIndex(at: event) {
+            onCommentLineClicked?(lineIndex)
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
+    private func textLineIndex(at event: NSEvent) -> Int? {
+        guard let layoutManager, let textContainer else { return nil }
+        let point = convert(event.locationInWindow, from: nil)
+        let adjustedPoint = NSPoint(x: point.x - textContainerInset.width,
+                                    y: point.y - textContainerInset.height)
+        let glyphIndex = layoutManager.glyphIndex(for: adjustedPoint, in: textContainer)
+        let charIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+
+        let lines = string.components(separatedBy: "\n")
+        var offset = 0
+        for (idx, line) in lines.enumerated() {
+            let lineEnd = offset + line.utf16.count
+            if charIndex >= offset && charIndex <= lineEnd {
+                return idx
+            }
+            offset = lineEnd + 1 // +1 for \n
+        }
+        return nil
+    }
+}
+
 // MARK: - Line Number Ruler
 
 @MainActor
@@ -480,20 +526,10 @@ final class DiffLineNumberView: NSRulerView {
                 currentDiffLineIndex += 1
 
             case .commentBlock:
-                // Draw blue background band for comment lines
+                // Draw blue background band for comment lines (no icon — click 💬 in text to edit)
                 let bandRect = NSRect(x: 0, y: y, width: bounds.width - 1, height: lineRect.height)
                 NSColor.systemBlue.withAlphaComponent(0.15).setFill()
                 bandRect.fill()
-
-                // Draw pencil icon to indicate editable
-                let iconStr = "✏️" as NSString
-                let iconAttrs: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.systemFont(ofSize: 11),
-                ]
-                let iconSize = iconStr.size(withAttributes: iconAttrs)
-                let iconX = (bounds.width - iconSize.width) / 2
-                let iconY = y + (lineRect.height - iconSize.height) / 2
-                iconStr.draw(at: NSPoint(x: iconX, y: iconY), withAttributes: iconAttrs)
             }
         }
     }
