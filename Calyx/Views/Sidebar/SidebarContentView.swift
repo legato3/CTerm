@@ -21,6 +21,7 @@ struct SidebarContentView: View {
     var onCloseTab: ((UUID) -> Void)?
     var onGroupRenamed: (() -> Void)?
     var onCollapseToggled: (() -> Void)?
+    var onCloseAllTabsInGroup: ((UUID) -> Void)?
     var onWorkingFileSelected: ((GitFileEntry) -> Void)?
     var onCommitFileSelected: ((CommitFileEntry) -> Void)?
     var onRefreshGitStatus: (() -> Void)?
@@ -55,7 +56,8 @@ struct SidebarContentView: View {
                                     onTabSelected: onTabSelected,
                                     onCloseTab: onCloseTab,
                                     onGroupRenamed: onGroupRenamed,
-                                    onCollapseToggled: onCollapseToggled
+                                    onCollapseToggled: onCollapseToggled,
+                                    onCloseAllTabsInGroup: onCloseAllTabsInGroup
                                 )
                             }
                         }
@@ -278,8 +280,10 @@ private struct GroupSectionView: View {
     var onCloseTab: ((UUID) -> Void)?
     var onGroupRenamed: (() -> Void)?
     var onCollapseToggled: (() -> Void)?
+    var onCloseAllTabsInGroup: ((UUID) -> Void)?
 
     @State private var isEditing = false
+    @State private var isHoveringHeader = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -336,6 +340,18 @@ private struct GroupSectionView: View {
                     }
                     .buttonStyle(.plain)
 
+                    // Close all tabs button (shown on hover)
+                    Button(action: { onCloseAllTabsInGroup?(group.id) }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.plain)
+                    .opacity(isHoveringHeader ? 1 : 0)
+                    .allowsHitTesting(isHoveringHeader)
+                    .accessibilityIdentifier(AccessibilityID.Sidebar.groupCloseAllButton(group.id))
+
                     // Right: collapse toggle button
                     Button(action: {
                         withAnimation(.easeInOut(duration: 0.15)) {
@@ -364,6 +380,7 @@ private struct GroupSectionView: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier(AccessibilityID.Sidebar.group(group.id))
                 .highPriorityGesture(TapGesture(count: 2).onEnded { isEditing = true })
+                .onHover { isHoveringHeader = $0 }
             }
 
             // Tabs in this group (only show if not collapsed)
@@ -436,6 +453,7 @@ private struct TabRowItemView: View {
     var onSelected: (() -> Void)?
     var onClose: (() -> Void)?
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @State private var isHovering = false
 
     private var tabIcon: String {
         switch tab.content {
@@ -446,33 +464,43 @@ private struct TabRowItemView: View {
     }
 
     var body: some View {
-        Button(action: { onSelected?() }) {
-            HStack(spacing: 4) {
-                Image(systemName: tabIcon)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(tab.title.isEmpty ? fallbackTitle : tab.title)
-                    .lineLimit(1)
-                    .font(.system(size: 12.5, weight: isActive ? .semibold : .medium, design: .rounded))
-                Spacer()
-                if tab.unreadNotifications > 0 {
-                    Text(tab.unreadNotifications > 99 ? "99+" : "\(tab.unreadNotifications)")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(minWidth: 16, minHeight: 16)
-                        .background(Circle().fill(Color.red))
-                }
+        HStack(spacing: 4) {
+            Image(systemName: tabIcon)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(tab.title.isEmpty ? fallbackTitle : tab.title)
+                .lineLimit(1)
+                .font(.system(size: 12.5, weight: isActive ? .semibold : .medium, design: .rounded))
+            Spacer()
+            if tab.unreadNotifications > 0 {
+                Text(tab.unreadNotifications > 99 ? "99+" : "\(tab.unreadNotifications)")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(minWidth: 16, minHeight: 16)
+                    .background(Circle().fill(Color.red))
             }
-            .contentShape(Rectangle())
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .modifier(TabChromeModifier(
-                isActive: isActive,
-                cornerRadius: 12,
-                reduceTransparency: reduceTransparency
-            ))
+            Button(action: { onClose?() }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(isActive ? .secondary : .tertiary)
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.plain)
+            .opacity(isHovering || isActive ? 1 : 0)
+            .allowsHitTesting(isHovering || isActive)
+            .accessibilityIdentifier(AccessibilityID.Sidebar.tabCloseButton(tab.id))
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .modifier(TabChromeModifier(
+            isActive: isActive,
+            cornerRadius: 12,
+            reduceTransparency: reduceTransparency
+        ))
+        .onTapGesture { onSelected?() }
+        .onHover { isHovering = $0 }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.Sidebar.tab(tab.id))
     }
 

@@ -352,6 +352,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             onExpandCommit: { [weak self] hash in self?.expandCommit(hash: hash) },
             onSidebarWidthChanged: { [weak self] width in self?.windowSession.sidebarWidth = width },
             onCollapseToggled: { [weak self] in self?.requestSave() },
+            onCloseAllTabsInGroup: { [weak self] groupID in self?.closeAllTabsInGroup(id: groupID) },
             onSidebarDragCommitted: { [weak self] in self?.requestSave() }
         )
     }
@@ -670,6 +671,49 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         switch result {
         case .switchedTab(_, _), .switchedGroup(_, _):
             activateCurrentTab()
+            refreshHostingView()
+            requestSave()
+        case .windowShouldClose:
+            window?.close()
+            requestSave()
+        }
+    }
+
+    private func closeAllTabsInGroup(id groupID: UUID) {
+        guard let group = windowSession.groups.first(where: { $0.id == groupID }) else { return }
+
+        let wasActiveGroup = (groupID == windowSession.activeGroupID)
+
+        if wasActiveGroup {
+            deactivateCurrentTab()
+        }
+
+        let tabIDs = group.tabs.map { $0.id }
+        for tabID in tabIDs {
+            browserControllers.removeValue(forKey: tabID)
+            diffTasks[tabID]?.cancel()
+            diffTasks.removeValue(forKey: tabID)
+            diffStates.removeValue(forKey: tabID)
+            closingTabIDs.insert(tabID)
+        }
+
+        for tab in group.tabs {
+            for surfaceID in tab.registry.allIDs {
+                tab.registry.destroySurface(surfaceID)
+            }
+        }
+
+        let result = windowSession.removeGroup(id: groupID)
+
+        for tabID in tabIDs {
+            closingTabIDs.remove(tabID)
+        }
+
+        switch result {
+        case .switchedTab(_, _), .switchedGroup(_, _):
+            if wasActiveGroup {
+                activateCurrentTab()
+            }
             refreshHostingView()
             requestSave()
         case .windowShouldClose:
