@@ -126,7 +126,6 @@ struct MainContentView: View {
                                         glassOpacity: glassOpacity,
                                         reviewStore: activeDiffReviewStore
                                     )
-                                        .glassEffect(.clear.tint(GlassTheme.chromeTint(for: glassOpacity)), in: .rect)
                                         .accessibilityIdentifier(AccessibilityID.Diff.content)
                                 case .error(let message):
                                     VStack(spacing: 12) {
@@ -140,6 +139,7 @@ struct MainContentView: View {
                                     }
                                 }
                             }
+                            .glassEffect(.clear.tint(GlassTheme.chromeTint(for: glassOpacity)), in: .rect)
                             .accessibilityIdentifier(AccessibilityID.Diff.container)
                         } else if let browserController = activeBrowserController {
                             BrowserContainerView(controller: browserController)

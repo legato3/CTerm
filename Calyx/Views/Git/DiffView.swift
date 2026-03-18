@@ -418,6 +418,11 @@ final class DiffLineNumberView: NSRulerView {
         hoveredDisplayLineIndex = displayLineIndex(at: event)
     }
 
+    override func draw(_ dirtyRect: NSRect) {
+        // Override default NSRulerView drawing entirely (no background, no border)
+        drawHashMarksAndLabels(in: dirtyRect)
+    }
+
     override func drawHashMarksAndLabels(in rect: NSRect) {
         guard let textView = clientView as? NSTextView,
               let layoutManager = textView.layoutManager,
