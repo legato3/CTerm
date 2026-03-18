@@ -25,6 +25,7 @@ xcodebuild \
   -project Calyx.xcodeproj \
   -scheme Calyx \
   -configuration Release \
+  ARCHS=arm64 \
   CODE_SIGN_IDENTITY="Developer ID Application: Yuuichi Eguchi (PQQBSRKD72)" \
   CODE_SIGN_STYLE=Manual \
   DEVELOPMENT_TEAM=PQQBSRKD72 \
