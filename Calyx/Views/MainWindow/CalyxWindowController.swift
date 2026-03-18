@@ -1657,19 +1657,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private func submitDiffReview(tabID: UUID) {
         guard let store = reviewStores[tabID], store.hasUnsubmittedComments else { return }
 
-        // Check IPC enabled — offer to enable if not
-        if !CalyxMCPServer.shared.isRunning {
-            let alert = NSAlert()
-            alert.messageText = "IPC Not Enabled"
-            alert.informativeText = "Review submission requires IPC. Enable IPC now?"
-            alert.addButton(withTitle: "Enable IPC")
-            alert.addButton(withTitle: "Cancel")
-            let response = alert.runModal()
-            guard response == .alertFirstButtonReturn else { return }
-            enableIPC()
-            guard CalyxMCPServer.shared.isRunning else { return }
-        }
-
         // Get file path from tab
         guard let tab = windowSession.groups.flatMap(\.tabs).first(where: { $0.id == tabID }),
               case .diff(let source) = tab.content else { return }
@@ -1681,66 +1668,56 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         let payload = store.formatForSubmission(filePath: filePath)
 
-        // Check payload size
-        guard payload.utf8.count <= 65536 else {
-            showIPCAlert(title: "Review Too Large", message: "Review content exceeds 64KB limit. Reduce comment count or length.")
+        // Find terminal tabs to send review to
+        let terminalTabs = windowSession.groups.flatMap(\.tabs).filter {
+            if case .terminal = $0.content { return true }
+            return false
+        }
+
+        guard !terminalTabs.isEmpty else {
+            showIPCAlert(title: "No Terminal", message: "No terminal tabs available to send review to.")
             return
         }
 
-        Task {
-            // Ensure app peer registration is complete before proceeding
-            await CalyxMCPServer.shared.ensureAppPeerRegistered()
-            guard let appPeerID = CalyxMCPServer.shared.appPeerID else {
-                showIPCAlert(title: "Peer Error", message: "App peer not registered.")
-                return
+        // Select target terminal tab
+        let targetTab: Tab
+        if terminalTabs.count == 1 {
+            targetTab = terminalTabs[0]
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "Select Terminal Tab"
+            alert.informativeText = "Choose which terminal tab to send the review to:"
+            alert.addButton(withTitle: "Send")
+            alert.addButton(withTitle: "Cancel")
+
+            let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+            for tab in terminalTabs {
+                popup.addItem(withTitle: tab.title)
             }
+            alert.accessoryView = popup
 
-            let peers = await CalyxMCPServer.shared.store.listPeers()
-            let candidates = peers.filter { $0.id != appPeerID }
+            let response = alert.runModal()
+            guard response == .alertFirstButtonReturn else { return }
 
-            guard !candidates.isEmpty else {
-                showIPCAlert(title: "No Peers", message: "No Claude Code instances connected. Restart Claude Code after enabling IPC.")
-                return
-            }
-
-            let targetPeerID: UUID
-            if candidates.count == 1 {
-                targetPeerID = candidates[0].id
-            } else {
-                // Show peer selection dialog
-                let alert = NSAlert()
-                alert.messageText = "Select Peer"
-                alert.informativeText = "Choose which Claude Code instance to send the review to:"
-                alert.addButton(withTitle: "Send")
-                alert.addButton(withTitle: "Cancel")
-
-                let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-                for peer in candidates {
-                    popup.addItem(withTitle: "\(peer.name) (\(peer.role))")
-                    popup.lastItem?.tag = candidates.firstIndex(where: { $0.id == peer.id }) ?? 0
-                }
-                alert.accessoryView = popup
-
-                let response = alert.runModal()
-                guard response == .alertFirstButtonReturn else { return }
-
-                let selectedIndex = popup.indexOfSelectedItem
-                guard selectedIndex >= 0, selectedIndex < candidates.count else { return }
-                targetPeerID = candidates[selectedIndex].id
-            }
-
-            do {
-                _ = try await CalyxMCPServer.shared.store.sendMessage(
-                    from: appPeerID,
-                    to: targetPeerID,
-                    content: payload
-                )
-                store.clearAll()
-                refreshHostingView()
-            } catch {
-                showIPCAlert(title: "Send Failed", message: error.localizedDescription)
-            }
+            let selectedIndex = popup.indexOfSelectedItem
+            guard selectedIndex >= 0, selectedIndex < terminalTabs.count else { return }
+            targetTab = terminalTabs[selectedIndex]
         }
+
+        // Send review text to terminal PTY via ghostty surface
+        guard let focusedID = targetTab.splitTree.focusedLeafID,
+              let controller = targetTab.registry.controller(for: focusedID) else {
+            showIPCAlert(title: "Send Failed", message: "Could not access terminal surface.")
+            return
+        }
+
+        controller.sendText(payload + "\n")
+
+        // Switch to the target terminal tab
+        switchToTab(id: targetTab.id)
+
+        store.clearAll()
+        refreshHostingView()
     }
 
     private func showIPCAlert(title: String, message: String) {
