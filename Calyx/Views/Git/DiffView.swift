@@ -342,8 +342,35 @@ final class DiffLineNumberView: NSRulerView {
     var displayLines: [DisplayLine] = []
     var commentedLineIndices: Set<Int> = []
     var onLineClicked: ((Int, DisplayLine) -> Void)?
+    private var hoveredDisplayLineIndex: Int? {
+        didSet {
+            if oldValue != hoveredDisplayLineIndex { needsDisplay = true }
+        }
+    }
+    private var trackingArea: NSTrackingArea?
 
     override var requiredThickness: CGFloat { 80 }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea { removeTrackingArea(existing) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoveredDisplayLineIndex = nil
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        hoveredDisplayLineIndex = displayLineIndex(at: event)
+    }
 
     override func drawHashMarksAndLabels(in rect: NSRect) {
         guard let textView = clientView as? NSTextView,
@@ -401,11 +428,29 @@ final class DiffLineNumberView: NSRulerView {
 
             switch displayLine {
             case .diff(let diffLine):
+                let isCommentable = diffLine.type == .addition || diffLine.type == .deletion || diffLine.type == .context
+
                 // Draw blue dot for commented lines
                 if commentedLineIndices.contains(currentDiffLineIndex) {
                     NSColor.systemBlue.setFill()
                     let dotRect = NSRect(x: 4, y: y + (lineRect.height - 6) / 2, width: 6, height: 6)
                     NSBezierPath(ovalIn: dotRect).fill()
+                } else if isCommentable && hoveredDisplayLineIndex == idx {
+                    // GitHub-style hover "+" button
+                    let btnSize: CGFloat = 16
+                    let btnRect = NSRect(x: 2, y: y + (lineRect.height - btnSize) / 2, width: btnSize, height: btnSize)
+                    NSColor.systemBlue.setFill()
+                    NSBezierPath(roundedRect: btnRect, xRadius: 3, yRadius: 3).fill()
+                    let plusStr = "+" as NSString
+                    let plusAttrs: [NSAttributedString.Key: Any] = [
+                        .font: NSFont.systemFont(ofSize: 12, weight: .bold),
+                        .foregroundColor: NSColor.white,
+                    ]
+                    let plusSize = plusStr.size(withAttributes: plusAttrs)
+                    plusStr.draw(at: NSPoint(
+                        x: btnRect.midX - plusSize.width / 2,
+                        y: btnRect.midY - plusSize.height / 2
+                    ), withAttributes: plusAttrs)
                 }
 
                 // Draw old line number (left column)
@@ -454,18 +499,23 @@ final class DiffLineNumberView: NSRulerView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if let idx = displayLineIndex(at: event), idx < displayLines.count {
+            onLineClicked?(idx, displayLines[idx])
+        } else {
+            super.mouseDown(with: event)
+        }
+    }
+
+    /// Hit-test: returns the displayLines index for the line under the mouse event.
+    private func displayLineIndex(at event: NSEvent) -> Int? {
         guard let textView = clientView as? NSTextView,
               let layoutManager = textView.layoutManager,
-              let textContainer = textView.textContainer else {
-            super.mouseDown(with: event)
-            return
-        }
+              let textContainer = textView.textContainer else { return nil }
 
         let locationInRuler = convert(event.locationInWindow, from: nil)
         let visibleRect = scrollView?.documentVisibleRect ?? bounds
 
-        let content = textView.string
-        let lines = content.components(separatedBy: "\n")
+        let lines = textView.string.components(separatedBy: "\n")
         var charOffset = 0
 
         for (idx, line) in lines.enumerated() {
@@ -486,11 +536,9 @@ final class DiffLineNumberView: NSRulerView {
             let hitRect = NSRect(x: 0, y: y, width: bounds.width, height: lineRect.height)
 
             if hitRect.contains(locationInRuler) {
-                onLineClicked?(idx, displayLines[idx])
-                return
+                return idx
             }
         }
-
-        super.mouseDown(with: event)
+        return nil
     }
 }
