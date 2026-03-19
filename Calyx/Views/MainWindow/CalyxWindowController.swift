@@ -319,7 +319,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         var config = GhosttyFFI.surfaceConfigNew()
         config.scale_factor = Double(window.backingScaleFactor)
 
-        guard let surfaceID = tab.registry.createSurface(app: app, config: config) else {
+        guard let surfaceID = tab.registry.createSurface(app: app, config: config, pwd: tab.pwd) else {
             logger.error("Failed to create initial surface")
             return
         }

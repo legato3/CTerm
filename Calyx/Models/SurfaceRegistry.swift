@@ -63,6 +63,17 @@ final class SurfaceRegistry {
         return id
     }
 
+    func createSurface(app: ghostty_app_t, config: ghostty_surface_config_s, pwd: String?) -> UUID? {
+        if let pwd {
+            return pwd.withCString { cStr in
+                var mutableConfig = config
+                mutableConfig.working_directory = cStr
+                return createSurface(app: app, config: mutableConfig)
+            }
+        }
+        return createSurface(app: app, config: config)
+    }
+
     func destroySurface(_ id: UUID) {
         guard var entry = entries[id] else { return }
         guard entry.state != .destroyed else { return }

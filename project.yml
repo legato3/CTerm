@@ -59,6 +59,19 @@ targets:
         NSPrincipalClass: NSApplication
         SUFeedURL: https://yuuichieguchi.github.io/Calyx/appcast.xml
         SUPublicEDKey: PCj8Kd8fh5sr8y4hhYbT7ER9hDOHUMLFRl9FBSzad2U=
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Folder
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.folder
+        NSServices:
+          - NSMenuItem:
+              default: Open in Calyx
+            NSMessage: openInCalyx
+            NSPortName: Calyx
+            NSSendFileTypes:
+              - public.folder
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.calyx.terminal

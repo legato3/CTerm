@@ -12,6 +12,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var appSession = AppSession()
     private(set) var browserTabBroker = BrowserTabBroker()
     private var windowControllers: [CalyxWindowController] = []
+    private var pendingURLs: [URL] = []
 
     var allWindowControllers: [CalyxWindowController] {
         windowControllers
@@ -52,10 +53,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let browserHandler = BrowserToolHandler(broker: browserTabBroker)
         BrowserServer.shared.toolHandler = browserHandler
         BrowserServer.shared.start()
+        NSApp.servicesProvider = self
 
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
         if isUITesting || !restoreSession() {
-            createNewWindow()
+            if pendingURLs.isEmpty {
+                createNewWindow()
+            }
+        }
+        // Process any URLs that arrived before launch completed
+        if !pendingURLs.isEmpty {
+            let urls = pendingURLs
+            pendingURLs = []
+            application(NSApp, open: urls)
         }
     }
 
@@ -114,6 +124,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        let directories = urls.compactMap { url -> String? in
+            guard url.isFileURL else {
+                logger.warning("Ignoring non-file URL: \(url)")
+                return nil
+            }
+            let resolved = url.resolvingSymlinksInPath().standardizedFileURL
+            let path = resolved.path
+
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
+                logger.warning("Path does not exist: \(path)")
+                return nil
+            }
+            let dirPath = isDir.boolValue ? path : resolved.deletingLastPathComponent().path
+            guard FileManager.default.isReadableFile(atPath: dirPath) else {
+                logger.warning("Directory not readable: \(dirPath)")
+                return nil
+            }
+            return dirPath
+        }
+
+        guard !directories.isEmpty else { return }
+
+        guard GhosttyAppController.shared.readiness == .ready else {
+            pendingURLs.append(contentsOf: urls)
+            return
+        }
+
+        for dir in directories {
+            openWindowAtPath(dir)
+        }
+    }
+
     // MARK: - Notification Observers
 
     private func registerNotificationObservers() {
@@ -147,6 +191,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let windowSession = WindowSession(initialTab: initialTab)
         appSession.addWindow(windowSession)
 
+        let wc = CalyxWindowController(windowSession: windowSession)
+        windowControllers.append(wc)
+        wc.showWindow(nil)
+    }
+
+    func openWindowAtPath(_ pwd: String) {
+        let initialTab = Tab(pwd: pwd)
+        let windowSession = WindowSession(initialTab: initialTab)
+        appSession.addWindow(windowSession)
         let wc = CalyxWindowController(windowSession: windowSession)
         windowControllers.append(wc)
         wc.showWindow(nil)
@@ -474,14 +527,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func createSurfaceWithPwd(tab: Tab, app: ghostty_app_t, window: NSWindow) -> UUID? {
         var config = GhosttyFFI.surfaceConfigNew()
         config.scale_factor = Double(window.backingScaleFactor)
+        return tab.registry.createSurface(app: app, config: config, pwd: tab.pwd)
+    }
 
-        if let pwd = tab.pwd {
-            return pwd.withCString { cStr in
-                config.working_directory = cStr
-                return tab.registry.createSurface(app: app, config: config)
-            }
+    // MARK: - Finder Services
+
+    @objc func openInCalyx(
+        _ pboard: NSPasteboard,
+        userData: String?,
+        error: AutoreleasingUnsafeMutablePointer<NSString>
+    ) {
+        guard let urls = pboard.readObjects(forClasses: [NSURL.self], options: [
+            .urlReadingFileURLsOnly: true
+        ]) as? [URL], !urls.isEmpty else {
+            error.pointee = "No folder selected" as NSString
+            return
         }
-        return tab.registry.createSurface(app: app, config: config)
+        application(NSApp, open: urls)
     }
 
     // MARK: - Actions
