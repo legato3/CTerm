@@ -4,6 +4,7 @@
 // Tests for DiffReviewStore: comment CRUD, submission formatting,
 // displayLine interleaving, and input sanitization.
 
+import Foundation
 import Testing
 @testable import Calyx
 
@@ -523,5 +524,314 @@ struct DiffReviewStoreSanitizeTests {
         let id = store.comments[0].id
         store.updateComment(id: id, text: "updated\u{1B}\twith\u{07}control")
         #expect(store.comments[0].text == "updated withcontrol")
+    }
+}
+
+// MARK: - Range Comment Tests
+
+@MainActor
+@Suite("DiffReviewStore Range Comment Tests")
+struct DiffReviewStoreRangeCommentTests {
+
+    /// Build diff lines with addition lines at indices 2-5, newLineNumber 10-13.
+    private func makeRangeDiffLines() -> [DiffLine] {
+        [
+            makeDiffLine(type: .meta, text: "diff --git a/f b/f"),
+            makeDiffLine(type: .hunkHeader, text: "@@ -1,3 +10,4 @@"),
+            makeDiffLine(type: .addition, text: "+line10", newLineNumber: 10),
+            makeDiffLine(type: .addition, text: "+line11", newLineNumber: 11),
+            makeDiffLine(type: .addition, text: "+line12", newLineNumber: 12),
+            makeDiffLine(type: .addition, text: "+line13", newLineNumber: 13),
+        ]
+    }
+
+    @Test func test_addRangeComment_storesRange() {
+        let store = DiffReviewStore()
+        let diffLines = makeRangeDiffLines()
+
+        store.addRangeComment(
+            startLineIndex: 2,
+            endLineIndex: 5,
+            lines: diffLines,
+            text: "range note"
+        )
+
+        #expect(store.comments.count == 1)
+        let comment = store.comments[0]
+        #expect(comment.endLineIndex == 5)
+        #expect(comment.displayLineNumber == "L10-L13")
+        #expect(comment.text == "range note")
+    }
+
+    @Test func test_rangeComment_displayLines_insertedAfterLastLine() {
+        let store = DiffReviewStore()
+        let diffLines = [
+            makeDiffLine(type: .context, text: " line A", oldLineNumber: 1, newLineNumber: 1),
+            makeDiffLine(type: .addition, text: "+line B", newLineNumber: 2),
+            makeDiffLine(type: .addition, text: "+line C", newLineNumber: 3),
+            makeDiffLine(type: .context, text: " line D", oldLineNumber: 2, newLineNumber: 4),
+        ]
+
+        // Range comment spanning lineIndex 1 to 2
+        store.addRangeComment(
+            startLineIndex: 1,
+            endLineIndex: 2,
+            lines: diffLines,
+            text: "range display test"
+        )
+
+        let result = store.buildDisplayLines(from: diffLines)
+
+        // Expected: diff[0], diff[1], diff[2], commentBlock, diff[3]
+        // The comment block should appear after the LAST line of the range (index 2), not after index 1
+        #expect(result.count == 5)
+
+        if case .diff(let d0) = result[0] {
+            #expect(d0 == diffLines[0])
+        } else {
+            Issue.record("Expected .diff at display index 0")
+        }
+        if case .diff(let d1) = result[1] {
+            #expect(d1 == diffLines[1])
+        } else {
+            Issue.record("Expected .diff at display index 1")
+        }
+        if case .diff(let d2) = result[2] {
+            #expect(d2 == diffLines[2])
+        } else {
+            Issue.record("Expected .diff at display index 2")
+        }
+        if case .commentBlock(let c) = result[3] {
+            #expect(c.text == "range display test")
+        } else {
+            Issue.record("Expected .commentBlock at display index 3")
+        }
+        if case .diff(let d3) = result[4] {
+            #expect(d3 == diffLines[3])
+        } else {
+            Issue.record("Expected .diff at display index 4")
+        }
+    }
+
+    @Test func test_rangeComment_formatForSubmission_additionOnly() {
+        let store = DiffReviewStore()
+        let diffLines = [
+            makeDiffLine(type: .addition, text: "+a", newLineNumber: 10),
+            makeDiffLine(type: .addition, text: "+b", newLineNumber: 11),
+        ]
+
+        store.addRangeComment(
+            startLineIndex: 0,
+            endLineIndex: 1,
+            lines: diffLines,
+            text: "addition range"
+        )
+
+        let output = store.formatForSubmission(filePath: "test.swift")
+        #expect(output.contains("L10-L11 (+): addition range"))
+    }
+
+    @Test func test_rangeComment_formatForSubmission_deletionOnly() {
+        let store = DiffReviewStore()
+        let diffLines = [
+            makeDiffLine(type: .deletion, text: "-a", oldLineNumber: 5),
+            makeDiffLine(type: .deletion, text: "-b", oldLineNumber: 6),
+            makeDiffLine(type: .deletion, text: "-c", oldLineNumber: 7),
+        ]
+
+        store.addRangeComment(
+            startLineIndex: 0,
+            endLineIndex: 2,
+            lines: diffLines,
+            text: "deletion range"
+        )
+
+        let output = store.formatForSubmission(filePath: "test.swift")
+        #expect(output.contains("L5(old)-L7(old) (-): deletion range"))
+    }
+
+    @Test func test_rangeComment_formatForSubmission_mixedTypes() {
+        let store = DiffReviewStore()
+        let diffLines = [
+            makeDiffLine(type: .deletion, text: "-old", oldLineNumber: 5),
+            makeDiffLine(type: .addition, text: "+new", newLineNumber: 11),
+        ]
+
+        // Range starting with deletion, ending with addition
+        store.addRangeComment(
+            startLineIndex: 0,
+            endLineIndex: 1,
+            lines: diffLines,
+            text: "mixed range"
+        )
+
+        let output = store.formatForSubmission(filePath: "test.swift")
+        // Uses start line's type (deletion) for the type indicator
+        #expect(output.contains("L5(old)-L11 (-): mixed range"))
+    }
+}
+
+// MARK: - resolveDisplayRange Tests
+
+@MainActor
+@Suite("DiffReviewStore resolveDisplayRange Tests")
+struct DiffReviewStoreResolveDisplayRangeTests {
+
+    private func makeTestDisplayLines() -> [DisplayLine] {
+        [
+            .diff(makeDiffLine(type: .meta, text: "diff --git a/f b/f")),                                // 0
+            .diff(makeDiffLine(type: .hunkHeader, text: "@@ -1,3 +1,4 @@")),                              // 1
+            .diff(makeDiffLine(type: .context, text: " line1", oldLineNumber: 1, newLineNumber: 1)),      // 2
+            .diff(makeDiffLine(type: .deletion, text: "-line2", oldLineNumber: 2)),                        // 3
+            .diff(makeDiffLine(type: .addition, text: "+line2a", newLineNumber: 2)),                       // 4
+            .diff(makeDiffLine(type: .addition, text: "+line2b", newLineNumber: 3)),                       // 5
+            .diff(makeDiffLine(type: .context, text: " line3", oldLineNumber: 3, newLineNumber: 4)),       // 6
+            .diff(makeDiffLine(type: .hunkHeader, text: "@@ -10,2 +11,2 @@")),                            // 7
+            .diff(makeDiffLine(type: .context, text: " line10", oldLineNumber: 10, newLineNumber: 11)),    // 8
+            .diff(makeDiffLine(type: .addition, text: "+line11", newLineNumber: 12)),                      // 9
+        ]
+    }
+
+    private func makeTestDisplayLinesWithComment() -> [DisplayLine] {
+        [
+            .diff(makeDiffLine(type: .meta, text: "diff --git a/f b/f")),                                // display 0
+            .diff(makeDiffLine(type: .hunkHeader, text: "@@ -1,3 +1,4 @@")),                              // display 1
+            .diff(makeDiffLine(type: .context, text: " line1", oldLineNumber: 1, newLineNumber: 1)),      // display 2, orig 2
+            .diff(makeDiffLine(type: .deletion, text: "-line2", oldLineNumber: 2)),                        // display 3, orig 3
+            .diff(makeDiffLine(type: .addition, text: "+line2a", newLineNumber: 2)),                       // display 4, orig 4
+            .commentBlock(ReviewComment(
+                id: UUID(),
+                lineIndex: 4,
+                endLineIndex: nil,
+                displayLineNumber: "L2",
+                lineType: .addition,
+                text: "existing"
+            )),                                                                                            // display 5
+            .diff(makeDiffLine(type: .addition, text: "+line2b", newLineNumber: 3)),                       // display 6, orig 5
+            .diff(makeDiffLine(type: .context, text: " line3", oldLineNumber: 3, newLineNumber: 4)),       // display 7, orig 6
+            .diff(makeDiffLine(type: .hunkHeader, text: "@@ -10,2 +11,2 @@")),                            // display 8, orig 7
+            .diff(makeDiffLine(type: .context, text: " line10", oldLineNumber: 10, newLineNumber: 11)),    // display 9, orig 8
+            .diff(makeDiffLine(type: .addition, text: "+line11", newLineNumber: 12)),                      // display 10, orig 9
+        ]
+    }
+
+    @Test func test_resolveDisplayRange_normalRange() {
+        let displayLines = makeTestDisplayLines()
+
+        let result = DiffReviewStore.resolveDisplayRange(
+            startDisplayIdx: 2,
+            endDisplayIdx: 5,
+            displayLines: displayLines
+        )
+
+        // display 2-5 are all .diff lines with commentable types (context, deletion, addition, addition)
+        // original indices: meta=0, hunkHeader=1, context=2, deletion=3, addition=4, addition=5
+        #expect(result != nil)
+        #expect(result?.startOriginal == 2)
+        #expect(result?.endOriginal == 5)
+    }
+
+    @Test func test_resolveDisplayRange_clampsAtHunkHeader() {
+        let displayLines = makeTestDisplayLines()
+
+        let result = DiffReviewStore.resolveDisplayRange(
+            startDisplayIdx: 5,
+            endDisplayIdx: 9,
+            displayLines: displayLines
+        )
+
+        // Range crosses hunkHeader at display index 7 → clamp to continuous commentable block before it
+        // display 5 = addition (orig 5), display 6 = context (orig 6), display 7 = hunkHeader → stop
+        #expect(result != nil)
+        #expect(result?.startOriginal == 5)
+        #expect(result?.endOriginal == 6)
+    }
+
+    @Test func test_resolveDisplayRange_skipsCommentBlocks() {
+        let displayLines = makeTestDisplayLinesWithComment()
+
+        let result = DiffReviewStore.resolveDisplayRange(
+            startDisplayIdx: 2,
+            endDisplayIdx: 6,
+            displayLines: displayLines
+        )
+
+        // display 2(context,orig 2), 3(deletion,orig 3), 4(addition,orig 4),
+        // 5(commentBlock, skip), 6(addition,orig 5)
+        // All commentable lines → originals 2-5
+        #expect(result != nil)
+        #expect(result?.startOriginal == 2)
+        #expect(result?.endOriginal == 5)
+    }
+
+    @Test func test_resolveDisplayRange_upwardDrag() {
+        let displayLines = makeTestDisplayLines()
+
+        // Reversed selection: start > end → should normalize
+        let result = DiffReviewStore.resolveDisplayRange(
+            startDisplayIdx: 5,
+            endDisplayIdx: 2,
+            displayLines: displayLines
+        )
+
+        #expect(result != nil)
+        #expect(result?.startOriginal == 2)
+        #expect(result?.endOriginal == 5)
+    }
+
+    @Test func test_resolveDisplayRange_singleLine() {
+        let displayLines = makeTestDisplayLines()
+
+        let result = DiffReviewStore.resolveDisplayRange(
+            startDisplayIdx: 4,
+            endDisplayIdx: 4,
+            displayLines: displayLines
+        )
+
+        // Single commentable line (addition at display 4, orig 4)
+        #expect(result != nil)
+        #expect(result?.startOriginal == 4)
+        #expect(result?.endOriginal == 4)
+    }
+
+    @Test func test_resolveDisplayRange_noCommentableLines() {
+        let displayLines = makeTestDisplayLines()
+
+        // display 0 = meta, display 1 = hunkHeader → neither is commentable
+        let result = DiffReviewStore.resolveDisplayRange(
+            startDisplayIdx: 0,
+            endDisplayIdx: 1,
+            displayLines: displayLines
+        )
+
+        #expect(result == nil)
+    }
+}
+
+// MARK: - Backward Compatibility Tests
+
+@MainActor
+@Suite("DiffReviewStore Backward Compatibility Tests")
+struct DiffReviewStoreBackwardCompatibilityTests {
+
+    @Test func test_singleLineComment_backwardCompatible() {
+        let store = DiffReviewStore()
+
+        // Use existing addComment method
+        store.addComment(
+            lineIndex: 3,
+            lineNumber: 42,
+            oldLineNumber: nil,
+            lineType: .addition,
+            text: "single line note"
+        )
+
+        let comment = store.comments[0]
+
+        // endLineIndex should be nil for single-line comments
+        #expect(comment.endLineIndex == nil)
+        // displayLineNumber should be the traditional format
+        #expect(comment.displayLineNumber == "L42")
+        #expect(comment.text == "single line note")
     }
 }

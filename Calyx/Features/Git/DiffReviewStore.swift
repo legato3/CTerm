@@ -7,10 +7,11 @@ import Foundation
 
 struct ReviewComment: Identifiable, Sendable {
     let id: UUID
-    let lineIndex: Int           // FileDiff.lines[] index (snapshot-fixed)
-    let displayLineNumber: String // For submission ("L42", "L42(old)")
-    let lineType: DiffLineType   // addition/deletion/context only
-    var text: String             // single-line only (no newlines)
+    let lineIndex: Int              // range start or single line
+    let endLineIndex: Int?          // range end (nil = single-line)
+    let displayLineNumber: String   // "L42" or "L10-L15" or "L5(old)-L7(old)"
+    let lineType: DiffLineType      // addition/deletion/context only
+    var text: String                // single-line only (no newlines)
 }
 
 enum DisplayLine: Sendable {
@@ -30,11 +31,19 @@ class DiffReviewStore {
     var hasUnsubmittedComments: Bool { !comments.isEmpty }
     var onCommentsChanged: (() -> Void)?
 
-    func addComment(lineIndex: Int, lineNumber: Int?, oldLineNumber: Int?, lineType: DiffLineType, text: String) {
-        // Strip newlines for single-line constraint
-        let sanitized = Self.sanitizeForTerminal(text)
+    static func displayNumber(for line: DiffLine) -> String {
+        switch line.type {
+        case .deletion:
+            return "L\(line.oldLineNumber ?? 0)(old)"
+        case .addition, .context:
+            return "L\(line.newLineNumber ?? 0)"
+        default:
+            return "L?"
+        }
+    }
 
-        // Determine displayLineNumber
+    func addComment(lineIndex: Int, lineNumber: Int?, oldLineNumber: Int?, lineType: DiffLineType, text: String) {
+        let sanitized = Self.sanitizeForTerminal(text)
         let displayLineNumber: String
         switch lineType {
         case .deletion:
@@ -44,10 +53,30 @@ class DiffReviewStore {
         default:
             displayLineNumber = "L?"
         }
-        
         let comment = ReviewComment(
             id: UUID(),
             lineIndex: lineIndex,
+            endLineIndex: nil,
+            displayLineNumber: displayLineNumber,
+            lineType: lineType,
+            text: sanitized
+        )
+        comments.append(comment)
+        onCommentsChanged?()
+    }
+
+    func addRangeComment(startLineIndex: Int, endLineIndex: Int, lines: [DiffLine], text: String) {
+        guard startLineIndex >= 0, endLineIndex < lines.count, startLineIndex <= endLineIndex else { return }
+        let sanitized = Self.sanitizeForTerminal(text)
+        let startDisplay = Self.displayNumber(for: lines[startLineIndex])
+        let endDisplay = Self.displayNumber(for: lines[endLineIndex])
+        let displayLineNumber = "\(startDisplay)-\(endDisplay)"
+        let lineType = lines[startLineIndex].type
+
+        let comment = ReviewComment(
+            id: UUID(),
+            lineIndex: startLineIndex,
+            endLineIndex: endLineIndex,
             displayLineNumber: displayLineNumber,
             lineType: lineType,
             text: sanitized
@@ -164,21 +193,68 @@ class DiffReviewStore {
     }
 
     func buildDisplayLines(from diffLines: [DiffLine]) -> [DisplayLine] {
-        // Build lookup: lineIndex -> [ReviewComment]
-        var commentsByLine: [Int: [ReviewComment]] = [:]
+        var commentsByEndLine: [Int: [ReviewComment]] = [:]
         for comment in comments {
-            commentsByLine[comment.lineIndex, default: []].append(comment)
+            let insertAfter = comment.endLineIndex ?? comment.lineIndex
+            commentsByEndLine[insertAfter, default: []].append(comment)
         }
-        
+
         var result: [DisplayLine] = []
         for (index, line) in diffLines.enumerated() {
             result.append(.diff(line))
-            if let lineComments = commentsByLine[index] {
+            if let lineComments = commentsByEndLine[index] {
                 for comment in lineComments {
                     result.append(.commentBlock(comment))
                 }
             }
         }
         return result
+    }
+
+    static func resolveDisplayRange(
+        startDisplayIdx: Int,
+        endDisplayIdx: Int,
+        displayLines: [DisplayLine]
+    ) -> (startOriginal: Int, endOriginal: Int)? {
+        let lo = min(startDisplayIdx, endDisplayIdx)
+        let hi = max(startDisplayIdx, endDisplayIdx)
+
+        var firstOriginal: Int?
+        var lastOriginal: Int?
+        var originalIndex = 0
+        var foundNonCommentableAfterStart = false
+
+        for i in 0..<displayLines.count {
+            guard case .diff(let line) = displayLines[i] else {
+                // .commentBlock — skip, don't increment originalIndex
+                continue
+            }
+            defer { originalIndex += 1 }
+
+            guard i >= lo && i <= hi else { continue }
+
+            let isCommentable = line.type == .addition || line.type == .deletion || line.type == .context
+
+            if isCommentable {
+                if foundNonCommentableAfterStart {
+                    // Crossed a non-commentable boundary — stop
+                    break
+                }
+                if firstOriginal == nil {
+                    firstOriginal = originalIndex
+                }
+                lastOriginal = originalIndex
+            } else {
+                // hunkHeader / meta within selection
+                if firstOriginal != nil {
+                    foundNonCommentableAfterStart = true
+                }
+            }
+        }
+
+        guard let start = firstOriginal, let end = lastOriginal else {
+            return nil
+        }
+        return (startOriginal: start, endOriginal: end)
     }
 }

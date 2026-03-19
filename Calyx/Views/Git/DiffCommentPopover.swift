@@ -18,10 +18,12 @@ final class DiffCommentPopoverController: NSViewController {
     weak var enclosingPopover: NSPopover?
 
     private let mode: Mode
+    private let rangeHeader: String?
     private var textField: NSTextField!
-    
-    init(mode: Mode) {
+
+    init(mode: Mode, rangeHeader: String? = nil) {
         self.mode = mode
+        self.rangeHeader = rangeHeader
         super.init(nibName: nil, bundle: nil)
     }
     
@@ -31,8 +33,20 @@ final class DiffCommentPopoverController: NSViewController {
     }
     
     override func loadView() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 80))
-        
+        let containerHeight: CGFloat = rangeHeader != nil ? 100 : 80
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: containerHeight))
+
+        // Range header label (if applicable)
+        var headerLabel: NSTextField?
+        if let rangeHeader {
+            let label = NSTextField(labelWithString: rangeHeader)
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.font = .systemFont(ofSize: 11, weight: .medium)
+            label.textColor = .secondaryLabelColor
+            container.addSubview(label)
+            headerLabel = label
+        }
+
         textField = NSTextField(frame: .zero)
         textField.translatesAutoresizingMaskIntoConstraints = false
         textField.placeholderString = "Add review comment..."
@@ -44,17 +58,17 @@ final class DiffCommentPopoverController: NSViewController {
         textField.target = self
         textField.action = #selector(textFieldAction)
         container.addSubview(textField)
-        
+
         if case .edit(let existingText) = mode {
             textField.stringValue = existingText
         }
-        
+
         // Buttons
         let buttonStack = NSStackView()
         buttonStack.translatesAutoresizingMaskIntoConstraints = false
         buttonStack.orientation = .horizontal
         buttonStack.spacing = 8
-        
+
         switch mode {
         case .add:
             let addButton = NSButton(title: "Add Comment", target: self, action: #selector(addAction))
@@ -65,7 +79,7 @@ final class DiffCommentPopoverController: NSViewController {
             cancelButton.keyEquivalent = "\u{1b}" // Escape
             buttonStack.addArrangedSubview(cancelButton)
             buttonStack.addArrangedSubview(addButton)
-            
+
         case .edit:
             let deleteButton = NSButton(title: "Delete", target: self, action: #selector(deleteAction))
             deleteButton.bezelStyle = .push
@@ -81,19 +95,31 @@ final class DiffCommentPopoverController: NSViewController {
             buttonStack.addArrangedSubview(cancelButton)
             buttonStack.addArrangedSubview(updateButton)
         }
-        
+
         container.addSubview(buttonStack)
-        
+
+        // Auto Layout
+        if let headerLabel {
+            NSLayoutConstraint.activate([
+                headerLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+                headerLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+                headerLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+                textField.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 4),
+            ])
+        } else {
+            NSLayoutConstraint.activate([
+                textField.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
+            ])
+        }
+
         NSLayoutConstraint.activate([
-            textField.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
             textField.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
             textField.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            
             buttonStack.topAnchor.constraint(equalTo: textField.bottomAnchor, constant: 8),
             buttonStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
             buttonStack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -12),
         ])
-        
+
         container.setAccessibilityIdentifier(AccessibilityID.DiffReview.commentPopover)
         self.view = container
     }

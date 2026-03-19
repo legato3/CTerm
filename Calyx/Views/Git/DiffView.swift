@@ -77,6 +77,11 @@ final class DiffView: NSView {
             self?.handleLineClicked(displayLineIndex: displayLineIndex, displayLine: displayLine)
         }
 
+        // Wire up range selection callback (gutter drag)
+        lineNumberView.onRangeSelected = { [weak self] startIdx, endIdx in
+            self?.handleRangeSelected(startDisplayIdx: startIdx, endDisplayIdx: endIdx)
+        }
+
         // Wire up comment text click (💬 lines in text view)
         textView.onCommentLineClicked = { [weak self] textLineIndex in
             guard let self, textLineIndex < self.displayLines.count else { return }
@@ -130,8 +135,15 @@ final class DiffView: NSView {
         }
         if let store = reviewStore {
             displayLines = store.buildDisplayLines(from: diff.lines)
-            // Build set of diff line indices that have comments
-            lineNumberView.commentedLineIndices = Set(store.comments.map { $0.lineIndex })
+            var indices = Set<Int>()
+            for comment in store.comments {
+                let start = comment.lineIndex
+                let end = comment.endLineIndex ?? comment.lineIndex
+                for i in start...end {
+                    indices.insert(i)
+                }
+            }
+            lineNumberView.commentedLineIndices = indices
         } else {
             displayLines = diff.lines.map { .diff($0) }
             lineNumberView.commentedLineIndices = []
@@ -214,7 +226,13 @@ final class DiffView: NSView {
                 result.append(NSAttributedString(string: text, attributes: attrs))
 
             case .commentBlock(let comment):
-                let commentText = "\u{1F4AC} \(comment.text)"
+                let prefix: String
+                if comment.endLineIndex != nil {
+                    prefix = "[\(comment.displayLineNumber)] "
+                } else {
+                    prefix = ""
+                }
+                let commentText = "\u{1F4AC} \(prefix)\(comment.text)"
                 let attrs: [NSAttributedString.Key: Any] = [
                     .font: font,
                     .foregroundColor: NSColor.systemBlue,
@@ -291,7 +309,14 @@ final class DiffView: NSView {
     private func showEditPopover(atDisplayLineIndex: Int, comment: ReviewComment, store: DiffReviewStore) {
         activePopover?.close()
 
-        let controller = DiffCommentPopoverController(mode: .edit(existingText: comment.text))
+        let rangeHeader: String?
+        if comment.endLineIndex != nil {
+            rangeHeader = comment.displayLineNumber
+        } else {
+            rangeHeader = nil
+        }
+
+        let controller = DiffCommentPopoverController(mode: .edit(existingText: comment.text), rangeHeader: rangeHeader)
         controller.onUpdate = { [weak self] text in
             store.updateComment(id: comment.id, text: text)
             self?.redisplayWithComments()
@@ -304,7 +329,63 @@ final class DiffView: NSView {
         let popover = NSPopover()
         popover.contentViewController = controller
         controller.enclosingPopover = popover
-        popover.contentSize = NSSize(width: 320, height: 80)
+        popover.contentSize = NSSize(width: 320, height: comment.endLineIndex != nil ? 100 : 80)
+        popover.behavior = .transient
+        activePopover = popover
+
+        let rect = rectForLine(at: atDisplayLineIndex)
+        popover.show(relativeTo: rect, of: lineNumberView, preferredEdge: .maxX)
+    }
+
+    private func handleRangeSelected(startDisplayIdx: Int, endDisplayIdx: Int) {
+        guard let store = reviewStore, let diff = currentDiff else { return }
+
+        guard let range = DiffReviewStore.resolveDisplayRange(
+            startDisplayIdx: startDisplayIdx,
+            endDisplayIdx: endDisplayIdx,
+            displayLines: displayLines
+        ) else { return }
+
+        guard range.startOriginal >= 0, range.endOriginal < diff.lines.count else { return }
+        let startLine = diff.lines[range.startOriginal]
+        let endLine = diff.lines[range.endOriginal]
+        let startNum = DiffReviewStore.displayNumber(for: startLine)
+        let endNum = DiffReviewStore.displayNumber(for: endLine)
+
+        showAddPopoverForRange(
+            atDisplayLineIndex: endDisplayIdx,
+            startOriginal: range.startOriginal,
+            endOriginal: range.endOriginal,
+            rangeHeader: "Lines \(startNum) – \(endNum)",
+            store: store
+        )
+    }
+
+    private func showAddPopoverForRange(
+        atDisplayLineIndex: Int,
+        startOriginal: Int,
+        endOriginal: Int,
+        rangeHeader: String,
+        store: DiffReviewStore
+    ) {
+        guard let diff = currentDiff else { return }
+        activePopover?.close()
+
+        let controller = DiffCommentPopoverController(mode: .add, rangeHeader: rangeHeader)
+        controller.onAdd = { [weak self] text in
+            store.addRangeComment(
+                startLineIndex: startOriginal,
+                endLineIndex: endOriginal,
+                lines: diff.lines,
+                text: text
+            )
+            self?.redisplayWithComments()
+        }
+
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        controller.enclosingPopover = popover
+        popover.contentSize = NSSize(width: 320, height: 100)
         popover.behavior = .transient
         activePopover = popover
 
@@ -388,6 +469,10 @@ final class DiffLineNumberView: NSRulerView {
     var displayLines: [DisplayLine] = []
     var commentedLineIndices: Set<Int> = []
     var onLineClicked: ((Int, DisplayLine) -> Void)?
+    var onRangeSelected: ((Int, Int) -> Void)?
+    private var dragStartIndex: Int?
+    private var dragCurrentIndex: Int?
+    private var lineRectCache: [(y: CGFloat, height: CGFloat)] = []
     private var hoveredDisplayLineIndex: Int? {
         didSet {
             if oldValue != hoveredDisplayLineIndex { needsDisplay = true }
@@ -441,6 +526,8 @@ final class DiffLineNumberView: NSRulerView {
         // Track the current diff line index (for commentedLineIndices lookup)
         var currentDiffLineIndex = 0
 
+        lineRectCache.removeAll()
+
         let lines = textView.string.components(separatedBy: "\n")
         var charOffset = 0
 
@@ -455,6 +542,7 @@ final class DiffLineNumberView: NSRulerView {
                 if idx < displayLines.count, case .diff = displayLines[idx] {
                     currentDiffLineIndex += 1
                 }
+                lineRectCache.append((y: 0, height: 0))
                 continue
             }
 
@@ -466,6 +554,18 @@ final class DiffLineNumberView: NSRulerView {
             lineRect.origin.y += textView.textContainerInset.height
 
             let y = lineRect.minY - visibleRect.minY + convert(NSPoint.zero, from: textView).y
+
+            lineRectCache.append((y: y, height: lineRect.height))
+
+            // Draw drag selection highlight
+            if let start = dragStartIndex, let current = dragCurrentIndex {
+                let lo = min(start, current)
+                let hi = max(start, current)
+                if idx >= lo && idx <= hi {
+                    NSColor.systemBlue.withAlphaComponent(0.15).setFill()
+                    NSRect(x: 0, y: y, width: bounds.width, height: lineRect.height).fill()
+                }
+            }
 
             switch displayLine {
             case .diff(let diffLine):
@@ -530,11 +630,68 @@ final class DiffLineNumberView: NSRulerView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        if let idx = displayLineIndex(at: event), idx < displayLines.count {
-            onLineClicked?(idx, displayLines[idx])
-        } else {
-            super.mouseDown(with: event)
+        let idx = cachedDisplayLineIndex(at: event) ?? displayLineIndex(at: event)
+        if let idx, idx < displayLines.count {
+            // Check if the line is commentable
+            if case .diff(let line) = displayLines[idx] {
+                if line.type == .addition || line.type == .deletion || line.type == .context {
+                    dragStartIndex = idx
+                    dragCurrentIndex = idx
+                    needsDisplay = true
+                    return
+                }
+            }
+            // For comment blocks, handle immediately
+            if case .commentBlock = displayLines[idx] {
+                onLineClicked?(idx, displayLines[idx])
+                return
+            }
         }
+        super.mouseDown(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard dragStartIndex != nil else { return }
+        if let idx = cachedDisplayLineIndex(at: event) {
+            dragCurrentIndex = idx
+            needsDisplay = true
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let start = dragStartIndex else {
+            super.mouseUp(with: event)
+            return
+        }
+        let current = dragCurrentIndex ?? start
+
+        let lo = min(start, current)
+        let hi = max(start, current)
+
+        // Reset drag state
+        dragStartIndex = nil
+        dragCurrentIndex = nil
+        needsDisplay = true
+
+        if lo == hi {
+            // Single line click — use existing callback
+            if lo < displayLines.count {
+                onLineClicked?(lo, displayLines[lo])
+            }
+        } else {
+            // Range selection
+            onRangeSelected?(lo, hi)
+        }
+    }
+
+    private func cachedDisplayLineIndex(at event: NSEvent) -> Int? {
+        let locationInRuler = convert(event.locationInWindow, from: nil)
+        for (idx, entry) in lineRectCache.enumerated() {
+            if entry.height > 0 && locationInRuler.y >= entry.y && locationInRuler.y < entry.y + entry.height {
+                return idx
+            }
+        }
+        return nil
     }
 
     /// Hit-test: returns the displayLines index for the line under the mouse event.
