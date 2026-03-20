@@ -33,7 +33,7 @@ class ComposeOverlayView: NSView {
 
     private let scrollView = NSScrollView()
     private(set) var textView: NSTextView = ComposeTextView()
-    private let placeholderLabel = NSTextField(labelWithString: "Compose...")
+    private let placeholderLabel = NSTextField(labelWithString: "Type here...")
 
     var onSend: ((String) -> Bool)?
     var onDismiss: (() -> Void)?
