@@ -27,6 +27,7 @@ struct SidebarContentView: View {
     var onRefreshGitStatus: (() -> Void)?
     var onLoadMoreCommits: (() -> Void)?
     var onExpandCommit: ((String) -> Void)?
+    var onMoveTab: ((UUID, Int, Int) -> Void)?
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -57,7 +58,8 @@ struct SidebarContentView: View {
                                     onCloseTab: onCloseTab,
                                     onGroupRenamed: onGroupRenamed,
                                     onCollapseToggled: onCollapseToggled,
-                                    onCloseAllTabsInGroup: onCloseAllTabsInGroup
+                                    onCloseAllTabsInGroup: onCloseAllTabsInGroup,
+                                    onMoveTab: onMoveTab
                                 )
                             }
                         }
@@ -282,9 +284,11 @@ private struct GroupSectionView: View {
     var onGroupRenamed: (() -> Void)?
     var onCollapseToggled: (() -> Void)?
     var onCloseAllTabsInGroup: ((UUID) -> Void)?
+    var onMoveTab: ((UUID, Int, Int) -> Void)?
 
     @State private var isEditing = false
     @State private var isHoveringHeader = false
+    @State private var reorderState = TabReorderState()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -386,17 +390,98 @@ private struct GroupSectionView: View {
 
             // Tabs in this group (only show if not collapsed)
             if !group.isCollapsed {
-                ForEach(group.tabs) { tab in
-                    TabRowItemView(
-                        tab: tab,
-                        isActive: tab.id == activeTabID && isActiveGroup,
-                        onSelected: { onTabSelected?(tab.id) },
-                        onClose: { onCloseTab?(tab.id) }
-                    )
+                VStack(spacing: 0) {
+                    ForEach(Array(group.tabs.enumerated()), id: \.element.id) { index, tab in
+                        TabRowItemView(
+                            tab: tab,
+                            isActive: tab.id == activeTabID && isActiveGroup,
+                            onSelected: { onTabSelected?(tab.id) },
+                            onClose: { onCloseTab?(tab.id) }
+                        )
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(
+                                    key: TabFramePreferenceKey.self,
+                                    value: [tab.id: geo.frame(in: .named("sidebarGroup-\(group.id.uuidString)"))]
+                                )
+                            }
+                        )
+                        .offset(y: reorderState.draggedTabID == tab.id ? reorderState.dragOffset : 0)
+                        .zIndex(reorderState.draggedTabID == tab.id ? 1 : 0)
+                        .scaleEffect(reorderState.draggedTabID == tab.id ? 1.03 : 1.0)
+                        .shadow(color: .black.opacity(reorderState.draggedTabID == tab.id ? 0.15 : 0), radius: 8)
+                        .gesture(tabDragGesture(index: index, tab: tab))
+                        .accessibilityValue(AccessibilityID.Sidebar.tabAtIndex(group.id, index))
+                    }
+                }
+                .coordinateSpace(name: "sidebarGroup-\(group.id.uuidString)")
+                .onPreferenceChange(TabFramePreferenceKey.self) { frames in
+                    reorderState.tabFrames = frames
+                }
+                .overlay {
+                    if let slot = reorderState.insertionSlot,
+                       reorderState.draggedTabID != nil {
+                        insertionIndicator(slot: slot)
+                    }
                 }
             }
         }
         .padding(.bottom, 4)
+        .onChange(of: group.tabs.map(\.id)) { _, _ in
+            reorderState.reset()
+        }
+    }
+
+    // MARK: - Drag Gesture
+
+    private func tabDragGesture(index: Int, tab: Tab) -> some Gesture {
+        DragGesture(minimumDistance: 5)
+            .onChanged { value in
+                guard group.tabs.count > 1, onMoveTab != nil else { return }
+                if reorderState.draggedTabID == nil {
+                    reorderState.draggedTabID = tab.id
+                    reorderState.draggedTabIndex = index
+                }
+                reorderState.dragOffset = value.translation.height
+                if let frame = reorderState.tabFrames[tab.id] {
+                    let midpoint = frame.midY + value.translation.height
+                    reorderState.updateInsertionSlot(dragMidpoint: midpoint, axis: .vertical)
+                }
+            }
+            .onEnded { _ in
+                let moveFrom = reorderState.draggedTabIndex
+                let moveTo = moveFrom.flatMap { reorderState.destinationIndex(fromIndex: $0, tabCount: group.tabs.count) }
+                withAnimation(.easeOut(duration: 0.15)) {
+                    reorderState.reset()
+                }
+                if let from = moveFrom, let to = moveTo {
+                    onMoveTab?(group.id, from, to)
+                }
+            }
+    }
+
+    // MARK: - Insertion Indicator
+
+    private func insertionIndicator(slot: Int) -> some View {
+        GeometryReader { geo in
+            let sortedFrames = reorderState.tabFrames.values.sorted { $0.minY < $1.minY }
+            let yPos: CGFloat = {
+                if slot == 0 {
+                    return sortedFrames.first?.minY ?? 0
+                } else if slot >= sortedFrames.count {
+                    return sortedFrames.last?.maxY ?? geo.size.height
+                } else {
+                    let prev = sortedFrames[slot - 1]
+                    let next = sortedFrames[slot]
+                    return (prev.maxY + next.minY) / 2
+                }
+            }()
+            RoundedRectangle(cornerRadius: 1)
+                .fill(Color.accentColor.opacity(0.8))
+                .frame(width: geo.size.width - 28, height: 2)
+                .position(x: geo.size.width / 2, y: yPos)
+        }
+        .allowsHitTesting(false)
     }
 }
 

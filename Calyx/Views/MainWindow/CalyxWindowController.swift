@@ -377,6 +377,14 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             onSidebarWidthChanged: { [weak self] width in self?.windowSession.sidebarWidth = width },
             onCollapseToggled: { [weak self] in self?.requestSave() },
             onCloseAllTabsInGroup: { [weak self] groupID in self?.closeAllTabsInGroup(id: groupID) },
+            onMoveTab: { [weak self] groupID, fromIndex, toIndex in
+                guard let self,
+                      let group = self.windowSession.groups.first(where: { $0.id == groupID })
+                else { return }
+                group.moveTab(fromIndex: fromIndex, toIndex: toIndex)
+                self.refreshHostingView()
+                self.requestSave()
+            },
             onSidebarDragCommitted: { [weak self] in self?.requestSave() },
             onSubmitReview: { [weak self] in
                 guard let self, let tab = self.activeTab else { return }

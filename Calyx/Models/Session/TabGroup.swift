@@ -63,6 +63,6 @@ class TabGroup: Identifiable {
               toIndex >= 0, toIndex < tabs.count else { return }
 
         let tab = tabs.remove(at: fromIndex)
-        tabs.insert(tab, at: toIndex > fromIndex ? toIndex : toIndex)
+        tabs.insert(tab, at: toIndex)
     }
 }

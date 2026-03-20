@@ -11,8 +11,11 @@ struct TabBarContentView: View {
     var onTabSelected: ((UUID) -> Void)?
     var onNewTab: (() -> Void)?
     var onCloseTab: ((UUID) -> Void)?
+    var onMoveTab: ((Int, Int) -> Void)?
+    var activeGroupID: UUID? = nil
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @State private var reorderState = TabReorderState()
 
     var body: some View {
         HStack(spacing: 0) {
@@ -20,7 +23,7 @@ struct TabBarContentView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     GlassEffectContainer(spacing: 10) {
                         HStack(spacing: 10) {
-                            ForEach(tabs) { tab in
+                            ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
                                 TabItemButton(
                                     tab: tab,
                                     isActive: tab.id == activeTabID,
@@ -28,10 +31,31 @@ struct TabBarContentView: View {
                                     onClose: { onCloseTab?(tab.id) }
                                 )
                                 .id(tab.id)
+                                .background(
+                                    GeometryReader { geo in
+                                        Color.clear.preference(
+                                            key: TabFramePreferenceKey.self,
+                                            value: [tab.id: geo.frame(in: .named("tabBarScroll"))]
+                                        )
+                                    }
+                                )
+                                .offset(x: reorderState.draggedTabID == tab.id ? reorderState.dragOffset : 0)
+                                .zIndex(reorderState.draggedTabID == tab.id ? 1 : 0)
+                                .scaleEffect(reorderState.draggedTabID == tab.id ? 1.03 : 1.0)
+                                .shadow(color: .black.opacity(reorderState.draggedTabID == tab.id ? 0.15 : 0), radius: 8)
+                                .gesture(tabDragGesture(index: index, tab: tab))
+                                .accessibilityValue(AccessibilityID.TabBar.tabAtIndex(index))
+                            }
+                        }
+                        .overlay {
+                            if let slot = reorderState.insertionSlot,
+                               reorderState.draggedTabID != nil {
+                                insertionIndicator(slot: slot)
                             }
                         }
                     }
                 }
+                .coordinateSpace(name: "tabBarScroll")
                 .onAppear {
                     scrollToActiveTab(proxy: proxy, animated: false)
                 }
@@ -39,9 +63,13 @@ struct TabBarContentView: View {
                     scrollToActiveTab(proxy: proxy, animated: true)
                 }
                 .onChange(of: tabs.map(\.id)) { _, _ in
+                    reorderState.reset()
                     scrollToActiveTab(proxy: proxy, animated: false)
                 }
                 .background(TabBarWheelBridge(onDoubleClickEmptyArea: onNewTab))
+                .onPreferenceChange(TabFramePreferenceKey.self) { frames in
+                    reorderState.tabFrames = frames
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
@@ -66,6 +94,60 @@ struct TabBarContentView: View {
         .clipped(antialiased: false)
         .accessibilityIdentifier(AccessibilityID.TabBar.container)
     }
+
+    // MARK: - Drag Gesture
+
+    private func tabDragGesture(index: Int, tab: Tab) -> some Gesture {
+        DragGesture(minimumDistance: 5)
+            .onChanged { value in
+                guard tabs.count > 1, onMoveTab != nil else { return }
+                if reorderState.draggedTabID == nil {
+                    reorderState.draggedTabID = tab.id
+                    reorderState.draggedTabIndex = index
+                }
+                reorderState.dragOffset = value.translation.width
+                if let frame = reorderState.tabFrames[tab.id] {
+                    let midpoint = frame.midX + value.translation.width
+                    reorderState.updateInsertionSlot(dragMidpoint: midpoint, axis: .horizontal)
+                }
+            }
+            .onEnded { _ in
+                let moveFrom = reorderState.draggedTabIndex
+                let moveTo = moveFrom.flatMap { reorderState.destinationIndex(fromIndex: $0, tabCount: tabs.count) }
+                withAnimation(.easeOut(duration: 0.15)) {
+                    reorderState.reset()
+                }
+                if let from = moveFrom, let to = moveTo {
+                    onMoveTab?(from, to)
+                }
+            }
+    }
+
+    // MARK: - Insertion Indicator
+
+    private func insertionIndicator(slot: Int) -> some View {
+        GeometryReader { geo in
+            let sortedFrames = reorderState.tabFrames.values.sorted { $0.minX < $1.minX }
+            let xPos: CGFloat = {
+                if slot == 0 {
+                    return sortedFrames.first?.minX ?? 0
+                } else if slot >= sortedFrames.count {
+                    return sortedFrames.last?.maxX ?? geo.size.width
+                } else {
+                    let prev = sortedFrames[slot - 1]
+                    let next = sortedFrames[slot]
+                    return (prev.maxX + next.minX) / 2
+                }
+            }()
+            RoundedRectangle(cornerRadius: 1)
+                .fill(Color.accentColor.opacity(0.8))
+                .frame(width: 2, height: 24)
+                .position(x: xPos, y: geo.size.height / 2)
+        }
+        .allowsHitTesting(false)
+    }
+
+    // MARK: - Scroll Helpers
 
     private func scrollToActiveTab(proxy: ScrollViewProxy, animated: Bool) {
         guard let activeTabID else { return }

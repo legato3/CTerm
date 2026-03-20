@@ -38,6 +38,7 @@ struct MainContentView: View {
     var onSidebarWidthChanged: ((CGFloat) -> Void)?
     var onCollapseToggled: (() -> Void)?
     var onCloseAllTabsInGroup: ((UUID) -> Void)?
+    var onMoveTab: ((UUID, Int, Int) -> Void)?  // (groupID, fromIndex, toIndex)
     var onSidebarDragCommitted: (() -> Void)?
     var onSubmitReview: (() -> Void)?
     var onDiscardReview: (() -> Void)?
@@ -79,7 +80,8 @@ struct MainContentView: View {
                         onCommitFileSelected: onCommitFileSelected,
                         onRefreshGitStatus: onRefreshGitStatus,
                         onLoadMoreCommits: onLoadMoreCommits,
-                        onExpandCommit: onExpandCommit
+                        onExpandCommit: onExpandCommit,
+                        onMoveTab: onMoveTab
                     )
                     .frame(width: windowSession.sidebarWidth)
                     .overlay(alignment: .trailing) {
@@ -105,7 +107,11 @@ struct MainContentView: View {
                                 activeTabID: activeTabID,
                                 onTabSelected: onTabSelected,
                                 onNewTab: onNewTab,
-                                onCloseTab: onCloseTab
+                                onCloseTab: onCloseTab,
+                                onMoveTab: activeGroup != nil
+                                    ? { from, to in onMoveTab?(activeGroup!.id, from, to) }
+                                    : nil,
+                                activeGroupID: activeGroup?.id
                             )
                         }
 
