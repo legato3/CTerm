@@ -48,6 +48,10 @@ final class GhosttyAppController {
         return GhosttyFFI.appNeedsConfirmQuit(app)
     }
 
+    /// Trusted paste content injected by the compose overlay.
+    /// When set, the next clipboard read will use this instead of NSPasteboard.
+    var trustedPasteContent: String? = nil
+
     // MARK: - Initialization
 
     private init() {
@@ -362,6 +366,16 @@ private func ghosttyReadClipboardCallback(
     MainActor.assumeIsolated {
         let surfaceView = GhosttyAppController.surfaceView(fromUserdata: safeUserdata)
         guard let surface = surfaceView.surfaceController?.surface else { return }
+
+        // Check for trusted paste content (from compose overlay).
+        let appController = GhosttyAppController.shared
+        if let trusted = appController.trustedPasteContent {
+            appController.trustedPasteContent = nil
+            trusted.withCString { ptr in
+                GhosttyFFI.surfaceCompleteClipboardRequest(surface, data: ptr, state: safeState, confirmed: true)
+            }
+            return
+        }
 
         let pasteboard: NSPasteboard
         switch location {

@@ -18,6 +18,7 @@ class WindowSession: Identifiable {
     var activeGroupID: UUID?
     var showSidebar: Bool
     var showCommandPalette: Bool = false
+    var showComposeOverlay: Bool = false
     var sidebarMode: SidebarMode = .tabs
     var gitChangesState: GitChangesState = .notLoaded
     var gitEntries: [GitFileEntry] = []
@@ -40,6 +41,7 @@ class WindowSession: Identifiable {
         activeGroupID: UUID? = nil,
         showSidebar: Bool = true,
         showCommandPalette: Bool = false,
+        showComposeOverlay: Bool = false,
         sidebarWidth: CGFloat = SidebarLayout.defaultWidth
     ) {
         self.id = id
@@ -47,6 +49,7 @@ class WindowSession: Identifiable {
         self.activeGroupID = activeGroupID
         self.showSidebar = showSidebar
         self.showCommandPalette = showCommandPalette
+        self.showComposeOverlay = showComposeOverlay
         self.sidebarWidth = sidebarWidth
     }
 

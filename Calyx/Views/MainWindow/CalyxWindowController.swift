@@ -27,6 +27,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private var hasMoreCommits = true
     private var reviewStores: [UUID: DiffReviewStore] = [:]
     private var clipboardConfirmationController: ClipboardConfirmationController?
+    private var composeOverlayTargetSurfaceID: UUID?
 
     // MARK: - Computed Properties
 
@@ -195,6 +196,14 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         commandRegistry.register(Command(id: "edit.find", title: "Find in Terminal", shortcut: "Cmd+F", category: "Edit") { [weak self] in
             guard let controller = self?.focusedController else { return }
             controller.performAction("start_search")
+        })
+        commandRegistry.register(Command(
+            id: "edit.compose",
+            title: "Compose Input",
+            shortcut: "Cmd+Shift+E",
+            category: "Edit"
+        ) { [weak self] in
+            self?.toggleComposeOverlay()
         })
         commandRegistry.register(Command(id: "browser.open", title: "Open Browser Tab", category: "Browser") { [weak self] in
             self?.promptAndOpenBrowserTab()
@@ -403,6 +412,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             onDiscardAllReviews: { [weak self] in
                 self?.discardAllDiffReviews()
             },
+            onComposeOverlaySend: { [weak self] text in self?.sendComposeText(text) },
+            onDismissComposeOverlay: { [weak self] in self?.dismissComposeOverlay() },
             totalReviewCommentCount: totalReviewCommentCount,
             reviewFileCount: reviewFileCount
         )
@@ -478,6 +489,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func deactivateCurrentTab() {
+        dismissComposeOverlay()
         guard let tab = activeTab else { return }
         if case .terminal = tab.content {
             focusedController?.setFocus(false)
@@ -655,6 +667,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
         guard windowSession.activeGroupID != groupID else { return }
 
+        dismissComposeOverlay()
         deactivateCurrentTab()
         windowSession.activeGroupID = groupID
         activateCurrentTab()
@@ -828,6 +841,52 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             }
         case .diff:
             break
+        }
+    }
+
+    @objc func toggleComposeOverlay() {
+        if windowSession.showComposeOverlay {
+            dismissComposeOverlay()
+        } else {
+            guard let tab = activeTab, case .terminal = tab.content else { return }
+            composeOverlayTargetSurfaceID = focusedController?.id
+            windowSession.showComposeOverlay = true
+            refreshHostingView()
+        }
+    }
+
+    private func dismissComposeOverlay() {
+        guard windowSession.showComposeOverlay else { return }
+        windowSession.showComposeOverlay = false
+        composeOverlayTargetSurfaceID = nil
+        refreshHostingView()
+        if case .terminal = activeTab?.content {
+            restoreFocus()
+        }
+    }
+
+    private func sendComposeText(_ text: String) {
+        guard !text.isEmpty else { return }
+
+        let targetController: GhosttySurfaceController?
+        if let targetID = composeOverlayTargetSurfaceID,
+           let tab = activeTab {
+            targetController = tab.registry.controller(for: targetID)
+        } else {
+            targetController = focusedController
+        }
+
+        dismissComposeOverlay()
+
+        guard let controller = targetController else { return }
+
+        if text.contains("\n") {
+            GhosttyAppController.shared.trustedPasteContent = text
+            if !controller.performAction("paste_from_clipboard") {
+                GhosttyAppController.shared.trustedPasteContent = nil
+            }
+        } else {
+            controller.sendText(text)
         }
     }
 
@@ -1380,6 +1439,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         focusedController?.setFocus(false)
         if windowSession.showCommandPalette {
             dismissCommandPalette()
+        }
+        if windowSession.showComposeOverlay {
+            dismissComposeOverlay()
         }
     }
 

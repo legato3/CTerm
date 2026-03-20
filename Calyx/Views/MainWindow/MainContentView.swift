@@ -44,6 +44,8 @@ struct MainContentView: View {
     var onDiscardReview: (() -> Void)?
     var onSubmitAllReviews: (() -> Void)?
     var onDiscardAllReviews: (() -> Void)?
+    var onComposeOverlaySend: ((String) -> Void)?
+    var onDismissComposeOverlay: (() -> Void)?
     var totalReviewCommentCount: Int = 0
     var reviewFileCount: Int = 0
 
@@ -170,6 +172,19 @@ struct MainContentView: View {
                             .overlay(alignment: .topTrailing) {
                                 if secureInput.enabled {
                                     SecureInputOverlay()
+                                }
+                            }
+                            .overlay(alignment: .bottom) {
+                                if windowSession.showComposeOverlay {
+                                    ComposeOverlayContainerView(
+                                        onSend: onComposeOverlaySend,
+                                        onDismiss: onDismissComposeOverlay
+                                    )
+                                    .frame(height: 120)
+                                    .glassEffect(.regular, in: .rect(cornerRadius: 8))
+                                    .padding(.horizontal, 8)
+                                    .padding(.bottom, 4)
+                                    .transition(.move(edge: .bottom).combined(with: .opacity))
                                 }
                             }
                         }

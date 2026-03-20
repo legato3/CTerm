@@ -31,6 +31,10 @@ enum AccessibilityID {
         static let searchField = "calyx.commandPalette.searchField"
         static let resultsTable = "calyx.commandPalette.resultsTable"
     }
+    enum Compose {
+        static let container = "calyx.compose"
+        static let textView = "calyx.compose.textView"
+    }
     enum Search {
         static let container = "calyx.search"
         static let searchField = "calyx.search.searchField"
