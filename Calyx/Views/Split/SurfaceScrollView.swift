@@ -70,6 +70,32 @@ class SurfaceScrollView: NSView {
         return max(0, min(row, maxRow))
     }
 
+    /// Returns true if this row should be sent (differs from last sent row).
+    static func shouldSendScrollRow(_ row: Int, lastSentRow: Int) -> Bool {
+        row != lastSentRow
+    }
+
+    /// Coalesce scroll rows: always takes the latest value.
+    static func coalesceScrollRow(pending: Int?, newRow: Int) -> Int {
+        newRow
+    }
+
+    /// Describes expected isLiveScrolling state after notification events.
+    static func liveScrollState(
+        afterWillStart: Bool = false,
+        afterDidLiveScroll: Bool = false,
+        afterDidEnd: Bool = false
+    ) -> Bool {
+        if afterDidEnd { return false }
+        if afterWillStart || afterDidLiveScroll { return true }
+        return false
+    }
+
+    /// Returns true if enough time has passed to flash scrollers again.
+    static func shouldFlashScrollers(lastFlashTime: CFTimeInterval, now: CFTimeInterval, interval: CFTimeInterval = 0.1) -> Bool {
+        lastFlashTime == 0 || now - lastFlashTime > interval
+    }
+
     // MARK: - Instance Properties
 
     private let scrollView = OverlayScrollView()
@@ -77,6 +103,7 @@ class SurfaceScrollView: NSView {
     private(set) var surfaceView: SurfaceView
 
     private var cellHeight: CGFloat = 0
+    private var lastFlashTime: CFTimeInterval = 0
     private var isLiveScrolling = false
     private var lastAppliedOffset: Int = -1
     private var lastSentRow: Int = -1
@@ -85,6 +112,9 @@ class SurfaceScrollView: NSView {
 
     private var pendingScrollRow: Int?
     private var throttleScheduled = false
+
+    private var pendingScrollbarOffset: Int?
+    private var scrollbarUIScheduled = false
 
     private var cellSizeObserver: NSObjectProtocol?
     private var configChangeObserver: NSObjectProtocol?
@@ -164,6 +194,12 @@ class SurfaceScrollView: NSView {
         addSubview(scrollView)
 
         // Register for live scroll notifications
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(scrollViewWillStartLiveScroll(_:)),
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: scrollView
+        )
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(scrollViewDidLiveScroll(_:)),
@@ -295,7 +331,10 @@ class SurfaceScrollView: NSView {
             cellHeight: cellHeight,
             contentHeight: contentSize.height
         )
-        documentContentView.frame.size = NSSize(width: contentSize.width, height: docHeight)
+        let newSize = NSSize(width: contentSize.width, height: docHeight)
+        if documentContentView.frame.size != newSize {
+            documentContentView.frame.size = newSize
+        }
 
         // Skip position update if user is dragging scrollbar
         guard !isLiveScrolling else { return }
@@ -304,17 +343,47 @@ class SurfaceScrollView: NSView {
         guard validated.offset != lastAppliedOffset else { return }
         lastAppliedOffset = validated.offset
 
-        // Scroll to the offset position
-        let scrollY = Self.offsetToScrollY(offset: validated.offset, cellHeight: cellHeight)
+        // Defer scrollbar UI update to avoid blocking the synchronous FFI call path.
+        // The core callback fires inside ghostty_surface_mouse_scroll; heavy UI work
+        // here delays scrollWheel from returning and starves event delivery.
+        scheduleScrollbarUIUpdate(offset: validated.offset)
+    }
+
+    // MARK: - Scrollbar UI Coalescing
+
+    private func scheduleScrollbarUIUpdate(offset: Int) {
+        pendingScrollbarOffset = offset
+        guard !scrollbarUIScheduled else { return }
+        scrollbarUIScheduled = true
+        RunLoop.main.perform(inModes: [.common]) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.flushScrollbarUIUpdate()
+            }
+        }
+    }
+
+    private func flushScrollbarUIUpdate() {
+        scrollbarUIScheduled = false
+        guard let offset = pendingScrollbarOffset else { return }
+        pendingScrollbarOffset = nil
+
+        guard cellHeight > 0 else { return }
+        let scrollY = Self.offsetToScrollY(offset: offset, cellHeight: cellHeight)
         scrollView.contentView.scroll(to: NSPoint(x: 0, y: scrollY))
         scrollView.reflectScrolledClipView(scrollView.contentView)
-        scrollView.flashScrollers()
-
-        // Surface stays at origin; ghostty re-renders the visible content.
+        let now = CACurrentMediaTime()
+        if Self.shouldFlashScrollers(lastFlashTime: lastFlashTime, now: now) {
+            lastFlashTime = now
+            scrollView.flashScrollers()
+        }
         surfaceView.frame.origin = .zero
     }
 
     // MARK: - Live Scroll (UI → Core)
+
+    @objc private func scrollViewWillStartLiveScroll(_ notification: Notification) {
+        isLiveScrolling = true
+    }
 
     @objc private func scrollViewDidLiveScroll(_ notification: Notification) {
         isLiveScrolling = true
@@ -355,7 +424,7 @@ class SurfaceScrollView: NSView {
         pendingScrollRow = row
         guard !throttleScheduled else { return }
         throttleScheduled = true
-        RunLoop.main.perform { [weak self] in
+        RunLoop.main.perform(inModes: [.common]) { [weak self] in
             MainActor.assumeIsolated {
                 self?.flushPendingScroll()
             }
@@ -371,7 +440,7 @@ class SurfaceScrollView: NSView {
 
     private func sendScrollToRow(_ row: Int) {
         // Dedup: don't send same row twice
-        guard row != lastSentRow else { return }
+        guard Self.shouldSendScrollRow(row, lastSentRow: lastSentRow) else { return }
         lastSentRow = row
 
         surfaceView.surfaceController?.performAction("scroll_to_row:\(row)")

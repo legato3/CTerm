@@ -148,4 +148,87 @@ struct SurfaceScrollViewTests {
         #expect(GhosttyConfigManager.ScrollbarMode.system.rawValue == "system")
         #expect(GhosttyConfigManager.ScrollbarMode.never.rawValue == "never")
     }
+
+    // MARK: - Dedup: sendScrollToRow skips same row
+
+    @Test("shouldSendScrollRow returns false for same row")
+    func shouldSendScrollRowSameRow() {
+        let result = SurfaceScrollView.shouldSendScrollRow(42, lastSentRow: 42)
+        #expect(result == false)
+    }
+
+    @Test("shouldSendScrollRow returns true for different row")
+    func shouldSendScrollRowDifferentRow() {
+        let result = SurfaceScrollView.shouldSendScrollRow(50, lastSentRow: 42)
+        #expect(result == true)
+    }
+
+    @Test("shouldSendScrollRow returns true when lastSentRow is -1 (initial)")
+    func shouldSendScrollRowInitial() {
+        // -1 is the initial sentinel; any real row should be sent
+        #expect(SurfaceScrollView.shouldSendScrollRow(0, lastSentRow: -1) == true)
+        #expect(SurfaceScrollView.shouldSendScrollRow(100, lastSentRow: -1) == true)
+    }
+
+    // MARK: - Coalescing keeps latest value
+
+    @Test("coalesceScrollRow overrides previous pending value")
+    func coalesceScrollRowOverrides() {
+        let result = SurfaceScrollView.coalesceScrollRow(pending: 10, newRow: 25)
+        #expect(result == 25)
+    }
+
+    @Test("coalesceScrollRow works with nil pending (first call)")
+    func coalesceScrollRowNilPending() {
+        let result = SurfaceScrollView.coalesceScrollRow(pending: nil, newRow: 7)
+        #expect(result == 7)
+    }
+
+    // MARK: - Live scroll state machine
+
+    @Test("liveScrollState is true after willStart")
+    func liveScrollStateAfterWillStart() {
+        let state = SurfaceScrollView.liveScrollState(afterWillStart: true)
+        #expect(state == true)
+    }
+
+    @Test("liveScrollState is true after didLiveScroll")
+    func liveScrollStateAfterDidLiveScroll() {
+        let state = SurfaceScrollView.liveScrollState(afterDidLiveScroll: true)
+        #expect(state == true)
+    }
+
+    @Test("liveScrollState is false after didEnd")
+    func liveScrollStateAfterDidEnd() {
+        let state = SurfaceScrollView.liveScrollState(afterDidEnd: true)
+        #expect(state == false)
+    }
+
+    @Test("liveScrollState: willStart then didEnd results in false")
+    func liveScrollStateWillStartThenDidEnd() {
+        let state = SurfaceScrollView.liveScrollState(afterWillStart: true, afterDidEnd: true)
+        #expect(state == false)
+    }
+
+    // MARK: - flashScrollers debounce logic
+
+    @Test("shouldFlashScrollers returns true when enough time has passed")
+    func shouldFlashScrollersEnoughTime() {
+        // 0.2s since last flash, interval is 0.1s
+        let result = SurfaceScrollView.shouldFlashScrollers(lastFlashTime: 1.0, now: 1.2)
+        #expect(result == true)
+    }
+
+    @Test("shouldFlashScrollers returns false when called too quickly")
+    func shouldFlashScrollersTooQuick() {
+        // Only 0.05s since last flash, interval is 0.1s
+        let result = SurfaceScrollView.shouldFlashScrollers(lastFlashTime: 1.0, now: 1.05)
+        #expect(result == false)
+    }
+
+    @Test("shouldFlashScrollers returns true on first call (lastFlashTime = 0)")
+    func shouldFlashScrollersFirstCall() {
+        let result = SurfaceScrollView.shouldFlashScrollers(lastFlashTime: 0, now: 0.001)
+        #expect(result == true)
+    }
 }

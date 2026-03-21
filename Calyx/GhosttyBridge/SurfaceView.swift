@@ -652,6 +652,13 @@ class SurfaceView: NSView {
         var x = event.scrollingDeltaX
         var y = event.scrollingDeltaY
 
+        // 2x multiplier for precision scrolling (trackpad/Magic Mouse).
+        // Matches Ghostty behavior for responsive feel.
+        if event.hasPreciseScrollingDeltas {
+            x *= 2
+            y *= 2
+        }
+
         // Mouse wheels reporting precise deltas (phase/momentumPhase both empty)
         // send a fixed pixel value per tick that may not match cell_height,
         // causing fractional-line scrolling. Normalize to cell_height for 1 line/tick.
