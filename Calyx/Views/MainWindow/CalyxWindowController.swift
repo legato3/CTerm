@@ -18,13 +18,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private var focusRequestID: UInt64 = 0
     private var isRestoring = false
     private var browserControllers: [UUID: BrowserTabController] = [:]
-    private var diffStates: [UUID: DiffLoadState] = [:]
-    private var diffTasks: [UUID: Task<Void, Never>] = [:]
-    private var refreshTask: Task<Void, Never>?
-    private var loadMoreTask: Task<Void, Never>?
-    private var expandTasks: [String: Task<Void, Never>] = [:]
-    private var hasMoreCommits = true
-    private var reviewStores: [UUID: DiffReviewStore] = [:]
+    private let gitController: GitController
+    private let reviewController: ReviewController
     private var clipboardConfirmationController: ClipboardConfirmationController?
     private var composeOverlayTargetSurfaceID: UUID?
     private let windowViewState = WindowViewState()
@@ -50,7 +45,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     private var activeDiffState: DiffLoadState? {
         guard let tab = activeTab, case .diff = tab.content else { return nil }
-        return diffStates[tab.id]
+        return reviewController.diffStates[tab.id]
     }
 
     private var activeDiffSource: DiffSource? {
@@ -60,16 +55,11 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     private var activeDiffReviewStore: DiffReviewStore? {
         guard let tab = activeTab, case .diff = tab.content else { return nil }
-        return reviewStores[tab.id]
+        return reviewController.reviewStores[tab.id]
     }
 
-    private var totalReviewCommentCount: Int {
-        reviewStores.values.filter { $0.hasUnsubmittedComments }.reduce(0) { $0 + $1.comments.count }
-    }
-
-    private var reviewFileCount: Int {
-        reviewStores.values.filter { $0.hasUnsubmittedComments }.count
-    }
+    private var totalReviewCommentCount: Int { reviewController.totalReviewCommentCount }
+    private var reviewFileCount: Int { reviewController.reviewFileCount }
 
     private func browserController(for tabID: UUID) -> BrowserTabController? {
         if let existing = browserControllers[tabID] { return existing }
@@ -114,7 +104,18 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     init(window: NSWindow, windowSession: WindowSession, restoring: Bool = false) {
         self.windowSession = windowSession
         self.isRestoring = restoring
+        self.gitController = GitController(windowSession: windowSession)
+        self.reviewController = ReviewController(windowSession: windowSession)
         super.init(window: window)
+        gitController.onOpenDiff = { [weak self] source in self?.openDiffTab(source: source) }
+        reviewController.onDiffStateChanged = { [weak self] in self?.refreshHostingView() }
+        reviewController.onReviewChanged = { [weak self] in
+            self?.windowViewState.reviewCommentGeneration += 1
+            self?.updateViewState()
+        }
+        reviewController.sendToAgent = { [weak self] payload in
+            self?.sendReviewToAgent(payload) ?? .failed
+        }
         window.delegate = self
         window.center()
         setupShortcutManager()
@@ -295,7 +296,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             category: "Git",
             isAvailable: { [weak self] in (self?.reviewFileCount ?? 0) >= 2 }
         ) { [weak self] in
-            self?.submitAllDiffReviews()
+            self?.reviewController.submitAllDiffReviews()
         })
     }
 
@@ -376,11 +377,11 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             onGroupRenamed: { [weak self] in self?.requestSave() },
             onToggleSidebar: { [weak self] in self?.toggleSidebar() },
             onDismissCommandPalette: { [weak self] in self?.dismissCommandPalette() },
-            onWorkingFileSelected: { [weak self] entry in self?.handleWorkingFileSelected(entry) },
-            onCommitFileSelected: { [weak self] entry in self?.handleCommitFileSelected(entry) },
-            onRefreshGitStatus: { [weak self] in self?.refreshGitStatus() },
-            onLoadMoreCommits: { [weak self] in self?.loadMoreCommits() },
-            onExpandCommit: { [weak self] hash in self?.expandCommit(hash: hash) },
+            onWorkingFileSelected: { [weak self] entry in self?.gitController.handleWorkingFileSelected(entry) },
+            onCommitFileSelected: { [weak self] entry in self?.gitController.handleCommitFileSelected(entry) },
+            onRefreshGitStatus: { [weak self] in self?.gitController.refreshGitStatus() },
+            onLoadMoreCommits: { [weak self] in self?.gitController.loadMoreCommits() },
+            onExpandCommit: { [weak self] hash in self?.gitController.expandCommit(hash: hash) },
             onSidebarWidthChanged: { [weak self] width in self?.windowSession.sidebarWidth = width },
             onCollapseToggled: { [weak self] in self?.requestSave() },
             onCloseAllTabsInGroup: { [weak self] groupID in self?.closeAllTabsInGroup(id: groupID) },
@@ -394,17 +395,17 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             onSidebarDragCommitted: { [weak self] in self?.requestSave() },
             onSubmitReview: { [weak self] in
                 guard let self, let tab = self.activeTab else { return }
-                self.submitDiffReview(tabID: tab.id)
+                self.reviewController.submitDiffReview(tabID: tab.id)
             },
             onDiscardReview: { [weak self] in
                 guard let self, let tab = self.activeTab else { return }
-                self.reviewStores[tab.id]?.clearAll()
+                self.reviewController.reviewStores[tab.id]?.clearAll()
             },
             onSubmitAllReviews: { [weak self] in
-                self?.submitAllDiffReviews()
+                self?.reviewController.submitAllDiffReviews()
             },
             onDiscardAllReviews: { [weak self] in
-                self?.discardAllDiffReviews()
+                self?.reviewController.discardAllDiffReviews()
             },
             onComposeOverlaySend: { [weak self] text in self?.sendComposeText(text) ?? false },
             onDismissComposeOverlay: { [weak self] in self?.dismissComposeOverlay() }
@@ -604,7 +605,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         guard let tab = group.tabs.first(where: { $0.id == tabID }) else { return }
 
         // Check for unsent review comments
-        if let store = reviewStores[tabID], store.hasUnsubmittedComments {
+        if let store = reviewController.reviewStores[tabID], store.hasUnsubmittedComments {
             let alert = NSAlert()
             alert.messageText = "Unsent Review Comments"
             alert.informativeText = "This diff tab has \(store.comments.count) unsent review comment(s). Closing will discard them."
@@ -1403,10 +1404,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     private func cleanupTabResources(id tabID: UUID) {
         browserControllers.removeValue(forKey: tabID)
-        diffTasks[tabID]?.cancel()
-        diffTasks.removeValue(forKey: tabID)
-        diffStates.removeValue(forKey: tabID)
-        reviewStores.removeValue(forKey: tabID)
+        reviewController.cleanupTab(id: tabID)
     }
 
     private func belongsToThisWindow(_ view: NSView) -> Bool {
@@ -1500,15 +1498,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
 
         browserControllers.removeAll()
-
-        for (_, task) in diffTasks { task.cancel() }
-        diffTasks.removeAll()
-        diffStates.removeAll()
-        reviewStores.removeAll()
-        for (_, task) in expandTasks { task.cancel() }
-        expandTasks.removeAll()
-        refreshTask?.cancel()
-        loadMoreTask?.cancel()
+        reviewController.cancelAll()
+        gitController.cancelAll()
 
         if let appDelegate = NSApp.delegate as? AppDelegate {
             appDelegate.removeWindowController(self)
@@ -1520,128 +1511,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     // MARK: - Git Source Control
-
-    private func refreshGitStatus() {
-        refreshTask?.cancel()
-        refreshTask = Task { [weak self] in
-            guard let self else { return }
-
-            let workDir = self.findWorkDir()
-            guard let workDir else {
-                self.windowSession.git.changesState = .error("No working directory found")
-                return
-            }
-
-            self.windowSession.git.changesState = .loading
-
-            do {
-                let repoRoot = try await GitService.repoRoot(workDir: workDir)
-                guard !Task.isCancelled else { return }
-
-                self.windowSession.git.repoRoots[workDir] = repoRoot
-
-                async let statusResult = GitService.gitStatus(workDir: repoRoot)
-                async let logResult = GitService.commitLog(workDir: repoRoot, maxCount: 100, skip: 0)
-
-                let (entries, commits) = try await (statusResult, logResult)
-                guard !Task.isCancelled else { return }
-
-                self.windowSession.git.entries = entries
-                self.windowSession.git.commits = commits
-                self.hasMoreCommits = true
-                self.windowSession.git.expandedCommitIDs = []
-                self.windowSession.git.commitFiles = [:]
-                self.windowSession.git.changesState = .loaded
-            } catch let error as GitService.GitError {
-                guard !Task.isCancelled else { return }
-                if case .notARepository = error {
-                    self.windowSession.git.changesState = .notRepository
-                } else {
-                    self.windowSession.git.changesState = .error(error.localizedDescription)
-                }
-            } catch {
-                guard !Task.isCancelled else { return }
-                self.windowSession.git.changesState = .error(error.localizedDescription)
-            }
-        }
-    }
-
-    private func loadMoreCommits() {
-        guard hasMoreCommits else { return }
-        guard loadMoreTask == nil || loadMoreTask?.isCancelled == true else { return }
-        loadMoreTask = Task { [weak self] in
-            guard let self else { return }
-            let currentCount = self.windowSession.git.commits.count
-
-            guard let workDir = self.findWorkDir(),
-                  let repoRoot = self.windowSession.git.repoRoots[workDir] else { return }
-
-            do {
-                let moreCommits = try await GitService.commitLog(
-                    workDir: repoRoot, maxCount: 50, skip: currentCount
-                )
-                guard !Task.isCancelled else { return }
-                guard !moreCommits.isEmpty else {
-                    self.hasMoreCommits = false
-                    return
-                }
-
-                self.windowSession.git.commits.append(contentsOf: moreCommits)
-            } catch {
-                logger.warning("Failed to load more commits: \(error.localizedDescription)")
-            }
-            self.loadMoreTask = nil
-        }
-    }
-
-    private func expandCommit(hash: String) {
-        if windowSession.git.expandedCommitIDs.contains(hash) {
-            windowSession.git.expandedCommitIDs.remove(hash)
-            return
-        }
-
-        windowSession.git.expandedCommitIDs.insert(hash)
-
-        if windowSession.git.commitFiles[hash] != nil { return }
-
-        guard let workDir = findWorkDir(),
-              let repoRoot = windowSession.git.repoRoots[workDir] else { return }
-
-        expandTasks[hash] = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let files = try await GitService.commitFiles(hash: hash, workDir: repoRoot)
-                self.windowSession.git.commitFiles[hash] = files
-            } catch {
-                logger.warning("Failed to expand commit \(hash): \(error.localizedDescription)")
-            }
-            self.expandTasks.removeValue(forKey: hash)
-        }
-    }
-
-    private func handleWorkingFileSelected(_ entry: GitFileEntry) {
-        guard let workDir = findWorkDir(),
-              let repoRoot = windowSession.git.repoRoots[workDir] else { return }
-
-        let source: DiffSource
-        if entry.isStaged {
-            source = .staged(path: entry.path, workDir: repoRoot)
-        } else if entry.status == .untracked {
-            source = .untracked(path: entry.path, workDir: repoRoot)
-        } else {
-            source = .unstaged(path: entry.path, workDir: repoRoot)
-        }
-
-        openDiffTab(source: source)
-    }
-
-    private func handleCommitFileSelected(_ entry: CommitFileEntry) {
-        guard let workDir = findWorkDir(),
-              let repoRoot = windowSession.git.repoRoots[workDir] else { return }
-
-        let source: DiffSource = .commit(hash: entry.commitHash, path: entry.path, workDir: repoRoot)
-        openDiffTab(source: source)
-    }
 
     private func openDiffTab(source: DiffSource) {
         // Dedup: check if same source already open
@@ -1667,66 +1536,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         group.addTab(tab)
         group.activeTabID = tab.id
 
-        diffStates[tab.id] = .loading
-        let reviewStore = DiffReviewStore()
-        reviewStore.onCommentsChanged = { [weak self] in
-            self?.windowViewState.reviewCommentGeneration += 1
-            self?.updateViewState()
-        }
-        reviewStores[tab.id] = reviewStore
+        reviewController.loadDiff(tabID: tab.id, source: source)
         refreshHostingView()
-
-        let tabID = tab.id
-        diffTasks[tabID] = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let rawDiff = try await GitService.fileDiff(source: source)
-                guard !Task.isCancelled else { return }
-
-                let path: String
-                switch source {
-                case .unstaged(let p, _), .staged(let p, _), .commit(_, let p, _), .untracked(let p, _):
-                    path = p
-                }
-                let parsed = DiffParser.parse(rawDiff, path: path)
-                guard !Task.isCancelled else { return }
-
-                // Verify tab still exists
-                guard self.windowSession.groups.flatMap(\.tabs).contains(where: { $0.id == tabID }) else { return }
-
-                self.diffStates[tabID] = .success(parsed)
-                self.refreshHostingView()
-            } catch {
-                guard !Task.isCancelled else { return }
-                self.diffStates[tabID] = .error(error.localizedDescription)
-                self.refreshHostingView()
-            }
-        }
-    }
-
-    private func findWorkDir() -> String? {
-        // 1. Active terminal tab's pwd
-        if let tab = activeTab, case .terminal = tab.content, let pwd = tab.pwd {
-            return pwd
-        }
-        // 2. Any terminal tab in same group
-        if let group = windowSession.activeGroup {
-            for tab in group.tabs {
-                if case .terminal = tab.content, let pwd = tab.pwd {
-                    return pwd
-                }
-            }
-        }
-        // 3. Any terminal tab in any group
-        for group in windowSession.groups {
-            for tab in group.tabs {
-                if case .terminal = tab.content, let pwd = tab.pwd {
-                    return pwd
-                }
-            }
-        }
-        // 4. Fallback from cached repo roots
-        return windowSession.git.repoRoots.values.first
     }
 
     // MARK: - IPC
@@ -1849,63 +1660,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         switchToTab(id: targetTab.id)
 
         return .sent
-    }
-
-    private func submitDiffReview(tabID: UUID) {
-        guard let store = reviewStores[tabID], store.hasUnsubmittedComments else { return }
-
-        // Get file path from tab
-        guard let tab = windowSession.groups.flatMap(\.tabs).first(where: { $0.id == tabID }),
-              case .diff(let source) = tab.content else { return }
-        let filePath: String
-        switch source {
-        case .unstaged(let p, _), .staged(let p, _), .commit(_, let p, _), .untracked(let p, _):
-            filePath = p
-        }
-
-        let payload = store.formatForSubmission(filePath: filePath)
-        let result = sendReviewToAgent(payload)
-
-        if result == .sent {
-            store.clearAll()
-            refreshHostingView()
-        }
-    }
-
-    private func submitAllDiffReviews() {
-        // Collect all review stores with comments, paired with their DiffSource
-        let entries: [(source: DiffSource, store: DiffReviewStore)] = reviewStores.compactMap { tabID, store in
-            guard store.hasUnsubmittedComments else { return nil }
-            guard let tab = windowSession.groups.flatMap(\.tabs).first(where: { $0.id == tabID }),
-                  case .diff(let source) = tab.content else { return nil }
-            return (source: source, store: store)
-        }
-        guard !entries.isEmpty else { return }
-
-        let payload = DiffReviewStore.formatAllForSubmission(entries)
-        let result = sendReviewToAgent(payload)
-
-        if result == .sent {
-            for entry in entries { entry.store.clearAll() }
-            refreshHostingView()
-        }
-    }
-
-    private func discardAllDiffReviews() {
-        let storesWithComments = reviewStores.values.filter { $0.hasUnsubmittedComments }
-        guard !storesWithComments.isEmpty else { return }
-
-        let alert = NSAlert()
-        alert.messageText = "Discard All Review Comments"
-        alert.informativeText = "This will discard \(totalReviewCommentCount) comment(s) across \(reviewFileCount) file(s)."
-        alert.addButton(withTitle: "Discard All")
-        alert.addButton(withTitle: "Cancel")
-        alert.alertStyle = .warning
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return }
-
-        for store in storesWithComments { store.clearAll() }
-        refreshHostingView()
     }
 
     private func showIPCAlert(title: String, message: String) {

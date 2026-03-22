@@ -2,7 +2,7 @@
 
 10 high-impact, low-effort improvements. No large refactors.
 
-**Status**: #1–4, 6, 8, 9 done (commit `1ec1c9d`). Remaining: #5, 7, 10.
+**Status**: #1–4, 6, 8–10 done. #5 deferred (unimplemented handlers, not dead code). #7 deferred (needs SurfaceRegistry callbacks).
 
 ## 1. ✅ Extract tab cleanup method
 
@@ -86,7 +86,7 @@ enum SecurityUtils {
 
 **Visible effect**: Reduced duplication, consistent security behavior.
 
-## 5. Delete unused notification names
+## 5. ⚠️ Delete unused notification names (deferred — not dead code)
 
 **What**: Grep for observers of each notification name. Delete any that have zero observers:
 
@@ -100,6 +100,13 @@ grep -r "ghosttyCloseWindow" --include="*.swift" Calyx/
 **Why**: 28 notification names defined, but likely 10+ are unused. Reduces confusion for maintainer.
 
 **Visible effect**: Cleaner API surface; easier to understand which notifications matter.
+
+**Audit result**: 9 names (`ghosttyCloseTab`, `ghosttyCloseWindow`, `ghosttyToggleFullscreen`,
+`ghosttyRingBell`, `ghosttyShowChildExited`, `ghosttyRendererHealth`, `ghosttyColorChange`,
+`ghosttyInitialSize`, `ghosttySizeLimit`) have no observers — but they are posted from
+`GhosttyAction.swift` in response to real libghostty callbacks. Deleting them without adding
+observers would silently discard real user actions (Cmd+W from ghostty config, bell, etc.).
+These are **unimplemented handlers**, not dead code. Fix: add observers in CalyxWindowController.
 
 ## 6. ✅ Move performDebugSelect() behind #if DEBUG
 
@@ -128,7 +135,7 @@ if isUITesting, mods == [.control, .shift],
 
 **Visible effect**: Cleaner production code; smaller binary.
 
-## 7. Add reverse lookup to findTab
+## 7. ⚠️ Add reverse lookup to findTab (deferred — needs SurfaceRegistry callbacks)
 
 **What**: Add a dictionary for O(1) surface-to-tab lookup:
 
@@ -187,7 +194,7 @@ private var surfaceToTab: [ObjectIdentifier: (tab: Tab, group: TabGroup)] = [:]
 
 **Visible effect**: Easier debugging when git operations fail; visible in Console.app logs.
 
-## 10. Document nonisolated(unsafe) usage
+## 10. ✅ Document nonisolated(unsafe) usage
 
 **What**: Add a `CONCURRENCY.md` in `docs/` explaining:
 - Why 25 `nonisolated(unsafe)` instances exist
