@@ -2,7 +2,6 @@ import AppKit
 import SwiftUI
 import GhosttyKit
 import OSLog
-import Security
 
 private let logger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "com.legato3.terminal",
@@ -619,14 +618,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         closingTabIDs.insert(tabID)
 
-        // Clean up browser controller if present
-        browserControllers.removeValue(forKey: tabID)
-
-        // Clean up diff state
-        diffTasks[tabID]?.cancel()
-        diffTasks.removeValue(forKey: tabID)
-        diffStates.removeValue(forKey: tabID)
-        reviewStores.removeValue(forKey: tabID)
+        cleanupTabResources(id: tabID)
 
         // Destroy all surfaces in the tab
         for surfaceID in tab.registry.allIDs {
@@ -723,20 +715,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         // Mark all tabs as closing to prevent notification handler from double-deleting
         let tabIDs = group.tabs.map { $0.id }
-        // Clean up browser controllers for all tabs in this group
         for tabID in tabIDs {
-            browserControllers.removeValue(forKey: tabID)
-        }
-        // Clean up diff states for all tabs in this group
-        for tabID in tabIDs {
-            diffTasks[tabID]?.cancel()
-            diffTasks.removeValue(forKey: tabID)
-            diffStates.removeValue(forKey: tabID)
-        }
-        for tabID in tabIDs {
-            reviewStores.removeValue(forKey: tabID)
-        }
-        for tabID in tabIDs {
+            cleanupTabResources(id: tabID)
             closingTabIDs.insert(tabID)
         }
 
@@ -775,11 +755,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         let tabIDs = group.tabs.map { $0.id }
         for tabID in tabIDs {
-            browserControllers.removeValue(forKey: tabID)
-            diffTasks[tabID]?.cancel()
-            diffTasks.removeValue(forKey: tabID)
-            diffStates.removeValue(forKey: tabID)
-            reviewStores.removeValue(forKey: tabID)
+            cleanupTabResources(id: tabID)
             closingTabIDs.insert(tabID)
         }
 
@@ -874,6 +850,20 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @discardableResult
+    private func sendEnterKey(to controller: GhosttySurfaceController) {
+        var keyEvent = ghostty_input_key_s()
+        keyEvent.keycode = 0x24 // macOS keycode for Return/Enter
+        keyEvent.mods = GHOSTTY_MODS_NONE
+        keyEvent.consumed_mods = GHOSTTY_MODS_NONE
+        keyEvent.text = nil
+        keyEvent.unshifted_codepoint = 0
+        keyEvent.composing = false
+        keyEvent.action = GHOSTTY_ACTION_PRESS
+        controller.sendKey(keyEvent)
+        keyEvent.action = GHOSTTY_ACTION_RELEASE
+        controller.sendKey(keyEvent)
+    }
+
     private func sendComposeText(_ text: String) -> Bool {
         guard !text.isEmpty else { return false }
 
@@ -898,35 +888,17 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
         controller.sendText(text)
 
-        var keyEvent = ghostty_input_key_s()
-        keyEvent.keycode = 0x24
-        keyEvent.mods = GHOSTTY_MODS_NONE
-        keyEvent.consumed_mods = GHOSTTY_MODS_NONE
-        keyEvent.text = nil
-        keyEvent.unshifted_codepoint = 0
-        keyEvent.composing = false
-
         if isAgent {
-            // AI agent: same timing as sendReviewToAgent (confirm paste + submit)
+            // AI agent: confirm paste then submit, with timing delays
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                keyEvent.action = GHOSTTY_ACTION_PRESS
-                controller.sendKey(keyEvent)
-                keyEvent.action = GHOSTTY_ACTION_RELEASE
-                controller.sendKey(keyEvent)
-
+                self.sendEnterKey(to: controller)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    keyEvent.action = GHOSTTY_ACTION_PRESS
-                    controller.sendKey(keyEvent)
-                    keyEvent.action = GHOSTTY_ACTION_RELEASE
-                    controller.sendKey(keyEvent)
+                    self.sendEnterKey(to: controller)
                 }
             }
         } else {
             // Regular terminal: single Enter, immediate
-            keyEvent.action = GHOSTTY_ACTION_PRESS
-            controller.sendKey(keyEvent)
-            keyEvent.action = GHOSTTY_ACTION_RELEASE
-            controller.sendKey(keyEvent)
+            sendEnterKey(to: controller)
         }
         return true
     }
@@ -1319,9 +1291,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc func closeTab(_ sender: Any?) {
-        guard let tab = activeTab, let group = windowSession.activeGroup else { return }
+        guard let tab = activeTab else { return }
         closeTab(id: tab.id)
-        _ = group // silence warning
     }
 
     @objc func newBrowserTab(_ sender: Any?) {
@@ -1429,6 +1400,14 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     // MARK: - Helpers
+
+    private func cleanupTabResources(id tabID: UUID) {
+        browserControllers.removeValue(forKey: tabID)
+        diffTasks[tabID]?.cancel()
+        diffTasks.removeValue(forKey: tabID)
+        diffStates.removeValue(forKey: tabID)
+        reviewStores.removeValue(forKey: tabID)
+    }
 
     private func belongsToThisWindow(_ view: NSView) -> Bool {
         view.window === self.window
@@ -1609,7 +1588,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
                 self.windowSession.git.commits.append(contentsOf: moreCommits)
             } catch {
-                // Silently ignore load-more errors
+                logger.warning("Failed to load more commits: \(error.localizedDescription)")
             }
             self.loadMoreTask = nil
         }
@@ -1634,7 +1613,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 let files = try await GitService.commitFiles(hash: hash, workDir: repoRoot)
                 self.windowSession.git.commitFiles[hash] = files
             } catch {
-                // Silently ignore
+                logger.warning("Failed to expand commit \(hash): \(error.localizedDescription)")
             }
             self.expandTasks.removeValue(forKey: hash)
         }
@@ -1754,14 +1733,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     private func enableIPC() {
         do {
-            // Generate token: 32 random bytes as hex
-            var bytes = [UInt8](repeating: 0, count: 32)
-            let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-            guard status == errSecSuccess else {
-                showIPCAlert(title: "IPC Error", message: "Failed to generate secure token.")
-                return
-            }
-            let token = bytes.map { String(format: "%02x", $0) }.joined()
+            let token = SecurityUtils.generateHexToken()
 
             // Start server first to get the port
             try CalyxMCPServer.shared.start(token: token)
@@ -1865,28 +1837,11 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
 
         controller.sendText(payload)
-        // Send Enter twice as key events: first to confirm paste, second to submit
+        // Send Enter twice: first to confirm paste, second to submit
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            var keyEvent = ghostty_input_key_s()
-            keyEvent.keycode = 0x24 // macOS keycode for Return/Enter
-            keyEvent.mods = GHOSTTY_MODS_NONE
-            keyEvent.consumed_mods = GHOSTTY_MODS_NONE
-            keyEvent.text = nil
-            keyEvent.unshifted_codepoint = 0
-            keyEvent.composing = false
-
-            // First Enter
-            keyEvent.action = GHOSTTY_ACTION_PRESS
-            controller.sendKey(keyEvent)
-            keyEvent.action = GHOSTTY_ACTION_RELEASE
-            controller.sendKey(keyEvent)
-
-            // Second Enter
+            self.sendEnterKey(to: controller)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                keyEvent.action = GHOSTTY_ACTION_PRESS
-                controller.sendKey(keyEvent)
-                keyEvent.action = GHOSTTY_ACTION_RELEASE
-                controller.sendKey(keyEvent)
+                self.sendEnterKey(to: controller)
             }
         }
 

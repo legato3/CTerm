@@ -568,12 +568,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard UserDefaults.standard.bool(forKey: "calyx.ipcAutoStart") else { return }
         guard !CalyxMCPServer.shared.isRunning else { return }
 
-        var bytes = [UInt8](repeating: 0, count: 32)
-        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
-            logger.error("IPC auto-start: failed to generate token")
-            return
-        }
-        let token = bytes.map { String(format: "%02x", $0) }.joined()
+        let token = SecurityUtils.generateHexToken()
 
         do {
             try CalyxMCPServer.shared.start(token: token)
@@ -662,6 +657,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
+#if DEBUG
             // Debug Select: Ctrl+Shift+D — only in UI testing mode.
             // Reads selection parameters from the pasteboard and simulates a mouse drag
             // via ghostty FFI to create a terminal selection.
@@ -671,6 +667,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.performDebugSelect()
                 return nil
             }
+#endif
 
             return event
         }
@@ -678,6 +675,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - UI Testing Support
 
+#if DEBUG
     /// Simulates a mouse drag on the focused terminal surface to create a text selection.
     /// Reads selection parameters (fromCol, toCol, row) from the general pasteboard as JSON.
     /// Only available when launched with --uitesting flag.
@@ -806,6 +804,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         debugLog("Debug select complete")
     }
+#endif
 
     @objc private func showAboutPanel() {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""

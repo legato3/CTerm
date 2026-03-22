@@ -21,7 +21,7 @@ final class BrowserServer {
 
     func start(preferredPort: Int = 41840) {
         if isRunning { return }
-        token = Self.generateToken()
+        token = SecurityUtils.generateHexToken()
 
         for offset in 0..<10 {
             let tryPort = preferredPort + offset
@@ -72,14 +72,6 @@ final class BrowserServer {
             try? data.write(to: stateFile)
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: stateFile.path)
         }
-    }
-
-    // MARK: - Token Generation
-
-    private static func generateToken() -> String {
-        var bytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
     private func removeStateFile() {
