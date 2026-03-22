@@ -205,6 +205,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
             UserDefaults.standard.set(lastLoadedPreset, forKey: "themeColorPreset")
             UserDefaults.standard.set(lastLoadedCustomHex, forKey: "themeColorCustomHex")
             loadPresetIntoUI()
+            GhosttyAppController.shared.reloadConfig()
             return true
         default:
             // Do not revert UserDefaults here (unlike windowShouldClose Cancel).
@@ -300,6 +301,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
             UserDefaults.standard.set("custom", forKey: "themeColorPreset")
         }
         fieldDidChange(sender)
+        GhosttyAppController.shared.reloadConfig()
     }
 
     @objc private func colorWellDidChange(_ sender: Any?) {
@@ -312,6 +314,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // Update popup to show "Custom"
         presetPopup.selectItem(at: presetPopup.numberOfItems - 1)
         fieldDidChange(sender)
+        GhosttyAppController.shared.reloadConfig()
     }
 
     @objc private func hexFieldDidCommit(_ sender: Any?) {
@@ -324,6 +327,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
             UserDefaults.standard.set(normalized, forKey: "themeColorCustomHex")
             UserDefaults.standard.set("custom", forKey: "themeColorPreset")
             presetPopup.selectItem(at: presetPopup.numberOfItems - 1)
+            GhosttyAppController.shared.reloadConfig()
         } else {
             // Invalid hex - show red text, do NOT write to UserDefaults
             hexField.textColor = .systemRed
@@ -443,6 +447,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
             UserDefaults.standard.set(lastLoadedPreset, forKey: "themeColorPreset")
             UserDefaults.standard.set(lastLoadedCustomHex, forKey: "themeColorCustomHex")
             loadPresetIntoUI()
+            GhosttyAppController.shared.reloadConfig()
             return true
         default:
             UserDefaults.standard.set(lastLoadedOpacity, forKey: "terminalGlassOpacity")
@@ -450,6 +455,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
             UserDefaults.standard.set(lastLoadedPreset, forKey: "themeColorPreset")
             UserDefaults.standard.set(lastLoadedCustomHex, forKey: "themeColorCustomHex")
             loadPresetIntoUI()
+            GhosttyAppController.shared.reloadConfig()
             return false
         }
     }

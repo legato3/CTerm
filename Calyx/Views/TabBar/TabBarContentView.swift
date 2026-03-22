@@ -314,6 +314,11 @@ private struct TabBarBackgroundModifier: ViewModifier {
         )
     }
 
+    private var chromeScheme: ColorScheme {
+        let tint = GlassTheme.chromeTint(for: themeColor, glassOpacity: glassOpacity)
+        return ColorLuminance.prefersDarkText(for: tint) ? .light : .dark
+    }
+
     func body(content: Content) -> some View {
         if reduceTransparency {
             content.background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea(.all, edges: .top))
@@ -336,6 +341,7 @@ private struct TabBarBackgroundModifier: ViewModifier {
                         )
                         .frame(height: 18)
                 }
+                .environment(\.colorScheme, chromeScheme)
         }
     }
 }

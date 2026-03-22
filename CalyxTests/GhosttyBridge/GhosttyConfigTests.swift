@@ -180,6 +180,7 @@ struct GhosttyConfigTests {
             "background-blur",
             "background-opacity-cells",
             "font-codepoint-map",
+            "foreground",
         ]
         let managed = GhosttyConfigManager.managedKeys
         for key in expectedKeys {
@@ -234,5 +235,63 @@ struct GhosttyConfigTests {
             #expect(managed.contains(key),
                     "managedKeys should contain runtime override key '\(key)'")
         }
+    }
+}
+
+// MARK: - foregroundOverrideLine Tests
+
+@MainActor
+@Suite("GhosttyConfigManager.foregroundOverrideLine Tests")
+struct GhosttyConfigForegroundOverrideTests {
+
+    @Test("Dark preset returns foreground = #FFFFFF")
+    func darkPresetReturnsWhiteForeground() {
+        let result = GhosttyConfigManager.foregroundOverrideLine(
+            preset: "original",
+            customHex: "#000000",
+            glassOpacity: 0.7
+        )
+        #expect(result == "foreground = #FFFFFF",
+                "Dark preset 'original' at default opacity should return white foreground")
+    }
+
+    @Test("Light custom color returns foreground = #000000")
+    func lightCustomReturnsBlackForeground() {
+        let result = GhosttyConfigManager.foregroundOverrideLine(
+            preset: "custom",
+            customHex: "#F0F0F0",
+            glassOpacity: 0.7
+        )
+        #expect(result == "foreground = #000000",
+                "Light custom #F0F0F0 at default opacity should return black foreground")
+    }
+
+    @Test("Ghostty preset returns nil (no override)")
+    func ghosttyPresetReturnsNil() {
+        let result = GhosttyConfigManager.foregroundOverrideLine(
+            preset: "ghostty",
+            customHex: "#AABBCC",
+            glassOpacity: 0.5
+        )
+        #expect(result == nil,
+                "Ghostty preset should return nil (foreground managed by user's ghostty config)")
+    }
+
+    @Test("Opacity affects foreground decision for light color")
+    func opacityAffectsForegroundDecision() {
+        // At opacity 0.0, the effective tint is nearly transparent over a dark base,
+        // so the result should differ from opacity 1.0 where the color is fully opaque.
+        let resultAtZero = GhosttyConfigManager.foregroundOverrideLine(
+            preset: "custom",
+            customHex: "#F0F0F0",
+            glassOpacity: 0.0
+        )
+        let resultAtOne = GhosttyConfigManager.foregroundOverrideLine(
+            preset: "custom",
+            customHex: "#F0F0F0",
+            glassOpacity: 1.0
+        )
+        #expect(resultAtZero != resultAtOne,
+                "Opacity 0.0 vs 1.0 should produce different foreground decisions for #F0F0F0")
     }
 }
