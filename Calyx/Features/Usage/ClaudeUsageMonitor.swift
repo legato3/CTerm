@@ -83,13 +83,13 @@ final class ClaudeUsageMonitor {
     // MARK: - Lifecycle
 
     func start() {
-        reload()
-        watchProjectsDir()
+        if !isLoaded { reload() }
+        if watchSource == nil { watchProjectsDir() }
     }
 
     func reload() {
         Task.detached(priority: .utility) {
-            let result = await Self.compute()
+            let result = Self.computeSync()
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.recentDays = result.days
@@ -118,11 +118,12 @@ final class ClaudeUsageMonitor {
         watchSource = src
     }
 
-    // MARK: - Parsing (off main actor)
+    // MARK: - Parsing (nonisolated — runs off the main actor in a detached task)
 
-    private static let claudeDir = NSHomeDirectory() + "/.claude"
-    private static let projectsDir = claudeDir + "/projects"
-    private static let statsCachePath = claudeDir + "/stats-cache.json"
+    // nonisolated(unsafe): read-only after init, safe for concurrent reads
+    nonisolated(unsafe) private static let claudeDir = NSHomeDirectory() + "/.claude"
+    nonisolated(unsafe) private static let projectsDir = claudeDir + "/projects"
+    nonisolated(unsafe) private static let statsCachePath = claudeDir + "/stats-cache.json"
 
     private struct ComputeResult: Sendable {
         var days: [DayActivity]
@@ -132,7 +133,8 @@ final class ClaudeUsageMonitor {
         var firstDate: Date?
     }
 
-    private static func compute() async -> ComputeResult {
+    /// Synchronous compute — call only from a detached task, never on the main thread.
+    private nonisolated static func computeSync() -> ComputeResult {
         var dayMap: [String: DayActivity] = [:]
         var modelMap: [String: ModelActivity] = [:]
         var totalSessions = 0
@@ -148,7 +150,7 @@ final class ClaudeUsageMonitor {
 
         // Scan JSONL files modified in the last 30 days for per-day/model detail
         let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-        let paths = collectJSONLFiles(newerThan: cutoff)
+        let paths = Self.collectJSONLFiles(newerThan: cutoff)
 
         for path in paths {
             parseJSONL(at: path, dayMap: &dayMap, modelMap: &modelMap)
@@ -174,7 +176,7 @@ final class ClaudeUsageMonitor {
         var firstDate: Date?
     }
 
-    private static func readStatsCache() -> CacheSummary? {
+    private nonisolated static func readStatsCache() -> CacheSummary? {
         guard let data = FileManager.default.contents(atPath: statsCachePath),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
@@ -191,7 +193,7 @@ final class ClaudeUsageMonitor {
 
     // MARK: - File Collection
 
-    private static func collectJSONLFiles(newerThan cutoff: Date) -> [String] {
+    private nonisolated static func collectJSONLFiles(newerThan cutoff: Date) -> [String] {
         let fm = FileManager.default
         guard let projects = try? fm.contentsOfDirectory(atPath: projectsDir) else { return [] }
         var paths: [String] = []
@@ -212,7 +214,7 @@ final class ClaudeUsageMonitor {
 
     // MARK: - JSONL Parsing
 
-    private static func parseJSONL(
+    private nonisolated static func parseJSONL(
         at path: String,
         dayMap: inout [String: DayActivity],
         modelMap: inout [String: ModelActivity]
@@ -278,24 +280,25 @@ final class ClaudeUsageMonitor {
 
     // MARK: - Helpers
 
-    static let iso8601: ISO8601DateFormatter = {
+    // nonisolated(unsafe): formatters are read-only after init, safe for concurrent reads
+    nonisolated(unsafe) static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
 
-    private static let dayFormatter: DateFormatter = {
+    nonisolated(unsafe) private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = .current
         return f
     }()
 
-    static func isoDay(_ date: Date) -> String {
+    nonisolated static func isoDay(_ date: Date) -> String {
         dayFormatter.string(from: date)
     }
 
-    static func formatTokens(_ n: Int) -> String {
+    nonisolated static func formatTokens(_ n: Int) -> String {
         if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
         if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
         return "\(n)"

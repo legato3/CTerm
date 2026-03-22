@@ -7,7 +7,7 @@ import SwiftUI
 import Charts
 
 struct ClaudeUsageView: View {
-    @State private var monitor = ClaudeUsageMonitor.shared
+    private var monitor: ClaudeUsageMonitor { ClaudeUsageMonitor.shared }
 
     var body: some View {
         ScrollView {
