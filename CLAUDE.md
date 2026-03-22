@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Audit
+
+A full codebase audit lives in `docs/audit/`. Read it before major changes. Key docs:
+- `docs/audit/02-architecture.md` — structural risks, the CalyxWindowController god class problem
+- `docs/audit/07-fragility-map.md` — what breaks easily and why
+- `docs/audit/10-refactor-plan.md` — incremental decomposition plan
+
 ## What This Is
 
 Calyx is a macOS 26+ native terminal application built on [libghostty](https://github.com/ghostty-org/ghostty). It wraps the Ghostty terminal engine (via xcframework) with a native Liquid Glass UI, adding tabs, splits, sidebar, browser tabs, IPC, and other features on top.
@@ -74,8 +81,16 @@ AppDelegate
 
 - **`@MainActor` everywhere** — all UI and model code is `@MainActor`. Never dispatch UI work off the main actor.
 - **All ghostty C API calls go through `GhosttyFFI`** (`Calyx/GhosttyBridge/GhosttyFFI.swift`). This is a thin enum of static wrapper methods — no business logic there.
-- **Action dispatch via `NotificationCenter`** — inter-component communication uses named notifications rather than direct calls.
+- **Action dispatch via `NotificationCenter`** — inter-component communication uses 28 named notifications with untyped `userInfo` dictionaries. These are a known fragility point (see `docs/audit/07-fragility-map.md`).
 - **`GhosttyAppController.shared`** is the singleton that owns `ghostty_app_t`, manages config reload, and handles C callbacks from libghostty.
+- **No force unwraps, force casts, or `try!` in production code.** Keep it that way.
+- **`nonisolated(unsafe)`** is used in ~25 places for C interop and read-only-after-init patterns. Each use is intentional — don't add new ones without justification.
+
+### Known architectural issues
+
+- **`CalyxWindowController` is 1,965 lines** — it is a god class handling tabs, splits, git, diffs, IPC, browser, reviews, focus, and session snapshots. See `docs/audit/10-refactor-plan.md` for the decomposition plan. Avoid adding more responsibilities here.
+- **`MainContentView` takes 22+ callback closures** — a symptom of the god controller. Planned migration to `@Environment` actions.
+- **10 singletons** with `static let shared` — no dependency injection. Test backdoors use `#if DEBUG`.
 
 ### Directory structure
 
@@ -100,11 +115,11 @@ AppDelegate
 
 ### IPC / MCP server
 
-`CalyxMCPServer` implements a local MCP server enabling Claude Code and Codex CLI instances in different terminal panes to communicate. `IPCConfigManager` writes the MCP config to `~/.claude.json` and `~/.codex/config.toml`.
+`CalyxMCPServer` implements a local MCP server (port 41830-41839) enabling Claude Code and Codex CLI instances in different terminal panes to communicate. `IPCConfigManager` writes the MCP config to `~/.claude.json` and `~/.codex/config.toml`. Backed by `IPCStore` actor with TTL-based peer/message expiration. See `docs/audit/04-networking.md`.
 
 ### Browser scripting
 
-`BrowserServer` runs on `localhost:41840`. `BrowserTabBroker` coordinates between `BrowserTabController` instances and the CLI. The `calyx browser` subcommand (in `CalyxCLI/BrowserCommands.swift`) communicates with this server.
+`BrowserServer` runs on `localhost:41840-41849`. `BrowserTabBroker` coordinates between `BrowserTabController` instances and the CLI. The `calyx browser` subcommand (in `CalyxCLI/BrowserCommands.swift`) communicates with this server. Both servers use a hand-rolled `HTTPParser` and bearer token auth. See `docs/audit/04-networking.md`.
 
 ## Project configuration
 
@@ -114,3 +129,7 @@ AppDelegate
 - **CalyxTests** / **CalyxUITests** — test bundles
 
 The `Calyx-Bridging-Header.h` (listed as a `fileGroup`) bridges GhosttyKit C headers into Swift.
+
+## Session persistence
+
+`SessionPersistenceActor` (Swift actor) saves/restores to `~/.calyx/sessions.json` with atomic temp+rename writes, backup rotation, and crash-loop detection (max 3 recovery attempts). Debounced saves trigger on every meaningful state change via `requestSave()`. Diff tabs are excluded from persistence by design.
