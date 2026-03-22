@@ -30,7 +30,7 @@ Low. Pure extraction, no behavior change. All 4 call sites have identical cleanu
 ### Verification
 Run `CalyxTests` -- all existing tests should pass unchanged.
 
-## Step 2: ✅ Extract GitController (done — commit TBD)
+## Step 2: ✅ Extract GitController (done — commit `7a4a246`)
 
 ### What
 Create `GitController` class with:
@@ -69,7 +69,7 @@ final class GitController {
 ### Risk
 Low-medium. Clean boundary -- git operations don't touch tab/split state directly. The only coupling is `findWorkDir()` needing access to tabs (pass as parameter or give GitController a reference to WindowSession).
 
-## Step 3: ✅ Extract ReviewController (done — commit TBD)
+## Step 3: ✅ Extract ReviewController (done — commit `7a4a246`)
 
 ### What
 Create `ReviewController` class managing diff review lifecycle:
