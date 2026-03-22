@@ -457,9 +457,12 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         refreshHostingView()
         switch tab.content {
         case .terminal:
-            tab.registry.resumeAll()
             rebuildSplitContainer()
             updateTerminalLayout()
+            // setOcclusion(false) must run AFTER view hierarchy is stable; calling it before
+            // rebuildSplitContainer would let the removeFromSuperview pass effectively re-occlude
+            // the surface (Metal context reset) before ghostty could act on the unocclude signal.
+            tab.registry.resumeAll()
             focusManager.focusImmediately(window: window, tab: activeTab)  // best-effort synchronous focus
             focusManager.restoreFocus(window: window, tab: activeTab, splitContainerView: splitContainerView)  // async safety net (handles post-layout focus loss)
         case .browser:
@@ -1380,6 +1383,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         } else if case .diff = activeTab?.content {
             // No special focus needed for diff tabs
         } else {
+            // Unocclude all active tab surfaces in case windowDidChangeOcclusionState fired
+            // with occluded=true during window setup before the surfaces were fully presented.
+            activeTab?.registry.resumeAll()
             focusedController?.setFocus(true)
             focusManager.restoreFocus(window: window, tab: activeTab, splitContainerView: splitContainerView)
         }

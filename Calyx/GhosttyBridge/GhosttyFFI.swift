@@ -250,8 +250,9 @@ enum GhosttyFFI {
     }
 
     /// Set whether the surface is occluded (not visible).
+    /// NOTE: ghostty_surface_set_occlusion takes `visible: bool`, so we invert here.
     static func surfaceSetOcclusion(_ surface: ghostty_surface_t, occluded: Bool) {
-        ghostty_surface_set_occlusion(surface, occluded)
+        ghostty_surface_set_occlusion(surface, !occluded)
     }
 
     /// Set the color scheme for a surface.
