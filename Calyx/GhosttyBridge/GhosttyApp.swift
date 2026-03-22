@@ -329,12 +329,21 @@ final class GhosttyAppController {
 /// These are file-level functions with @convention(c) calling convention
 /// that can be used as ghostty runtime callbacks.
 
+/// Coalescing flag for the wakeup callback. ghostty_app_tick drains all pending
+/// events in one call, so a single queued tick is sufficient regardless of how
+/// many wakeup signals arrived. This prevents main-queue flooding during high-
+/// throughput terminal output (e.g. `cat` on a large file).
+private nonisolated(unsafe) var ghosttyTickPending: Bool = false
+
 /// Wakeup callback - dispatches to main queue to call tick().
 /// This is called from an arbitrary thread.
 private func ghosttyWakeupCallback(_ userdata: UnsafeMutableRawPointer?) {
     guard let userdata else { return }
+    guard !ghosttyTickPending else { return }
+    ghosttyTickPending = true
     nonisolated(unsafe) let ud = userdata
     DispatchQueue.main.async {
+        ghosttyTickPending = false
         let controller = GhosttyAppController.appController(from: ud)
         controller.tick()
     }

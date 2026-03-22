@@ -130,11 +130,13 @@ final class SurfaceRegistry {
         for id in allIDs {
             entries[id]?.controller.setFocus(false)
             entries[id]?.view.resetFocusState()
+            entries[id]?.controller.setOcclusion(true)
         }
     }
 
     func resumeAll() {
         for id in allIDs {
+            entries[id]?.controller.setOcclusion(false)
             entries[id]?.controller.refresh()
             entries[id]?.view.needsDisplay = true
         }

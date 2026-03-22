@@ -1387,6 +1387,14 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         return true
     }
 
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        guard let window = self.window, let tab = activeTab else { return }
+        let occluded = !window.occlusionState.contains(.visible)
+        for id in tab.registry.allIDs {
+            tab.registry.controller(for: id)?.setOcclusion(occluded)
+        }
+    }
+
     func windowDidChangeBackingProperties(_ notification: Notification) {
         guard let window = self.window, let tab = activeTab else { return }
         let scale = window.backingScaleFactor
