@@ -3,7 +3,7 @@
 Goals: Improve consistency, reduce bugs, prepare for future features.
 Constraints: No full rewrite. Incremental changes only. Each step is independently mergeable.
 
-## Step 1: Extract TabCleanupHelper (Day 1)
+## Step 1: ✅ Extract TabCleanupHelper (done — commit `1ec1c9d`)
 
 ### What
 Create a method `cleanupTabResources(id:)` on `CalyxWindowController`:

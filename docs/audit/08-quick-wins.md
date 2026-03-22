@@ -2,7 +2,9 @@
 
 10 high-impact, low-effort improvements. No large refactors.
 
-## 1. Extract tab cleanup method
+**Status**: #1–4, 6, 8, 9 done (commit `1ec1c9d`). Remaining: #5, 7, 10.
+
+## 1. ✅ Extract tab cleanup method
 
 **What**: Create `cleanupTabResources(id:)` on `CalyxWindowController` that consolidates the repeated pattern:
 
@@ -22,7 +24,7 @@ Call from `closeTab`, `closeActiveGroup`, `closeAllTabsInGroup`, `windowWillClos
 
 **Visible effect**: Fewer edge cases in tab closing; single point of change for future tab resource types.
 
-## 2. Fix BrowserServer.generateToken()
+## 2. ✅ Fix BrowserServer.generateToken()
 
 **What**: Check `SecRandomCopyBytes` return value:
 
@@ -40,7 +42,7 @@ private static func generateToken() -> String {
 
 **Visible effect**: Eliminates theoretical auth bypass in browser automation.
 
-## 3. Extract sendKeyEvent helper
+## 3. ✅ Extract sendKeyEvent helper
 
 **What**: Create a helper for the duplicated Enter-key event pattern:
 
@@ -64,7 +66,7 @@ private func sendEnterKey(to controller: GhosttySurfaceController) {
 
 **Visible effect**: Consistent compose/review behavior; single point of change for key event timing.
 
-## 4. Extract generateHexToken() utility
+## 4. ✅ Extract generateHexToken() utility
 
 **What**: Move token generation to a shared utility:
 
@@ -99,7 +101,7 @@ grep -r "ghosttyCloseWindow" --include="*.swift" Calyx/
 
 **Visible effect**: Cleaner API surface; easier to understand which notifications matter.
 
-## 6. Move performDebugSelect() behind #if DEBUG
+## 6. ✅ Move performDebugSelect() behind #if DEBUG
 
 **What**: Wrap the 125-line `performDebugSelect()` method and its `debugLog()` helper in `AppDelegate.swift`:
 
@@ -142,7 +144,7 @@ private var surfaceToTab: [ObjectIdentifier: (tab: Tab, group: TabGroup)] = [:]
 
 **Visible effect**: Faster notification handling with many tabs; eliminates cumulative UI lag.
 
-## 8. Remove dead binding
+## 8. ✅ Remove dead binding
 
 **What**: Delete line 1324 in `CalyxWindowController.swift`:
 
@@ -165,7 +167,7 @@ private var surfaceToTab: [ObjectIdentifier: (tab: Tab, group: TabGroup)] = [:]
 
 **Visible effect**: Cleaner code.
 
-## 9. Add logging to silent catch blocks
+## 9. ✅ Add logging to silent catch blocks
 
 **What**: Replace silent error swallowing with logged warnings:
 
