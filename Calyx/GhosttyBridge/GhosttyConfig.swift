@@ -28,7 +28,24 @@ final class GhosttyConfigManager {
         "background-blur",
         "background-opacity-cells",
         "font-codepoint-map",
+        "foreground",
     ]
+
+    /// Returns the foreground override line for the runtime config, or nil for Ghostty preset.
+    /// Non-Ghostty presets always get an explicit foreground (white or black) based on
+    /// the effective chrome tint luminance, so user's Ghostty foreground is fully managed.
+    /// Ghostty preset returns nil so the user's own foreground config applies.
+    static func foregroundOverrideLine(
+        preset: String,
+        customHex: String,
+        glassOpacity: Double
+    ) -> String? {
+        guard preset != "ghostty" else { return nil }
+        let bg = ThemeColorPreset.resolve(preset: preset, customHex: customHex)
+        let tint = ColorLuminance.effectiveChromeTint(themeColor: bg, glassOpacity: glassOpacity)
+        let hex = ColorLuminance.prefersDarkText(for: tint) ? "#000000" : "#FFFFFF"
+        return "foreground = \(hex)"
+    }
 
     private static var calyxConfigDir: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -178,7 +195,16 @@ final class GhosttyConfigManager {
             # --- End Calyx Runtime Override ---
             """
 
-            try (text + "\n").write(to: calyxRuntimeOverrideURL, atomically: true, encoding: .utf8)
+            var finalText = text
+            if let fgLine = foregroundOverrideLine(
+                preset: UserDefaults.standard.string(forKey: "themeColorPreset") ?? "original",
+                customHex: UserDefaults.standard.string(forKey: "themeColorCustomHex") ?? ThemeColorPreset.defaultCustomHex,
+                glassOpacity: clampedOpacity
+            ) {
+                finalText += "\n\(fgLine)"
+            }
+
+            try (finalText + "\n").write(to: calyxRuntimeOverrideURL, atomically: true, encoding: .utf8)
             GhosttyFFI.configLoadFile(cfg, path: calyxRuntimeOverrideURL.path)
         } catch {
             logger.warning("Failed to apply runtime overrides: \(error.localizedDescription, privacy: .public)")
