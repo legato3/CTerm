@@ -6,7 +6,7 @@
 import Foundation
 import os
 
-private let logger = Logger(subsystem: "com.calyx.terminal", category: "SessionPersistence")
+private let logger = Logger(subsystem: "com.legato3.terminal", category: "SessionPersistence")
 
 actor SessionPersistenceActor {
 

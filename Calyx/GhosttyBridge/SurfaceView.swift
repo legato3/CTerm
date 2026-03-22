@@ -9,7 +9,7 @@ import GhosttyKit
 @preconcurrency import QuartzCore
 import os
 
-private let logger = Logger(subsystem: "com.calyx.terminal", category: "SurfaceView")
+private let logger = Logger(subsystem: "com.legato3.terminal", category: "SurfaceView")
 
 
 // MARK: - SurfaceView

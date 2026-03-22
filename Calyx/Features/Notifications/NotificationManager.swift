@@ -7,7 +7,7 @@ import AppKit
 import UserNotifications
 import os
 
-private let logger = Logger(subsystem: "com.calyx.terminal", category: "NotificationManager")
+private let logger = Logger(subsystem: "com.legato3.terminal", category: "NotificationManager")
 
 @MainActor
 class NotificationManager {

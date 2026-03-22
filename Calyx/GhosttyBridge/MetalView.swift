@@ -6,7 +6,7 @@
 @preconcurrency import QuartzCore
 import os
 
-private let logger = Logger(subsystem: "com.calyx.terminal", category: "MetalView")
+private let logger = Logger(subsystem: "com.legato3.terminal", category: "MetalView")
 
 // MARK: - GhosttyMetalLayer
 

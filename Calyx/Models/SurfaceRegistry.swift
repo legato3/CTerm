@@ -7,7 +7,7 @@ import AppKit
 import GhosttyKit
 import os
 
-private let logger = Logger(subsystem: "com.calyx.terminal", category: "SurfaceRegistry")
+private let logger = Logger(subsystem: "com.legato3.terminal", category: "SurfaceRegistry")
 
 @MainActor
 final class SurfaceRegistry {

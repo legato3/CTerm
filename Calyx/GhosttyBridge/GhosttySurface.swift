@@ -7,7 +7,7 @@
 import GhosttyKit
 import os
 
-private let logger = Logger(subsystem: "com.calyx.terminal", category: "GhosttySurface")
+private let logger = Logger(subsystem: "com.legato3.terminal", category: "GhosttySurface")
 
 // MARK: - SearchQuerySender Protocol
 

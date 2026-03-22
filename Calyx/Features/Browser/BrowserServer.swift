@@ -11,6 +11,7 @@ final class BrowserServer {
 
     private(set) var isRunning = false
     private(set) var port: Int = 0
+    private(set) var token: String = ""
     private var listener: NWListener?
     var toolHandler: BrowserToolHandler?
 
@@ -20,6 +21,7 @@ final class BrowserServer {
 
     func start(preferredPort: Int = 41840) {
         if isRunning { return }
+        token = Self.generateToken()
 
         for offset in 0..<10 {
             let tryPort = preferredPort + offset
@@ -37,7 +39,7 @@ final class BrowserServer {
                 self.listener = nl
                 self.port = tryPort
                 self.isRunning = true
-                writeStateFile()
+                writeStateFile(token: self.token)
                 return
             } catch {
                 continue
@@ -51,23 +53,33 @@ final class BrowserServer {
         listener = nil
         isRunning = false
         port = 0
+        token = ""
     }
 
     // MARK: - State File
 
-    private func writeStateFile() {
+    private func writeStateFile(token: String) {
         let configDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/calyx")
         try? FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
         let stateFile = configDir.appendingPathComponent("browser.json")
         let state: [String: Any] = [
             "port": port,
+            "token": token,
             "pid": ProcessInfo.processInfo.processIdentifier,
         ]
         if let data = try? JSONSerialization.data(withJSONObject: state, options: .prettyPrinted) {
             try? data.write(to: stateFile)
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: stateFile.path)
         }
+    }
+
+    // MARK: - Token Generation
+
+    private static func generateToken() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
     private func removeStateFile() {
@@ -88,6 +100,11 @@ final class BrowserServer {
                     let request = try HTTPParser.parse(data)
                     guard request.method == "POST", request.path == "/browser" else {
                         self.send(connection, HTTPParser.response(statusCode: 404, body: nil))
+                        return
+                    }
+                    let authHeader = request.headers["authorization"] ?? request.headers["Authorization"] ?? ""
+                    guard authHeader == "Bearer \(self.token)" else {
+                        self.send(connection, HTTPParser.response(statusCode: 401, body: nil))
                         return
                     }
                     guard let body = request.body else {

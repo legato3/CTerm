@@ -10,7 +10,7 @@ import Carbon
 import GhosttyKit
 import os
 
-private let logger = Logger(subsystem: "com.calyx.terminal", category: "GlobalEventTap")
+private let logger = Logger(subsystem: "com.legato3.terminal", category: "GlobalEventTap")
 
 /// Singleton that installs a session-level CGEvent tap to intercept global key events
 /// and forward them to ghostty for global keybind matching.

@@ -1,6 +1,6 @@
 name: Calyx
 options:
-  bundleIdPrefix: com.calyx
+  bundleIdPrefix: com.legato3
   deploymentTarget:
     macOS: "26.0"
   xcodeVersion: "26.2"
@@ -82,7 +82,7 @@ targets:
               - public.plain-text
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.calyx.terminal
+        PRODUCT_BUNDLE_IDENTIFIER: com.legato3.terminal
         PRODUCT_NAME: Calyx
         MARKETING_VERSION: "0.17.2"
         CURRENT_PROJECT_VERSION: 17

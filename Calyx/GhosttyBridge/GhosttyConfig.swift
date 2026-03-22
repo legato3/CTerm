@@ -7,7 +7,7 @@
 import GhosttyKit
 import os
 
-private let logger = Logger(subsystem: "com.calyx.terminal", category: "GhosttyConfig")
+private let logger = Logger(subsystem: "com.legato3.terminal", category: "GhosttyConfig")
 
 // MARK: - GhosttyConfigManager
 

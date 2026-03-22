@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 
 private let logger = Logger(
-    subsystem: Bundle.main.bundleIdentifier ?? "com.calyx.terminal",
+    subsystem: Bundle.main.bundleIdentifier ?? "com.legato3.terminal",
     category: "BrowserTabController"
 )
 

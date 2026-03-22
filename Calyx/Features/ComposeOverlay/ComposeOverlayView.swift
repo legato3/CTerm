@@ -6,7 +6,7 @@
 import AppKit
 import os
 
-private let logger = Logger(subsystem: "com.calyx.terminal", category: "ComposeOverlay")
+private let logger = Logger(subsystem: "com.legato3.terminal", category: "ComposeOverlay")
 
 /// NSTextView subclass that notifies when IME composition state changes.
 @MainActor

@@ -7,7 +7,7 @@
 import AppKit
 import os
 
-private let logger = Logger(subsystem: "com.calyx.terminal", category: "CommandPalette")
+private let logger = Logger(subsystem: "com.legato3.terminal", category: "CommandPalette")
 
 @MainActor
 class CommandPaletteView: NSView, NSTableViewDelegate, NSTableViewDataSource, NSTextFieldDelegate {

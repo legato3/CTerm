@@ -7,7 +7,7 @@
 import Foundation
 import os
 
-private let logger = Logger(subsystem: "com.calyx.terminal", category: "ConfigFileWatcher")
+private let logger = Logger(subsystem: "com.legato3.terminal", category: "ConfigFileWatcher")
 
 /// Watches the ghostty config file (and any config-file includes) for modifications.
 /// Uses GCD DispatchSource for efficient kernel-level file monitoring.

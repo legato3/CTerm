@@ -8,7 +8,7 @@ import Foundation
 import OSLog
 
 private let logger = Logger(
-    subsystem: Bundle.main.bundleIdentifier ?? "com.calyx",
+    subsystem: Bundle.main.bundleIdentifier ?? "com.legato3.terminal",
     category: "ClaudeUsage"
 )
 

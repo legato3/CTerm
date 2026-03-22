@@ -6,7 +6,7 @@
 @preconcurrency import AppKit
 import os
 
-private let logger = Logger(subsystem: "com.calyx.terminal", category: "SearchBar")
+private let logger = Logger(subsystem: "com.legato3.terminal", category: "SearchBar")
 
 @MainActor
 class SearchBarView: NSView, NSTextFieldDelegate {
