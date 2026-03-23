@@ -168,6 +168,11 @@ private struct SidebarBackgroundModifier: ViewModifier {
         )
     }
 
+    private var chromeScheme: ColorScheme {
+        let tint = GlassTheme.chromeTint(for: themeColor, glassOpacity: glassOpacity)
+        return ColorLuminance.prefersDarkText(for: tint) ? .light : .dark
+    }
+
     func body(content: Content) -> some View {
         if reduceTransparency {
             content.background(Color(nsColor: .controlBackgroundColor).ignoresSafeArea(.all, edges: .top))
@@ -188,6 +193,10 @@ private struct SidebarBackgroundModifier: ViewModifier {
                     .frame(height: 32)
                     .allowsHitTesting(false)
                 }
+                .environment(\.colorScheme, chromeScheme)
+                .foregroundStyle(themePreset == "ghostty"
+                    ? AnyShapeStyle(Color(nsColor: ghosttyProvider.ghosttyForeground))
+                    : AnyShapeStyle(.primary))
         }
     }
 }
