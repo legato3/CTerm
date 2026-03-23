@@ -1,11 +1,12 @@
 // ClaudeUsageMonitor.swift
 // Calyx
 //
-// Parses ~/.claude JSONL session files to surface Claude Code token usage.
+// Parses ~/.claude JSONL session files to surface Claude Code token usage and cost.
 // Runs parsing off the main actor; publishes results as @Observable state.
 
 import Foundation
 import OSLog
+import UserNotifications
 
 private let logger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "com.legato3.terminal",
@@ -24,6 +25,7 @@ struct DayActivity: Identifiable, Sendable {
     var outputTokens: Int = 0
     var messageCount: Int = 0
     var toolCallCount: Int = 0
+    var costUSD: Double = 0
 
     /// Approximate "billed" tokens (excludes cache reads, which are cheaper).
     var totalTokens: Int { inputTokens + outputTokens + cacheCreationTokens }
@@ -38,6 +40,7 @@ struct ModelActivity: Identifiable, Sendable {
     var cacheReadTokens: Int = 0
     var outputTokens: Int = 0
     var messageCount: Int = 0
+    var costUSD: Double = 0
 
     var totalTokens: Int { inputTokens + outputTokens + cacheCreationTokens }
 
@@ -73,6 +76,10 @@ final class ClaudeUsageMonitor {
     private(set) var firstSessionDate: Date?
     private(set) var isLoaded = false
 
+    /// Budget alert tracking — reset when the date changes.
+    private var lastBudgetAlertDate: String = ""
+    private var lastBudgetAlertLevel: Int = 0
+
     var today: DayActivity {
         let key = Self.isoDay(Date())
         return recentDays.first { $0.date == key } ?? DayActivity(date: key)
@@ -98,7 +105,59 @@ final class ClaudeUsageMonitor {
                 self.totalMessages = result.totalMessages
                 self.firstSessionDate = result.firstDate
                 self.isLoaded = true
+                self.checkBudget()
             }
+        }
+    }
+
+    // MARK: - Budget Alerts
+
+    private func checkBudget() {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: AppStorageKeys.dailyCostBudgetEnabled) else { return }
+        let budget = defaults.double(forKey: AppStorageKeys.dailyCostBudget)
+        guard budget > 0 else { return }
+
+        let todayKey = Self.isoDay(Date())
+        let cost = today.costUSD
+
+        // Reset tracking when the day rolls over
+        if lastBudgetAlertDate != todayKey {
+            lastBudgetAlertDate = todayKey
+            lastBudgetAlertLevel = 0
+        }
+
+        let fraction = cost / budget
+        let targetLevel: Int
+        if fraction >= 1.0 {
+            targetLevel = 2
+        } else if fraction >= 0.8 {
+            targetLevel = 1
+        } else {
+            return
+        }
+
+        guard targetLevel > lastBudgetAlertLevel else { return }
+        lastBudgetAlertLevel = targetLevel
+
+        let body: String
+        if targetLevel == 2 {
+            body = String(format: "Daily budget of $%.2f reached ($%.2f used).", budget, cost)
+        } else {
+            body = String(format: "80%% of daily budget used — $%.2f of $%.2f.", cost, budget)
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Claude Budget"
+        content.body = body
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "calyx.budget.\(todayKey).\(targetLevel)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error { logger.error("Budget notification failed: \(error)") }
         }
     }
 
@@ -157,7 +216,7 @@ final class ClaudeUsageMonitor {
         }
 
         let days = dayMap.values.sorted { $0.date > $1.date }
-        let models = modelMap.values.sorted { $0.totalTokens > $1.totalTokens }
+        let models = modelMap.values.sorted { $0.costUSD > $1.costUSD }
 
         return ComputeResult(
             days: days,
@@ -244,6 +303,7 @@ final class ClaudeUsageMonitor {
                 let output = usage["output_tokens"] as? Int ?? 0
                 let cacheCreate = usage["cache_creation_input_tokens"] as? Int ?? 0
                 let cacheRead = usage["cache_read_input_tokens"] as? Int ?? 0
+                let cost = obj["costUSD"] as? Double ?? 0
 
                 var day = dayMap[dateKey] ?? DayActivity(date: dateKey)
                 day.inputTokens += input
@@ -251,6 +311,7 @@ final class ClaudeUsageMonitor {
                 day.cacheCreationTokens += cacheCreate
                 day.cacheReadTokens += cacheRead
                 day.messageCount += 1
+                day.costUSD += cost
                 dayMap[dateKey] = day
 
                 var mod = modelMap[model] ?? ModelActivity(model: model)
@@ -259,6 +320,7 @@ final class ClaudeUsageMonitor {
                 mod.cacheCreationTokens += cacheCreate
                 mod.cacheReadTokens += cacheRead
                 mod.messageCount += 1
+                mod.costUSD += cost
                 modelMap[model] = mod
 
             case "user":

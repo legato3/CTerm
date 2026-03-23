@@ -32,17 +32,29 @@ struct SidebarContentView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private var agentState: IPCAgentState { IPCAgentState.shared }
 
+    private var activeTab: Tab? {
+        guard let group = groups.first(where: { $0.id == activeGroupID }),
+              let tabID = group.activeTabID else { return nil }
+        return group.tabs.first { $0.id == tabID }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Picker("Mode", selection: $sidebarMode) {
-                Text("Tabs").tag(SidebarMode.tabs)
-                Text("Changes").tag(SidebarMode.changes)
-                Text("Agents").tag(SidebarMode.agents)
-                Text("Usage").tag(SidebarMode.usage)
+                Image(systemName: "square.on.square")
+                    .help("Tabs").tag(SidebarMode.tabs)
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .help("Changes").tag(SidebarMode.changes)
+                Image(systemName: "person.2.fill")
+                    .help("Agents").tag(SidebarMode.agents)
+                Image(systemName: "chart.bar.fill")
+                    .help("Usage").tag(SidebarMode.usage)
+                Image(systemName: "doc.text.fill")
+                    .help("Context").tag(SidebarMode.context)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 8)
             .padding(.top, 8)
             .accessibilityIdentifier(AccessibilityID.Git.modeToggle)
 
@@ -123,8 +135,11 @@ struct SidebarContentView: View {
             } else if sidebarMode == .agents {
                 IPCAgentsView()
                     .padding(.top, 4)
-            } else {
+            } else if sidebarMode == .usage {
                 ClaudeUsageView()
+                    .padding(.top, 4)
+            } else {
+                ContextView(pwd: activeTab?.pwd)
                     .padding(.top, 4)
             }
         }
@@ -181,7 +196,7 @@ private struct SidebarBackgroundModifier: ViewModifier {
                 .glassEffect(.clear.tint(Color(nsColor: GlassTheme.chromeTint(for: themeColor, glassOpacity: glassOpacity))), in: .rect)
                 .overlay(alignment: .trailing) {
                     Rectangle()
-                        .fill(GlassTheme.specularStroke.opacity(0.30))
+                        .fill(GlassTheme.specularStroke.opacity(0.70))
                         .frame(width: 1)
                 }
                 .overlay(alignment: .topLeading) {
@@ -587,6 +602,7 @@ private struct TabRowItemView: View {
     var onClose: (() -> Void)?
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var isHovering = false
+    @State private var claudePulse = false
 
     private var tabIcon: String {
         switch tab.content {
@@ -601,6 +617,18 @@ private struct TabRowItemView: View {
             Image(systemName: tabIcon)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if tab.title.lowercased().contains("claude") {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: 5, height: 5)
+                    .opacity(claudePulse ? 1.0 : 0.3)
+                    .onAppear {
+                        withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) {
+                            claudePulse = true
+                        }
+                    }
+                    .help("Claude Code is running in this tab")
+            }
             Text(tab.title.isEmpty ? fallbackTitle : tab.title)
                 .lineLimit(1)
                 .font(.system(size: 12.5, weight: isActive ? .semibold : .medium, design: .rounded))

@@ -305,6 +305,31 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         ) { [weak self] in
             self?.reviewController.submitAllDiffReviews()
         })
+
+        // Claude Code slash commands
+        let claudeCommands: [(id: String, title: String, cmd: String)] = [
+            ("claude.commit",  "Claude: Commit",          "/commit"),
+            ("claude.review",  "Claude: Review Changes",  "/review"),
+            ("claude.plan",    "Claude: Create Plan",      "/plan"),
+            ("claude.fix",     "Claude: Fix Issues",       "/fix"),
+            ("claude.test",    "Claude: Run Tests",        "/test"),
+            ("claude.explain", "Claude: Explain This",    "/explain"),
+        ]
+        for c in claudeCommands {
+            commandRegistry.register(Command(
+                id: c.id,
+                title: c.title,
+                category: "Claude",
+                isAvailable: { [weak self] in
+                    guard let tab = self?.activeTab else { return false }
+                    if case .terminal = tab.content { return true }
+                    return false
+                },
+                handler: { [weak self] in
+                    self?.focusedController?.sendText(c.cmd + "\n")
+                }
+            ))
+        }
     }
 
     private func setupUI() {
@@ -377,7 +402,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         windowActions.onRefreshGitStatus = { [weak self] in self?.gitController.refreshGitStatus() }
         windowActions.onLoadMoreCommits = { [weak self] in self?.gitController.loadMoreCommits() }
         windowActions.onExpandCommit = { [weak self] hash in self?.gitController.expandCommit(hash: hash) }
-        windowActions.onSidebarWidthChanged = { [weak self] width in self?.windowSession.sidebarWidth = width }
+        windowActions.onSidebarWidthChanged = { [weak self] width in self?.windowSession.sidebarWidth = SidebarLayout.clampWidth(width) }
         windowActions.onCollapseToggled = { [weak self] in self?.requestSave() }
         windowActions.onCloseAllTabsInGroup = { [weak self] groupID in self?.closeAllTabsInGroup(id: groupID) }
         windowActions.onMoveTab = { [weak self] groupID, fromIndex, toIndex in

@@ -51,6 +51,9 @@ struct IPCAgentsView: View {
                 serverStatusSection
                 if agentState.isRunning {
                     peersSection
+                    if !visiblePeers.isEmpty {
+                        liveCostSection
+                    }
                     quickActionsSection
                     if !agentState.activityLog.isEmpty {
                         activitySection
@@ -184,6 +187,36 @@ struct IPCAgentsView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Live Cost
+
+    private var liveCostSection: some View {
+        let monitor = ClaudeUsageMonitor.shared
+        return VStack(alignment: .leading, spacing: 6) {
+            sectionHeader("Today's Cost", icon: "dollarsign.circle")
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(String(format: "$%.4f", monitor.today.costUSD))
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    Text("estimated")
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(ClaudeUsageMonitor.formatTokens(monitor.today.totalTokens))
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                    Text("tokens")
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                }
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
         }
     }
 

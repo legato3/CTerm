@@ -48,7 +48,7 @@ class WindowSession: Identifiable {
         self.showSidebar = showSidebar
         self.showCommandPalette = showCommandPalette
         self.showComposeOverlay = showComposeOverlay
-        self.sidebarWidth = sidebarWidth
+        self.sidebarWidth = SidebarLayout.clampWidth(sidebarWidth)
     }
 
     convenience init(initialTab: Tab) {

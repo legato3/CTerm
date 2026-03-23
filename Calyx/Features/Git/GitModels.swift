@@ -10,6 +10,7 @@ enum SidebarMode: Sendable {
     case changes
     case agents
     case usage
+    case context
 }
 
 enum GitChangesState: Sendable {

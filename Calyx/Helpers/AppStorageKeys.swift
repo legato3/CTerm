@@ -8,4 +8,6 @@ enum AppStorageKeys {
     static let terminalGlassOpacity = "terminalGlassOpacity"
     static let themeColorPreset = "themeColorPreset"
     static let themeColorCustomHex = "themeColorCustomHex"
+    static let dailyCostBudgetEnabled = "dailyCostBudgetEnabled"
+    static let dailyCostBudget = "dailyCostBudget"
 }
