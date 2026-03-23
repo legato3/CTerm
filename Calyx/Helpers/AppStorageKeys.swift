@@ -10,4 +10,5 @@ enum AppStorageKeys {
     static let themeColorCustomHex = "themeColorCustomHex"
     static let dailyCostBudgetEnabled = "dailyCostBudgetEnabled"
     static let dailyCostBudget = "dailyCostBudget"
+    static let ghosttyTerminalOverrides = "ghosttyTerminalOverrides"
 }

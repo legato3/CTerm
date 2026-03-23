@@ -56,8 +56,33 @@ final class GhosttyConfigManager {
         calyxConfigDir.appendingPathComponent("calyx-glass.conf", isDirectory: false)
     }
 
+    private static var calyxUserSettingsURL: URL {
+        calyxConfigDir.appendingPathComponent("calyx-user-settings.conf", isDirectory: false)
+    }
+
     private static var calyxRuntimeOverrideURL: URL {
         calyxConfigDir.appendingPathComponent("calyx-runtime.conf", isDirectory: false)
+    }
+
+    /// Write user-configured terminal overrides to calyx-user-settings.conf.
+    /// Pass an empty dict to remove the file (restores ghostty config defaults).
+    static func writeUserSettings(_ overrides: [String: String]) {
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: calyxConfigDir, withIntermediateDirectories: true)
+            guard !overrides.isEmpty else {
+                try? fm.removeItem(at: calyxUserSettingsURL)
+                return
+            }
+            var lines = ["# --- Calyx User Settings (managed by Calyx Settings UI) ---"]
+            for (key, value) in overrides.sorted(by: { $0.key < $1.key }) {
+                lines.append("\(key) = \(value)")
+            }
+            lines.append("# --- End Calyx User Settings ---")
+            try (lines.joined(separator: "\n") + "\n").write(to: calyxUserSettingsURL, atomically: true, encoding: .utf8)
+        } catch {
+            logger.warning("Failed to write user settings: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// Remove lines whose key (left-hand side of `=`) matches any entry in `keys`.
@@ -150,6 +175,12 @@ final class GhosttyConfigManager {
         let presetPath = calyxGlassPresetURL.path
         if FileManager.default.fileExists(atPath: presetPath) {
             GhosttyFFI.configLoadFile(cfg, path: presetPath)
+        }
+
+        // Load user settings from the Settings UI (overrides user's ghostty config).
+        let userSettingsPath = calyxUserSettingsURL.path
+        if FileManager.default.fileExists(atPath: userSettingsPath) {
+            GhosttyFFI.configLoadFile(cfg, path: userSettingsPath)
         }
 
         // Load runtime override last so UI slider state always wins.

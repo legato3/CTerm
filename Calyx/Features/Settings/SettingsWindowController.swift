@@ -10,6 +10,8 @@ private let logger = Logger(
 class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     static let shared = SettingsWindowController()
+
+    // MARK: - Glass / Theme controls
     private let opacityLabel = NSTextField(labelWithString: "")
     private let opacitySlider = NSSlider(value: 0.7, minValue: 0.0, maxValue: 1.0, target: nil, action: nil)
     private let saveButton = NSButton(title: "Save", target: nil, action: nil)
@@ -20,9 +22,36 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var lastLoadedPreset: String = "original"
     private var lastLoadedCustomHex: String = ThemeColorPreset.defaultCustomHex
 
+    // MARK: - Terminal settings controls
+    private let scrollbackField = NSTextField()
+    private let scrollbackStepper = NSStepper()
+    private let fontSizeField = NSTextField()
+    private let fontSizeStepper = NSStepper()
+    private let copyOnSelectCheckbox = NSButton(checkboxWithTitle: "Enabled", target: nil, action: nil)
+    private let mouseHideCheckbox = NSButton(checkboxWithTitle: "Enabled", target: nil, action: nil)
+    private let focusFollowsMouseCheckbox = NSButton(checkboxWithTitle: "Enabled", target: nil, action: nil)
+    private let cursorStylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+
+    // MARK: - Terminal overrides persistence
+    private var terminalOverrides: [String: String] {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: AppStorageKeys.ghosttyTerminalOverrides),
+                  let dict = try? JSONDecoder().decode([String: String].self, from: data) else {
+                return [:]
+            }
+            return dict
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(data, forKey: AppStorageKeys.ghosttyTerminalOverrides)
+            }
+            GhosttyConfigManager.writeUserSettings(newValue)
+        }
+    }
+
     private init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 550),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 620),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
@@ -44,18 +73,46 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         guard let window = self.window,
               let contentView = window.contentView else { return }
 
+        let scrollView = NSScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
+        contentView.addSubview(scrollView)
+
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
+
+        // Use a plain NSView as the document view so NSScrollView can compute scroll extent
+        // correctly. The stack view is constrained inside it — the bottom constraint between
+        // stack and document is what gives the document its height.
+        let documentView = NSView()
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = documentView
+
+        let clipView = scrollView.contentView
+        NSLayoutConstraint.activate([
+            documentView.topAnchor.constraint(equalTo: clipView.topAnchor),
+            documentView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
+            documentView.trailingAnchor.constraint(equalTo: clipView.trailingAnchor),
+        ])
+
         let root = NSStackView()
         root.orientation = .vertical
         root.alignment = .leading
         root.spacing = 18
         root.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(root)
+        documentView.addSubview(root)
 
         NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
-            root.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
-            root.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
-            root.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -24),
+            root.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 24),
+            root.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 24),
+            root.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -24),
+            root.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -24),
         ])
 
         // --- Theme Color Section ---
@@ -150,6 +207,85 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         actions.addArrangedSubview(NSView())
         root.addArrangedSubview(actions)
 
+        // --- Terminal Settings Section ---
+        let termDivider = NSBox()
+        termDivider.boxType = .separator
+        termDivider.translatesAutoresizingMaskIntoConstraints = false
+        termDivider.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        root.addArrangedSubview(termDivider)
+
+        let termTitle = NSTextField(labelWithString: "Terminal Settings")
+        termTitle.font = .systemFont(ofSize: 20, weight: .semibold)
+        root.addArrangedSubview(termTitle)
+
+        let termSubtitle = NSTextField(wrappingLabelWithString: "Override ghostty config settings from the UI. Changes apply immediately and are saved to ~/.config/calyx/calyx-user-settings.conf.")
+        termSubtitle.textColor = .secondaryLabelColor
+        termSubtitle.font = .systemFont(ofSize: 13)
+        root.addArrangedSubview(termSubtitle)
+
+        // Scrollback limit
+        scrollbackStepper.minValue = 100
+        scrollbackStepper.maxValue = 1_000_000
+        scrollbackStepper.increment = 1000
+        scrollbackStepper.valueWraps = false
+        scrollbackStepper.isContinuous = false
+        scrollbackStepper.target = self
+        scrollbackStepper.action = #selector(scrollbackStepperDidChange(_:))
+        scrollbackField.placeholderString = "10000"
+        scrollbackField.target = self
+        scrollbackField.action = #selector(scrollbackFieldDidCommit(_:))
+        scrollbackField.widthAnchor.constraint(equalToConstant: 72).isActive = true
+        let linesLabel = NSTextField(labelWithString: "lines")
+        linesLabel.textColor = .secondaryLabelColor
+        let scrollbackRow = NSStackView(views: [scrollbackField, scrollbackStepper, linesLabel])
+        scrollbackRow.orientation = .horizontal
+        scrollbackRow.spacing = 4
+        root.addArrangedSubview(row(label: "Scrollback limit", control: scrollbackRow))
+
+        // Font size
+        fontSizeStepper.minValue = 6
+        fontSizeStepper.maxValue = 72
+        fontSizeStepper.increment = 1
+        fontSizeStepper.valueWraps = false
+        fontSizeStepper.isContinuous = false
+        fontSizeStepper.target = self
+        fontSizeStepper.action = #selector(fontSizeStepperDidChange(_:))
+        fontSizeField.placeholderString = "13"
+        fontSizeField.target = self
+        fontSizeField.action = #selector(fontSizeFieldDidCommit(_:))
+        fontSizeField.widthAnchor.constraint(equalToConstant: 48).isActive = true
+        let ptLabel = NSTextField(labelWithString: "pt")
+        ptLabel.textColor = .secondaryLabelColor
+        let fontSizeRow = NSStackView(views: [fontSizeField, fontSizeStepper, ptLabel])
+        fontSizeRow.orientation = .horizontal
+        fontSizeRow.spacing = 4
+        root.addArrangedSubview(row(label: "Font size", control: fontSizeRow))
+
+        // Cursor style
+        cursorStylePopup.addItems(withTitles: ["Block", "Bar", "Underline"])
+        cursorStylePopup.target = self
+        cursorStylePopup.action = #selector(cursorStyleDidChange(_:))
+        root.addArrangedSubview(row(label: "Cursor style", control: cursorStylePopup))
+
+        // Copy on select
+        copyOnSelectCheckbox.target = self
+        copyOnSelectCheckbox.action = #selector(copyOnSelectDidChange(_:))
+        root.addArrangedSubview(row(label: "Copy on select", control: copyOnSelectCheckbox))
+
+        // Mouse hide while typing
+        mouseHideCheckbox.target = self
+        mouseHideCheckbox.action = #selector(mouseHideDidChange(_:))
+        root.addArrangedSubview(row(label: "Mouse hide while typing", control: mouseHideCheckbox))
+
+        // Focus follows mouse
+        focusFollowsMouseCheckbox.target = self
+        focusFollowsMouseCheckbox.action = #selector(focusFollowsMouseDidChange(_:))
+        root.addArrangedSubview(row(label: "Focus follows mouse", control: focusFollowsMouseCheckbox))
+
+        let resetButton = NSButton(title: "Reset to Ghostty Defaults", target: self, action: #selector(resetTerminalSettings(_:)))
+        resetButton.bezelStyle = .rounded
+        root.addArrangedSubview(resetButton)
+
         // Divider before config info section
         let configDivider = NSBox()
         configDivider.boxType = .separator
@@ -179,6 +315,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         root.addArrangedSubview(managedKeysList)
 
         loadPresetIntoUI()
+        loadTerminalSettingsIntoUI()
     }
 
     /// Checks for unsaved changes before app termination.
@@ -216,8 +353,134 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func showSettings() {
         loadPresetIntoUI()
+        loadTerminalSettingsIntoUI()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: - Terminal settings load/save
+
+    private func loadTerminalSettingsIntoUI() {
+        let overrides = terminalOverrides
+        let config = GhosttyAppController.shared.configManager
+
+        // Scrollback limit
+        if let str = overrides["scrollback-limit"], let val = Int(str) {
+            scrollbackStepper.integerValue = val
+            scrollbackField.stringValue = "\(val)"
+        } else {
+            let val = config.getInt("scrollback-limit", default: 10000)
+            scrollbackStepper.integerValue = val
+            scrollbackField.stringValue = "\(val)"
+        }
+
+        // Font size
+        if let str = overrides["font-size"], let val = Double(str) {
+            fontSizeStepper.doubleValue = val
+            fontSizeField.stringValue = String(format: "%.0f", val)
+        } else {
+            let val = config.getDouble("font-size", default: 13)
+            fontSizeStepper.doubleValue = val
+            fontSizeField.stringValue = String(format: "%.0f", val)
+        }
+
+        // Cursor style
+        let cursorStyles = ["block", "bar", "underline"]
+        if let str = overrides["cursor-style"], let idx = cursorStyles.firstIndex(of: str) {
+            cursorStylePopup.selectItem(at: idx)
+        } else {
+            let style = config.getString("cursor-style") ?? "block"
+            cursorStylePopup.selectItem(at: cursorStyles.firstIndex(of: style) ?? 0)
+        }
+
+        // Copy on select
+        if let str = overrides["copy-on-select"] {
+            copyOnSelectCheckbox.state = (str == "clipboard" || str == "true") ? .on : .off
+        } else {
+            let val = config.getString("copy-on-select") ?? "clipboard"
+            copyOnSelectCheckbox.state = (val == "clipboard" || val == "true") ? .on : .off
+        }
+
+        // Mouse hide while typing
+        if let str = overrides["mouse-hide-while-typing"] {
+            mouseHideCheckbox.state = str == "true" ? .on : .off
+        } else {
+            mouseHideCheckbox.state = config.getBool("mouse-hide-while-typing") ? .on : .off
+        }
+
+        // Focus follows mouse
+        if let str = overrides["focus-follows-mouse"] {
+            focusFollowsMouseCheckbox.state = str == "true" ? .on : .off
+        } else {
+            focusFollowsMouseCheckbox.state = config.getBool("focus-follows-mouse") ? .on : .off
+        }
+    }
+
+    private func applyTerminalOverride(_ key: String, value: String) {
+        var overrides = terminalOverrides
+        overrides[key] = value
+        terminalOverrides = overrides
+        GhosttyAppController.shared.reloadConfig()
+    }
+
+    // MARK: - Terminal settings handlers
+
+    @objc private func scrollbackStepperDidChange(_ sender: Any?) {
+        let val = scrollbackStepper.integerValue
+        scrollbackField.stringValue = "\(val)"
+        applyTerminalOverride("scrollback-limit", value: "\(val)")
+    }
+
+    @objc private func scrollbackFieldDidCommit(_ sender: Any?) {
+        guard let val = Int(scrollbackField.stringValue), val >= 100 else {
+            scrollbackField.stringValue = "\(scrollbackStepper.integerValue)"
+            return
+        }
+        let clamped = min(val, 1_000_000)
+        scrollbackStepper.integerValue = clamped
+        scrollbackField.stringValue = "\(clamped)"
+        applyTerminalOverride("scrollback-limit", value: "\(clamped)")
+    }
+
+    @objc private func fontSizeStepperDidChange(_ sender: Any?) {
+        let val = fontSizeStepper.integerValue
+        fontSizeField.stringValue = "\(val)"
+        applyTerminalOverride("font-size", value: "\(val)")
+    }
+
+    @objc private func fontSizeFieldDidCommit(_ sender: Any?) {
+        guard let val = Double(fontSizeField.stringValue), val >= 6 else {
+            fontSizeField.stringValue = "\(fontSizeStepper.integerValue)"
+            return
+        }
+        let clamped = min(val, 72)
+        fontSizeStepper.doubleValue = clamped
+        fontSizeField.stringValue = String(format: "%.0f", clamped)
+        applyTerminalOverride("font-size", value: String(format: "%.0f", clamped))
+    }
+
+    @objc private func cursorStyleDidChange(_ sender: Any?) {
+        let styles = ["block", "bar", "underline"]
+        let style = styles[cursorStylePopup.indexOfSelectedItem]
+        applyTerminalOverride("cursor-style", value: style)
+    }
+
+    @objc private func copyOnSelectDidChange(_ sender: Any?) {
+        applyTerminalOverride("copy-on-select", value: copyOnSelectCheckbox.state == .on ? "clipboard" : "false")
+    }
+
+    @objc private func mouseHideDidChange(_ sender: Any?) {
+        applyTerminalOverride("mouse-hide-while-typing", value: mouseHideCheckbox.state == .on ? "true" : "false")
+    }
+
+    @objc private func focusFollowsMouseDidChange(_ sender: Any?) {
+        applyTerminalOverride("focus-follows-mouse", value: focusFollowsMouseCheckbox.state == .on ? "true" : "false")
+    }
+
+    @objc private func resetTerminalSettings(_ sender: Any?) {
+        terminalOverrides = [:]
+        GhosttyAppController.shared.reloadConfig()
+        loadTerminalSettingsIntoUI()
     }
 
     @objc private func openConfigFile(_ sender: Any?) {
