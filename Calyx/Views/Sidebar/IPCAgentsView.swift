@@ -372,7 +372,7 @@ struct IPCAgentsView: View {
         Task {
             await server.ensureAppPeerRegistered()
             guard let appPeerID = server.appPeerID else { isSending = false; return }
-            try? await server.store.broadcast(from: appPeerID, content: trimmed, topic: topic)
+            _ = try? await server.store.broadcast(from: appPeerID, content: trimmed, topic: topic)
             isSending = false
         }
     }
@@ -386,7 +386,7 @@ struct IPCAgentsView: View {
             for peer in peers where peer.name != "calyx-app" {
                 if roleNames.contains(where: { $0.lowercased() == peer.name.lowercased() }) {
                     let prompt = AgentWorkflow.rolePrompt(roleName: peer.name, allRoles: roleNames, port: port)
-                    try? await CalyxMCPServer.shared.store.sendMessage(
+                    _ = try? await CalyxMCPServer.shared.store.sendMessage(
                         from: appPeerID, to: peer.id, content: prompt, topic: "role-context", replyTo: nil
                     )
                 }

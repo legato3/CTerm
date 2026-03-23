@@ -13,7 +13,7 @@ final class GhosttyThemeProvider {
 
     private(set) var ghosttyBackground: NSColor = ThemeColorPreset.ghostty.color
     private(set) var ghosttyForeground: NSColor = .white
-    nonisolated(unsafe) private var observer: Any?
+    private var observer: Any?
 
     private init() {
         refreshFromConfig()
@@ -25,8 +25,10 @@ final class GhosttyThemeProvider {
     }
 
     deinit {
-        if let observer {
-            NotificationCenter.default.removeObserver(observer)
+        MainActor.assumeIsolated {
+            if let observer {
+                NotificationCenter.default.removeObserver(observer)
+            }
         }
     }
 

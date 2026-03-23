@@ -7,7 +7,7 @@ enum QuickTerminalPosition: String {
     case right
     case center
 
-    func setLoaded(_ window: NSWindow, size: QuickTerminalSize) {
+    @MainActor func setLoaded(_ window: NSWindow, size: QuickTerminalSize) {
         guard let screen = window.screen ?? NSScreen.main else { return }
         window.setFrame(.init(
             origin: window.frame.origin,
@@ -15,7 +15,7 @@ enum QuickTerminalPosition: String {
         ), display: false)
     }
 
-    func setInitial(in window: NSWindow, on screen: NSScreen, terminalSize: QuickTerminalSize, closedFrame: NSRect? = nil) {
+    @MainActor func setInitial(in window: NSWindow, on screen: NSScreen, terminalSize: QuickTerminalSize, closedFrame: NSRect? = nil) {
         window.alphaValue = 0
         window.setFrame(.init(
             origin: initialOrigin(for: window, on: screen),
@@ -23,7 +23,7 @@ enum QuickTerminalPosition: String {
         ), display: false)
     }
 
-    func setFinal(in window: NSWindow, on screen: NSScreen, terminalSize: QuickTerminalSize, closedFrame: NSRect? = nil) {
+    @MainActor func setFinal(in window: NSWindow, on screen: NSScreen, terminalSize: QuickTerminalSize, closedFrame: NSRect? = nil) {
         window.alphaValue = 1
         window.setFrame(.init(
             origin: finalOrigin(for: window, on: screen),
@@ -31,12 +31,12 @@ enum QuickTerminalPosition: String {
         ), display: true)
     }
 
-    func configuredFrameSize(on screen: NSScreen, terminalSize: QuickTerminalSize) -> NSSize {
+    @MainActor func configuredFrameSize(on screen: NSScreen, terminalSize: QuickTerminalSize) -> NSSize {
         let dimensions = terminalSize.calculate(position: self, screenDimensions: screen.visibleFrame.size)
         return NSSize(width: dimensions.width, height: dimensions.height)
     }
 
-    func initialOrigin(for window: NSWindow, on screen: NSScreen) -> CGPoint {
+    @MainActor func initialOrigin(for window: NSWindow, on screen: NSScreen) -> CGPoint {
         switch self {
         case .top:
             return .init(
@@ -61,7 +61,7 @@ enum QuickTerminalPosition: String {
         }
     }
 
-    func finalOrigin(for window: NSWindow, on screen: NSScreen) -> CGPoint {
+    @MainActor func finalOrigin(for window: NSWindow, on screen: NSScreen) -> CGPoint {
         switch self {
         case .top:
             return .init(

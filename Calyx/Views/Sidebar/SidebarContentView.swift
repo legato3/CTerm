@@ -261,7 +261,7 @@ private struct GroupNameTextField: NSViewRepresentable {
         context.coordinator.onCancel = onCancel
     }
 
-    class Coordinator: NSObject, NSTextFieldDelegate {
+    @MainActor class Coordinator: NSObject, NSTextFieldDelegate {
         weak var textField: NSTextField?
         var onCommit: (String) -> Void
         var onCancel: () -> Void
@@ -283,7 +283,7 @@ private struct GroupNameTextField: NSViewRepresentable {
                     if textField.bounds.contains(point) {
                         return event
                     }
-                    if let editor = textField.currentEditor() as? NSView {
+                    if let editor = textField.currentEditor().map({ $0 as NSView }) {
                         let editorPoint = editor.convert(event.locationInWindow, from: nil)
                         if editor.bounds.contains(editorPoint) {
                             return event
@@ -330,7 +330,9 @@ private struct GroupNameTextField: NSViewRepresentable {
         }
 
         deinit {
-            removeClickMonitor()
+            MainActor.assumeIsolated {
+                removeClickMonitor()
+            }
         }
     }
 }

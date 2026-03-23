@@ -5,6 +5,10 @@
 
 import Foundation
 
+/// Mutable container used to safely pass results out of concurrent DispatchQueue blocks.
+/// Each instance is written by exactly one queue, making this safe despite @unchecked Sendable.
+private final class DataCapture: @unchecked Sendable { var data = Data() }
+
 enum GitService {
     enum GitError: Error, LocalizedError {
         case notARepository
@@ -201,20 +205,22 @@ enum GitService {
                 DispatchQueue.global().asyncAfter(deadline: .now() + 10, execute: timeoutItem)
 
                 // Read both pipes concurrently to avoid deadlock
-                var stdoutData = Data()
-                var stderrData = Data()
+                let stdoutCapture = DataCapture()
+                let stderrCapture = DataCapture()
                 let readGroup = DispatchGroup()
                 readGroup.enter()
                 DispatchQueue.global().async {
-                    stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                    stdoutCapture.data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
                     readGroup.leave()
                 }
                 readGroup.enter()
                 DispatchQueue.global().async {
-                    stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                    stderrCapture.data = stderrPipe.fileHandleForReading.readDataToEndOfFile()
                     readGroup.leave()
                 }
                 readGroup.wait()
+                let stdoutData = stdoutCapture.data
+                let stderrData = stderrCapture.data
 
                 process.waitUntilExit()
                 timeoutItem.cancel()

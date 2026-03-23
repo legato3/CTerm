@@ -18,9 +18,9 @@ private func dockSym<T>(_ name: String) -> T? {
     return unsafeBitCast(sym, to: T.self)
 }
 
-nonisolated(unsafe) private let _coreDockGetOrientation: GetOrientationFn? = dockSym("CoreDockGetOrientationAndPinning")
-nonisolated(unsafe) private let _coreDockGetAutoHide: GetAutoHideFn?       = dockSym("CoreDockGetAutoHideEnabled")
-nonisolated(unsafe) private let _coreDockSetAutoHide: SetAutoHideFn?       = dockSym("CoreDockSetAutoHideEnabled")
+private let _coreDockGetOrientation: GetOrientationFn? = dockSym("CoreDockGetOrientationAndPinning")
+private let _coreDockGetAutoHide: GetAutoHideFn?       = dockSym("CoreDockGetAutoHideEnabled")
+private let _coreDockSetAutoHide: SetAutoHideFn?       = dockSym("CoreDockSetAutoHideEnabled")
 
 enum DockOrientation: Int {
     case top = 1

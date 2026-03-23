@@ -179,10 +179,9 @@ final class ClaudeUsageMonitor {
 
     // MARK: - Parsing (nonisolated — runs off the main actor in a detached task)
 
-    // nonisolated(unsafe): read-only after init, safe for concurrent reads
-    nonisolated(unsafe) private static let claudeDir = NSHomeDirectory() + "/.claude"
-    nonisolated(unsafe) private static let projectsDir = claudeDir + "/projects"
-    nonisolated(unsafe) private static let statsCachePath = claudeDir + "/stats-cache.json"
+    nonisolated private static let claudeDir = NSHomeDirectory() + "/.claude"
+    nonisolated private static let projectsDir = claudeDir + "/projects"
+    nonisolated private static let statsCachePath = claudeDir + "/stats-cache.json"
 
     private struct ComputeResult: Sendable {
         var days: [DayActivity]
@@ -342,14 +341,13 @@ final class ClaudeUsageMonitor {
 
     // MARK: - Helpers
 
-    // nonisolated(unsafe): formatters are read-only after init, safe for concurrent reads
     nonisolated(unsafe) static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
 
-    nonisolated(unsafe) private static let dayFormatter: DateFormatter = {
+    nonisolated private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = .current

@@ -29,7 +29,7 @@ final class SecureInput {
         global || scoped.contains(where: { $0.value })
     }
 
-    nonisolated(unsafe) private var observers: [Any] = []
+    private var observers: [Any] = []
 
     private init() {
         observers.append(NotificationCenter.default.addObserver(
@@ -49,8 +49,10 @@ final class SecureInput {
     }
 
     deinit {
-        for observer in observers {
-            NotificationCenter.default.removeObserver(observer)
+        MainActor.assumeIsolated {
+            for observer in observers {
+                NotificationCenter.default.removeObserver(observer)
+            }
         }
     }
 

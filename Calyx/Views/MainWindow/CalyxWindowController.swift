@@ -873,7 +873,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
-    @discardableResult
     private func sendEnterKey(to controller: GhosttySurfaceController) {
         var keyEvent = ghostty_input_key_s()
         keyEvent.keycode = 0x24 // macOS keycode for Return/Enter
@@ -1760,7 +1759,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 Task { @MainActor in
                     await self.mcpServer.ensureAppPeerRegistered()
                     guard let appPeerID = self.mcpServer.appPeerID else { return }
-                    try? await self.mcpServer.store.broadcast(
+                    _ = try? await self.mcpServer.store.broadcast(
                         from: appPeerID,
                         content: initialTask,
                         topic: "task"
