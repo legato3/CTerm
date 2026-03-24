@@ -22,6 +22,7 @@ final class TabLifecycleController {
 
     // MARK: - View-side callbacks (set by CalyxWindowController after init)
 
+    var onTabCreated: ((Tab) -> Void)?
     var onActivateCurrentTab: (() -> Void)?
     var onDeactivateCurrentTab: (() -> Void)?
     var onRefreshHostingView: (() -> Void)?
@@ -95,6 +96,7 @@ final class TabLifecycleController {
 
         group.addTab(tab)
         group.activeTabID = tab.id
+        onTabCreated?(tab)
 
         onRebuildSplitContainerAndLayout?()
         onRefreshHostingView?()

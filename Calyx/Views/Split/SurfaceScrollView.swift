@@ -7,6 +7,7 @@
 // total scrollback height.
 
 @preconcurrency import AppKit
+import SwiftUI
 
 /// Flipped document view so scroll coordinates match top-to-bottom orientation.
 private class FlippedView: NSView {
@@ -121,6 +122,12 @@ class SurfaceScrollView: NSView {
 
     private var searchBar: SearchBarView?
     private var startSearchObserver: NSObjectProtocol?
+
+    // MARK: - Token HUD
+    var paneID: UUID? {
+        didSet { guard oldValue != paneID else { return }; updateHUD() }
+    }
+    private var hudHostingView: NSHostingView<AnyView>?
     private var endSearchObserver: NSObjectProtocol?
     private var searchTotalObserver: NSObjectProtocol?
     private var searchSelectedObserver: NSObjectProtocol?
@@ -305,6 +312,7 @@ class SurfaceScrollView: NSView {
         surfaceView.frame.origin = .zero
 
         layoutSearchBar()
+        layoutHUD()
     }
 
     // MARK: - Scrollbar Update (Core → UI)
@@ -528,6 +536,32 @@ class SurfaceScrollView: NSView {
         searchBar?.removeFromSuperview()
         searchBar = nil
         window?.makeFirstResponder(surfaceView)
+    }
+
+    private func updateHUD() {
+        hudHostingView?.removeFromSuperview()
+        hudHostingView = nil
+        guard let paneID else { return }
+        let view = AnyView(TokenHUDView(paneID: paneID))
+        let hosting = NSHostingView(rootView: view)
+        hosting.wantsLayer = true
+        hosting.layer?.zPosition = 50
+        addSubview(hosting)
+        hudHostingView = hosting
+        layoutHUD()
+    }
+
+    private func layoutHUD() {
+        guard let hud = hudHostingView else { return }
+        let padding: CGFloat = 8
+        let size = hud.fittingSize
+        // top-left corner (isFlipped: y=0 is top)
+        hud.frame = CGRect(
+            x: padding,
+            y: padding,
+            width: max(size.width, 68),
+            height: max(size.height, 28)
+        )
     }
 
     private func layoutSearchBar() {

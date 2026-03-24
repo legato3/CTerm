@@ -191,6 +191,7 @@ class SplitContainerView: NSView {
                     wrapper = existing
                 } else {
                     wrapper = SurfaceScrollView(surfaceView: surfaceView)
+                    wrapper.paneID = id
                     scrollWrappers[id] = wrapper
                 }
                 wrapper.frame = rect

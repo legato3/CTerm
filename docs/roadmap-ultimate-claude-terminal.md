@@ -112,7 +112,7 @@ Canvas-based sidebar panel ("network" icon tab) showing all connected peers and 
 
 ---
 
-### 9. Token Budget HUD
+### 9. Token Budget HUD ✅ **(Implemented)**
 
 Per-pane overlay (subtle, top-right corner):
 - Tokens used in current session
@@ -142,7 +142,8 @@ Queue multiple tasks for a Codex pane to process one after another:
 ✅ Phase 6:           File change tracker
 ✅ Phase 7:           Auto-accept mode
 ✅ Phase 8:           Visual IPC mesh
-○  Phase 9-10:        Token HUD, task queue
+✅ Phase 9:           Token Budget HUD
+○  Phase 10:          Task queue
 ```
 
 ---

@@ -30,6 +30,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     // Auto-accept monitors keyed by tab ID.
     private var autoAcceptMonitors: [UUID: AutoAcceptMonitor] = [:]
+    // Token-budget HUD monitors keyed by tab ID (always running, not user-toggled).
+    private var paneUsageMonitors: [UUID: PaneUsageMonitor] = [:]
 
     // O(1) surface-to-tab reverse lookup. Rebuilt lazily after any structural change.
     private var surfaceToTab: [UUID: (tab: Tab, group: TabGroup)] = [:]
@@ -119,6 +121,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         splitController.onSurfaceCreated = { [weak self] in self?.invalidateSurfaceToTab() }
 
         // TabLifecycleController callbacks
+        tabController.onTabCreated = { [weak self] tab in self?.startUsageMonitor(for: tab) }
         tabController.onActivateCurrentTab = { [weak self] in self?.activateCurrentTab() }
         tabController.onDeactivateCurrentTab = { [weak self] in self?.deactivateCurrentTab() }
         tabController.onRefreshHostingView = { [weak self] in self?.refreshHostingView() }
@@ -155,6 +158,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         setupShortcutManager()
         setupCommandRegistry()
         setupUI()
+        startUsageMonitorsForExistingTabs()
         if !restoring { setupTerminalSurface() }
         registerNotificationObservers()
         focusManager.onFocusFailed = { [weak self] in
@@ -1376,9 +1380,26 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     // MARK: - Helpers
 
+    private func startUsageMonitor(for tab: Tab) {
+        guard paneUsageMonitors[tab.id] == nil else { return }
+        let monitor = PaneUsageMonitor(tab: tab)
+        monitor.start()
+        paneUsageMonitors[tab.id] = monitor
+    }
+
+    private func startUsageMonitorsForExistingTabs() {
+        for group in windowSession.groups {
+            for tab in group.tabs {
+                startUsageMonitor(for: tab)
+            }
+        }
+    }
+
     private func cleanupTabResources(id tabID: UUID) {
         autoAcceptMonitors[tabID]?.stop()
         autoAcceptMonitors.removeValue(forKey: tabID)
+        paneUsageMonitors[tabID]?.stop()
+        paneUsageMonitors.removeValue(forKey: tabID)
         tabController.cleanupTabResources(id: tabID)
     }
 
