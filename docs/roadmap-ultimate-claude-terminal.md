@@ -100,15 +100,15 @@ Implemented: `AutoAcceptMonitor` polls each tab's surfaces every 400ms, detects 
 
 ## Tier 3 — Polish & Power
 
-### 8. Visual IPC Mesh
+### 8. Visual IPC Mesh ✅ **(Implemented)**
 
-Minimap-style view showing all connected peers and message flow:
-- Nodes = registered peers (Claude instances)
-- Arrows animate when messages are sent
-- Shows which agents are actively talking
-- Click a node to jump to that pane
-
-This is purely presentational — all the data exists in `IPCStore` already.
+Canvas-based sidebar panel ("network" icon tab) showing all connected peers and message flow:
+- **Nodes**: registered peers as circles, Calyx hub centered, others arranged in a circle
+- **Edges**: animated flow dot travels along each edge when a message was exchanged in the last 10s; older edges are dim
+- **Status colors**: green (active <30s), yellow (idle), gray (disconnected); active nodes pulse with a ring
+- **Click to focus**: tap any peer node → `runInPaneMatching` jumps to that agent's pane
+- **Recent message list**: last 4 messages shown below the canvas with from→to routing and topic color
+- **Empty states**: "MCP server offline" and "No peers connected" with guidance text
 
 ---
 
@@ -134,14 +134,15 @@ Queue multiple tasks for a Codex pane to process one after another:
 ## Implementation Order
 
 ```
-✅ Phase 1 (now):     MCP tool surface (9 new tools via TerminalControlBridge)
-○  Phase 2 (next):    Agent status panel + nudge
-○  Phase 3:           Context bridge / output capture
-○  Phase 4:           Prompt library + system prompts
-○  Phase 5:           Pre-edit checkpoint commits
+✅ Phase 1:           MCP tool surface (9 new tools via TerminalControlBridge)
+✅ Phase 2:           Agent status panel + nudge
+✅ Phase 3:           Context bridge / output capture
+✅ Phase 4:           Prompt library + system prompts
+✅ Phase 5:           Pre-edit checkpoint commits
 ✅ Phase 6:           File change tracker
 ✅ Phase 7:           Auto-accept mode
-○  Phase 8-10:        Visual mesh, token HUD, task queue
+✅ Phase 8:           Visual IPC mesh
+○  Phase 9-10:        Token HUD, task queue
 ```
 
 ---
