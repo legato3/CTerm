@@ -7,7 +7,14 @@
       "Read(//tmp/**)",
       "Bash(xargs wc:*)",
       "Bash(find /c/GitHub/Terminal -name *.swift -type f -exec grep -l \"git.*stage\\\\|git.*add\\\\|git.*commit\" {})",
-      "Bash(2)"
+      "Bash(2)",
+      "Bash(sed -n '540,550p' /Users/chris/Developer/Xcode/Terminal/Calyx/Views/MainWindow/CalyxWindowController.swift)",
+      "Bash(sed -n '1020,1035p' /Users/chris/Developer/Xcode/Terminal/Calyx/Views/MainWindow/CalyxWindowController.swift)",
+      "Bash(sed -n '1688,1698p' /Users/chris/Developer/Xcode/Terminal/Calyx/Views/MainWindow/CalyxWindowController.swift)",
+      "Bash(sed -i '' 's/        guard let snapshot = windowSnapshot\\(\\) else { return }/        let windowSnap = windowSnapshot\\(\\)/' /Users/chris/Developer/Xcode/Terminal/Calyx/Views/MainWindow/CalyxWindowController.swift)",
+      "Bash(sed -i '' 's/            try WorkspaceManager.save\\(snapshot, name: name\\)/            try WorkspaceManager.save\\(SessionSnapshot\\(windows: [windowSnap]\\), name: name\\)/' /Users/chris/Developer/Xcode/Terminal/Calyx/Views/MainWindow/CalyxWindowController.swift)",
+      "Bash(python3:*)",
+      "Bash(xcodegen generate:*)"
     ]
   }
 }
