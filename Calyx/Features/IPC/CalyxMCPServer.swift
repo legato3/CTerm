@@ -297,6 +297,18 @@ final class CalyxMCPServer {
         case "report_file_change":
             return await handleReportFileChange(id: id, arguments: arguments)
 
+        case "queue_task":
+            return handleQueueTask(id: id, arguments: arguments)
+
+        case "get_queue":
+            return handleGetQueue(id: id)
+
+        case "complete_task":
+            return handleCompleteTask(id: id, arguments: arguments)
+
+        case "clear_queue":
+            return handleClearQueue(id: id)
+
         default:
             return toolError(id: id, text: "Unknown tool: \(toolName)")
         }
@@ -648,6 +660,59 @@ final class CalyxMCPServer {
         let escapedPath = path.replacingOccurrences(of: "\\", with: "\\\\")
                              .replacingOccurrences(of: "\"", with: "\\\"")
         return toolSuccess(id: id, text: "{\"recorded\":true,\"path\":\"\(escapedPath)\"}")
+    }
+
+    // MARK: - Task Queue Handlers
+
+    private func handleQueueTask(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) -> (statusCode: Int, body: Data?) {
+        guard let prompt = arguments?["prompt"]?.stringValue, !prompt.isEmpty else {
+            return toolError(id: id, text: "Missing prompt")
+        }
+        let targetPeer = arguments?["target_peer"]?.stringValue
+        let position = arguments?["position"]?.rawValue as? Int
+        Task { @MainActor in
+            TaskQueueStore.shared.enqueue(prompt, targetPeerName: targetPeer, at: position)
+        }
+        return toolSuccess(id: id, text: "{\"queued\":true,\"pending\":\(TaskQueueStore.shared.pendingCount + 1)}")
+    }
+
+    private func handleGetQueue(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
+        let tasks = TaskQueueStore.shared.tasks
+        let items = tasks.map { t -> [String: Any] in
+            var d: [String: Any] = [
+                "id": t.id.uuidString,
+                "prompt": String(t.prompt.prefix(200)),
+                "status": t.status.rawValue,
+            ]
+            if let target = t.targetPeerName { d["target_peer"] = target }
+            if let snippet = t.resultSnippet { d["result_snippet"] = String(snippet.prefix(100)) }
+            return d
+        }
+        let json = (try? JSONSerialization.data(withJSONObject: ["tasks": items])).flatMap {
+            String(data: $0, encoding: .utf8)
+        } ?? "{\"tasks\":[]}"
+        return toolSuccess(id: id, text: json)
+    }
+
+    private func handleCompleteTask(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) -> (statusCode: Int, body: Data?) {
+        let result = arguments?["result"]?.stringValue
+        Task { @MainActor in
+            TaskQueueStore.shared.completeCurrent(result: result)
+        }
+        return toolSuccess(id: id, text: "{\"advanced\":true}")
+    }
+
+    private func handleClearQueue(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
+        Task { @MainActor in
+            TaskQueueStore.shared.clearPending()
+        }
+        return toolSuccess(id: id, text: "{\"cleared\":true}")
     }
 
     // MARK: - Response Helpers

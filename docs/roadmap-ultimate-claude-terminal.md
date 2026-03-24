@@ -122,12 +122,13 @@ Per-pane overlay (subtle, top-right corner):
 
 ---
 
-### 10. Sequential Task Queue for Codex
+### 10. Sequential Task Queue for Codex ✅ **(Implemented)**
 
-Queue multiple tasks for a Codex pane to process one after another:
-- Task 1 completes → result context is prepended to task 2 → auto-start
-- Backed by the IPC message bus: orchestrator agent manages the queue
-- UI: simple list in the sidebar, drag to reorder
+Queue multiple tasks for a Codex/Claude pane to process one after another:
+- **Auto-advance**: target peer goes idle (>30s since heartbeat + min 20s run time) → mark complete → inject next task
+- **Context prepend**: previous task's result snippet is prepended to the next prompt
+- **MCP tools**: `queue_task`, `get_queue`, `complete_task`, `clear_queue` — orchestrator agents manage the queue programmatically
+- **UI**: checklist icon sidebar tab with drag-to-reorder list, per-task status icons (⏳/▶️/✅/❌/⊘), target peer picker, start/pause toggle, inline add-task editor
 
 ---
 
@@ -143,7 +144,7 @@ Queue multiple tasks for a Codex pane to process one after another:
 ✅ Phase 7:           Auto-accept mode
 ✅ Phase 8:           Visual IPC mesh
 ✅ Phase 9:           Token Budget HUD
-○  Phase 10:          Task queue
+✅ Phase 10:          Sequential Task Queue
 ```
 
 ---

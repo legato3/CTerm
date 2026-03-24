@@ -487,6 +487,37 @@ struct MCPRouter: Sendable {
                 )
             ),
             MCPTool(
+                name: "queue_task",
+                description: "Add a task prompt to Calyx's sequential task queue. Tasks are injected one at a time into the target pane; when the current task's agent goes idle the next task starts automatically, with the previous result prepended as context.",
+                inputSchema: schema(
+                    properties: [
+                        "prompt": prop("string", "The full prompt or command to send to the target pane."),
+                        "target_peer": prop("string", "Name (or partial name) of the peer/pane to target. Omit to use the queue's configured default target."),
+                        "position": prop("number", "Insert at this 0-based position in the queue. Omit to append at end."),
+                    ],
+                    required: ["prompt"]
+                )
+            ),
+            MCPTool(
+                name: "get_queue",
+                description: "List all tasks in Calyx's task queue with their current status (pending/running/completed/failed/cancelled) and prompts.",
+                inputSchema: schema(properties: [:])
+            ),
+            MCPTool(
+                name: "complete_task",
+                description: "Mark the currently running task as completed and advance the queue to the next pending task. Call this from the target pane's agent when it finishes the work assigned by the queue.",
+                inputSchema: schema(
+                    properties: [
+                        "result": prop("string", "Optional short summary of what was accomplished. Prepended as context for the next task."),
+                    ]
+                )
+            ),
+            MCPTool(
+                name: "clear_queue",
+                description: "Cancel and remove all pending tasks from the queue. Running tasks are not affected.",
+                inputSchema: schema(properties: [:])
+            ),
+            MCPTool(
                 name: "report_file_change",
                 description: "Report that you modified a file. Call this after each file edit so Calyx can track changes in the File Changes sidebar. The path can be relative (to work_dir) or absolute.",
                 inputSchema: schema(

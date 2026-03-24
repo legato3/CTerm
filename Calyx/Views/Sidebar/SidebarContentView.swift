@@ -52,6 +52,8 @@ struct SidebarContentView: View {
                     .help("Agents").tag(SidebarMode.agents)
                 Image(systemName: "network")
                     .help("Mesh").tag(SidebarMode.mesh)
+                Image(systemName: "checklist")
+                    .help("Task Queue").tag(SidebarMode.taskQueue)
                 Image(systemName: "chart.bar.fill")
                     .help("Usage").tag(SidebarMode.usage)
                 Image(systemName: "doc.text.fill")
@@ -145,6 +147,9 @@ struct SidebarContentView: View {
                     .padding(.top, 4)
             } else if sidebarMode == .mesh {
                 IPCMeshView()
+                    .padding(.top, 4)
+            } else if sidebarMode == .taskQueue {
+                TaskQueueView()
                     .padding(.top, 4)
             } else if sidebarMode == .usage {
                 ClaudeUsageView()

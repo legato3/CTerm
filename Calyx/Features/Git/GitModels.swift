@@ -13,6 +13,7 @@ enum SidebarMode: Sendable {
     case usage
     case context
     case fileChanges
+    case taskQueue
 }
 
 enum GitChangesState: Sendable {
