@@ -14,7 +14,6 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private var splitContainerView: SplitContainerView?
     private var hostingView: NSHostingView<AnyView>?
     private let commandRegistry = CommandRegistry()
-    private var closingTabIDs: Set<UUID> = []
     private let focusManager = FocusManager()
     private let windowActions = WindowActions()
     private var isRestoring = false
@@ -25,6 +24,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private let composeController = ComposeOverlayController()
     private let windowViewState = WindowViewState()
     let mcpServer: CalyxMCPServer
+    private let splitController: SplitController
+    private let tabController: TabLifecycleController
+    private let ipcController: IPCWindowController
 
     // O(1) surface-to-tab reverse lookup. Rebuilt lazily after any structural change.
     private var surfaceToTab: [UUID: (tab: Tab, group: TabGroup)] = [:]
@@ -96,8 +98,46 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         self.isRestoring = restoring
         self.mcpServer = mcpServer
         self.gitController = GitController(windowSession: windowSession)
-        self.reviewController = ReviewController(windowSession: windowSession)
+        let rc = ReviewController(windowSession: windowSession)
+        self.reviewController = rc
+        self.splitController = SplitController(window: window)
+        self.tabController = TabLifecycleController(
+            windowSession: windowSession,
+            reviewController: rc,
+            browserManager: self.browserManager,
+            focusManager: self.focusManager
+        )
+        self.ipcController = IPCWindowController(mcpServer: mcpServer, windowSession: windowSession)
         super.init(window: window)
+
+        // SplitController callbacks
+        splitController.getActiveTab = { [weak self] in self?.activeTab }
+        splitController.getSplitContainerView = { [weak self] in self?.splitContainerView }
+        splitController.onSurfaceCreated = { [weak self] in self?.invalidateSurfaceToTab() }
+
+        // TabLifecycleController callbacks
+        tabController.onActivateCurrentTab = { [weak self] in self?.activateCurrentTab() }
+        tabController.onDeactivateCurrentTab = { [weak self] in self?.deactivateCurrentTab() }
+        tabController.onRefreshHostingView = { [weak self] in self?.refreshHostingView() }
+        tabController.onRebuildSplitContainerAndLayout = { [weak self] in
+            self?.rebuildSplitContainer()
+            self?.updateLayout()
+        }
+        tabController.onInvalidateSurfaceToTab = { [weak self] in self?.invalidateSurfaceToTab() }
+        tabController.onRequestSave = { [weak self] in self?.requestSave() }
+        tabController.onCloseWindow = { [weak self] in self?.window?.close() }
+        tabController.onRetargetComposeOverlay = { [weak self] in self?.retargetComposeOverlayIfNeeded() }
+        tabController.onDismissComposeOverlay = { [weak self] in self?.dismissComposeOverlay() }
+        tabController.getWindow = { [weak self] in self?.window }
+        tabController.getSplitContainerView = { [weak self] in self?.splitContainerView }
+
+        // IPCWindowController callbacks
+        ipcController.onCreateNewTab = { [weak self] pwd in self?.createNewTab(pwd: pwd) }
+        ipcController.onSwitchToTab = { [weak self] id in self?.switchToTab(id: id) }
+        ipcController.onSendEnterKey = { [weak self] controller in self?.sendEnterKey(to: controller) }
+        ipcController.getActiveTabPwd = { [weak self] in self?.activeTab?.pwd }
+        ipcController.onShowGitSidebar = { [weak self] in self?.gitController.refreshGitStatus() }
+
         gitController.onOpenDiff = { [weak self] source in self?.openDiffTab(source: source) }
         reviewController.onDiffStateChanged = { [weak self] in self?.refreshHostingView() }
         reviewController.onReviewChanged = { [weak self] in
@@ -105,7 +145,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             self?.updateViewState()
         }
         reviewController.sendToAgent = { [weak self] payload in
-            self?.sendReviewToAgent(payload) ?? .failed
+            self?.ipcController.sendToAgent(payload) ?? .failed
         }
         window.delegate = self
         window.center()
@@ -239,12 +279,12 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         commandRegistry.register(Command(id: "ipc.enable", title: "Enable AI Agent IPC", category: "IPC", isAvailable: { [weak self] in
             !(self?.mcpServer.isRunning ?? false)
         }) { [weak self] in
-            self?.enableIPC()
+            self?.ipcController.enableIPC()
         })
         commandRegistry.register(Command(id: "ipc.disable", title: "Disable AI Agent IPC", category: "IPC", isAvailable: { [weak self] in
             self?.mcpServer.isRunning ?? false
         }) { [weak self] in
-            self?.disableIPC()
+            self?.ipcController.disableIPC()
         })
         commandRegistry.register(Command(id: "cli.install", title: "Install CLI to PATH", category: "System") {
             let appPath = Bundle.main.bundlePath
@@ -514,302 +554,49 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     // MARK: - Tab Operations
 
     func createNewTab(inheritedConfig: Any? = nil, pwd: String? = nil) {
-        guard let app = GhosttyAppController.shared.app,
-              let window = self.window,
-              let group = windowSession.activeGroup else { return }
-
-        let tab = Tab()
-
-        var config: ghostty_surface_config_s
-        if let inherited = inheritedConfig as? ghostty_surface_config_s {
-            config = inherited
-        } else {
-            config = GhosttyFFI.surfaceConfigNew()
-        }
-        config.scale_factor = Double(window.backingScaleFactor)
-
-        guard let surfaceID = tab.registry.createSurface(app: app, config: config, pwd: pwd) else {
-            logger.error("Failed to create surface for new tab")
-            return
-        }
-
-        tab.splitTree = SplitTree(leafID: surfaceID)
-        invalidateSurfaceToTab()
-
-        // Pause current tab
-        activeTab?.registry.pauseAll()
-
-        group.addTab(tab)
-        group.activeTabID = tab.id
-
-        rebuildSplitContainer()
-        updateLayout()
-        refreshHostingView()
-
-        focusManager.restoreFocus(window: window, tab: activeTab, splitContainerView: splitContainerView)
-        retargetComposeOverlayIfNeeded()
-        requestSave()
+        tabController.createNewTab(inheritedConfig: inheritedConfig, pwd: pwd)
     }
 
     func createBrowserTab(url: URL) {
-        guard let group = windowSession.activeGroup else { return }
-        let tab = Tab(title: url.host() ?? url.absoluteString, content: .browser(url: url))
-
-        deactivateCurrentTab()
-
-        group.addTab(tab)
-        group.activeTabID = tab.id
-
-        let controller = BrowserTabController(url: url)
-        browserManager.register(controller, for: tab)
-
-        refreshHostingView()
-        DispatchQueue.main.async { [weak self] in
-            self?.window?.makeFirstResponder(controller.browserView)
-        }
-        requestSave()
+        tabController.createBrowserTab(url: url)
     }
 
     func promptAndOpenBrowserTab() {
-        let alert = NSAlert()
-        alert.messageText = "Open Browser Tab"
-        alert.informativeText = "Enter a URL:"
-        alert.addButton(withTitle: "Open")
-        alert.addButton(withTitle: "Cancel")
-
-        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-        textField.placeholderString = "https://example.com"
-        alert.accessoryView = textField
-
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return }
-
-        var input = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !input.isEmpty else { return }
-
-        // Normalize: add https:// if no scheme
-        if !input.contains("://") {
-            input = "https://" + input
-        }
-
-        guard let url = URL(string: input),
-              let scheme = url.scheme,
-              BrowserSecurity.isAllowedTopLevelScheme(scheme) else {
-            let errorAlert = NSAlert()
-            errorAlert.messageText = "Invalid URL"
-            errorAlert.informativeText = "Only http and https URLs are allowed."
-            errorAlert.alertStyle = .warning
-            errorAlert.runModal()
-            return
-        }
-
-        createBrowserTab(url: url)
+        tabController.promptAndOpenBrowserTab()
     }
 
     private func closeTab(id tabID: UUID) {
-        // Prevent double execution
-        guard !closingTabIDs.contains(tabID) else { return }
-
-        guard let group = windowSession.groups.first(where: { g in
-            g.tabs.contains(where: { $0.id == tabID })
-        }) else { return }
-        guard let tab = group.tabs.first(where: { $0.id == tabID }) else { return }
-
-        // Check for unsent review comments
-        if let store = reviewController.reviewStores[tabID], store.hasUnsubmittedComments {
-            let alert = NSAlert()
-            alert.messageText = "Unsent Review Comments"
-            alert.informativeText = "This diff tab has \(store.comments.count) unsent review comment(s). Closing will discard them."
-            alert.addButton(withTitle: "Discard & Close")
-            alert.addButton(withTitle: "Cancel")
-            let response = alert.runModal()
-            if response != .alertFirstButtonReturn {
-                return
-            }
-        }
-
-        closingTabIDs.insert(tabID)
-
-        cleanupTabResources(id: tabID)
-
-        // Destroy all surfaces in the tab
-        for surfaceID in tab.registry.allIDs {
-            tab.registry.destroySurface(surfaceID)
-        }
-        invalidateSurfaceToTab()
-
-        let result = windowSession.removeTab(id: tabID, fromGroup: group.id)
-
-        switch result {
-        case .switchedTab, .switchedGroup:
-            activateCurrentTab()
-        case .windowShouldClose:
-            window?.close()
-        }
-
-        refreshHostingView()
-        requestSave()
-        closingTabIDs.remove(tabID)
+        tabController.closeTab(id: tabID)
     }
 
     func switchToTab(id tabID: UUID) {
-        guard let targetGroup = windowSession.groups.first(where: { group in
-            group.tabs.contains(where: { $0.id == tabID })
-        }) else {
-            logger.warning("Attempted to switch to non-existent tab: \(tabID)")
-            return
-        }
-        let sameGroup = windowSession.activeGroupID == targetGroup.id
-        let sameTab = sameGroup && targetGroup.activeTabID == tabID
-        guard !sameTab else { return }
-
-        deactivateCurrentTab()
-        windowSession.activeGroupID = targetGroup.id
-        targetGroup.activeTabID = tabID
-        activateCurrentTab()
+        tabController.switchToTab(id: tabID)
     }
 
     func switchToGroup(id groupID: UUID) {
-        guard windowSession.groups.contains(where: { $0.id == groupID }) else {
-            logger.warning("Attempted to switch to non-existent group: \(groupID)")
-            return
-        }
-        guard windowSession.activeGroupID != groupID else { return }
-
-        dismissComposeOverlay()
-        deactivateCurrentTab()
-        windowSession.activeGroupID = groupID
-        activateCurrentTab()
+        tabController.switchToGroup(id: groupID)
     }
 
     // MARK: - Group Operations
 
     func createNewGroup() {
-        guard let app = GhosttyAppController.shared.app,
-              let window = self.window else { return }
-
-        let tab = Tab()
-
-        var config = GhosttyFFI.surfaceConfigNew()
-        config.scale_factor = Double(window.backingScaleFactor)
-
-        guard let surfaceID = tab.registry.createSurface(app: app, config: config) else {
-            logger.error("Failed to create surface for new group")
-            return
-        }
-
-        tab.splitTree = SplitTree(leafID: surfaceID)
-        invalidateSurfaceToTab()
-
-        // Pause current tab
-        activeTab?.registry.pauseAll()
-
-        let newColor = TabGroupColor.nextColor(excluding: windowSession.groups.map { $0.color })
-        let group = TabGroup(
-            name: "Group \(windowSession.groups.count + 1)",
-            color: newColor,
-            tabs: [tab],
-            activeTabID: tab.id
-        )
-
-        windowSession.addGroup(group)
-        windowSession.activeGroupID = group.id
-
-        rebuildSplitContainer()
-        updateLayout()
-        refreshHostingView()
-
-        focusManager.restoreFocus(window: window, tab: activeTab, splitContainerView: splitContainerView)
-        retargetComposeOverlayIfNeeded()
-        requestSave()
+        tabController.createNewGroup()
     }
 
     private func closeActiveGroup() {
-        guard let group = windowSession.activeGroup else { return }
-
-        // Mark all tabs as closing to prevent notification handler from double-deleting
-        let tabIDs = group.tabs.map { $0.id }
-        for tabID in tabIDs {
-            cleanupTabResources(id: tabID)
-            closingTabIDs.insert(tabID)
-        }
-
-        // Destroy all surfaces in all tabs of this group
-        for tab in group.tabs {
-            for surfaceID in tab.registry.allIDs {
-                tab.registry.destroySurface(surfaceID)
-            }
-        }
-        invalidateSurfaceToTab()
-
-        let result = windowSession.removeGroup(id: group.id)
-
-        for tabID in tabIDs {
-            closingTabIDs.remove(tabID)
-        }
-
-        switch result {
-        case .switchedTab(_, _), .switchedGroup(_, _):
-            activateCurrentTab()
-            refreshHostingView()
-            requestSave()
-        case .windowShouldClose:
-            window?.close()
-            requestSave()
-        }
+        tabController.closeActiveGroup()
     }
 
     private func closeAllTabsInGroup(id groupID: UUID) {
-        guard let group = windowSession.groups.first(where: { $0.id == groupID }) else { return }
-
-        let wasActiveGroup = (groupID == windowSession.activeGroupID)
-
-        if wasActiveGroup {
-            deactivateCurrentTab()
-        }
-
-        let tabIDs = group.tabs.map { $0.id }
-        for tabID in tabIDs {
-            cleanupTabResources(id: tabID)
-            closingTabIDs.insert(tabID)
-        }
-
-        for tab in group.tabs {
-            for surfaceID in tab.registry.allIDs {
-                tab.registry.destroySurface(surfaceID)
-            }
-        }
-        invalidateSurfaceToTab()
-
-        let result = windowSession.removeGroup(id: groupID)
-
-        for tabID in tabIDs {
-            closingTabIDs.remove(tabID)
-        }
-
-        switch result {
-        case .switchedTab(_, _), .switchedGroup(_, _):
-            if wasActiveGroup {
-                activateCurrentTab()
-            }
-            refreshHostingView()
-            requestSave()
-        case .windowShouldClose:
-            window?.close()
-            requestSave()
-        }
+        tabController.closeAllTabsInGroup(id: groupID)
     }
 
     private func switchToNextGroup() {
-        deactivateCurrentTab()
-        windowSession.nextGroup()
-        activateCurrentTab()
+        tabController.switchToNextGroup()
     }
 
     private func switchToPreviousGroup() {
-        deactivateCurrentTab()
-        windowSession.previousGroup()
-        activateCurrentTab()
+        tabController.switchToPreviousGroup()
     }
 
     @objc func toggleSidebar() {
@@ -882,15 +669,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     // MARK: - Split Operations
 
     private func handleDividerDrag(leafID: UUID, delta: Double, direction: SplitDirection) {
-        guard let tab = activeTab, let contentView = window?.contentView else { return }
-        tab.splitTree = tab.splitTree.resize(
-            node: leafID,
-            by: delta,
-            direction: direction,
-            bounds: contentView.bounds.size,
-            minSize: 50
-        )
-        splitContainerView?.updateLayout(tree: tab.splitTree)
+        splitController.handleDividerDrag(leafID: leafID, delta: delta, direction: direction)
     }
 
     private func registerNotificationObservers() {
@@ -948,41 +727,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func handleNewSplitNotification(_ notification: Notification) {
         guard let event = GhosttyNewSplitEvent.from(notification) else { return }
-        guard let tab = activeTab else { return }
-        guard let surfaceID = tab.registry.id(for: event.surfaceView) else { return }
-        guard belongsToThisWindow(event.surfaceView) else { return }
-
-        guard let app = GhosttyAppController.shared.app else { return }
-
-        let splitDir: SplitDirection
-        switch event.direction {
-        case GHOSTTY_SPLIT_DIRECTION_RIGHT, GHOSTTY_SPLIT_DIRECTION_LEFT:
-            splitDir = .horizontal
-        case GHOSTTY_SPLIT_DIRECTION_DOWN, GHOSTTY_SPLIT_DIRECTION_UP:
-            splitDir = .vertical
-        default:
-            splitDir = .horizontal
-        }
-
-        var config: ghostty_surface_config_s = event.inheritedConfig ?? GhosttyFFI.surfaceConfigNew()
-        if let window = self.window {
-            config.scale_factor = Double(window.backingScaleFactor)
-        }
-
-        guard let newSurfaceID = tab.registry.createSurface(app: app, config: config) else {
-            logger.error("Failed to create split surface")
-            return
-        }
-        invalidateSurfaceToTab()
-
-        let (newTree, _) = tab.splitTree.insert(at: surfaceID, direction: splitDir, newID: newSurfaceID)
-        tab.splitTree = newTree
-
-        splitContainerView?.updateLayout(tree: tab.splitTree)
-
-        if let newView = tab.registry.view(for: newSurfaceID) {
-            window?.makeFirstResponder(newView)
-        }
+        splitController.handleNewSplit(event: event)
     }
 
     @objc private func handleCloseSurfaceNotification(_ notification: Notification) {
@@ -999,7 +744,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         invalidateSurfaceToTab()
 
         // If closeTab is handling this tab, skip tab removal (closeTab will do it)
-        if closingTabIDs.contains(owningTab.id) {
+        if tabController.closingTabIDs.contains(owningTab.id) {
             return
         }
 
@@ -1030,76 +775,16 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func handleGotoSplitNotification(_ notification: Notification) {
         guard let event = GhosttyGotoSplitEvent.from(notification) else { return }
-        guard let tab = activeTab else { return }
-        guard let surfaceID = tab.registry.id(for: event.surfaceView) else { return }
-        guard belongsToThisWindow(event.surfaceView) else { return }
-
-        let focusDir: FocusDirection
-        switch event.direction {
-        case GHOSTTY_GOTO_SPLIT_PREVIOUS: focusDir = .previous
-        case GHOSTTY_GOTO_SPLIT_NEXT: focusDir = .next
-        case GHOSTTY_GOTO_SPLIT_LEFT: focusDir = .spatial(.left)
-        case GHOSTTY_GOTO_SPLIT_RIGHT: focusDir = .spatial(.right)
-        case GHOSTTY_GOTO_SPLIT_UP: focusDir = .spatial(.up)
-        case GHOSTTY_GOTO_SPLIT_DOWN: focusDir = .spatial(.down)
-        default: focusDir = .next
-        }
-
-        guard let targetID = tab.splitTree.focusTarget(for: focusDir, from: surfaceID) else { return }
-        tab.splitTree.focusedLeafID = targetID
-
-        if let targetView = tab.registry.view(for: targetID) {
-            window?.makeFirstResponder(targetView)
-        }
+        splitController.handleGotoSplit(event: event)
     }
 
     @objc private func handleResizeSplitNotification(_ notification: Notification) {
         guard let event = GhosttyResizeSplitEvent.from(notification) else { return }
-        let surfaceView = event.surfaceView
-        guard let tab = activeTab else { return }
-        guard let surfaceID = tab.registry.id(for: surfaceView) else { return }
-        guard belongsToThisWindow(surfaceView) else { return }
-        guard let contentView = window?.contentView else { return }
-
-        let resize = event.resize
-
-        let direction: SplitDirection
-        switch resize.direction {
-        case GHOSTTY_RESIZE_SPLIT_LEFT, GHOSTTY_RESIZE_SPLIT_RIGHT:
-            direction = .horizontal
-        case GHOSTTY_RESIZE_SPLIT_UP, GHOSTTY_RESIZE_SPLIT_DOWN:
-            direction = .vertical
-        default:
-            direction = .horizontal
-        }
-
-        let sign: Double
-        switch resize.direction {
-        case GHOSTTY_RESIZE_SPLIT_RIGHT, GHOSTTY_RESIZE_SPLIT_DOWN:
-            sign = 1.0
-        default:
-            sign = -1.0
-        }
-
-        let amount = Double(resize.amount) * sign
-        tab.splitTree = tab.splitTree.resize(
-            node: surfaceID,
-            by: amount,
-            direction: direction,
-            bounds: contentView.bounds.size,
-            minSize: 50
-        )
-        splitContainerView?.updateLayout(tree: tab.splitTree)
+        splitController.handleResizeSplit(event: event)
     }
 
     @objc private func handleEqualizeSplitsNotification(_ notification: Notification) {
-        if let surfaceView = notification.object as? SurfaceView {
-            guard belongsToThisWindow(surfaceView) else { return }
-        }
-
-        guard let tab = activeTab else { return }
-        tab.splitTree = tab.splitTree.equalize()
-        splitContainerView?.updateLayout(tree: tab.splitTree)
+        splitController.handleEqualizeSplits(surfaceView: notification.object as? SurfaceView)
     }
 
     @objc private func handleSetTitleNotification(_ notification: Notification) {
@@ -1332,26 +1017,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     // MARK: - Menu Actions
 
     @objc func jumpToMostRecentUnreadTab() {
-        var mostRecentTab: Tab?
-        var mostRecentTime: Date?
-
-        for group in windowSession.groups {
-            for tab in group.tabs {
-                guard tab.unreadNotifications > 0,
-                      let time = tab.lastNotificationTime else { continue }
-                if mostRecentTime == nil || time > mostRecentTime! {
-                    mostRecentTab = tab
-                    mostRecentTime = time
-                }
-            }
-        }
-
-        guard let target = mostRecentTab else {
-            NSSound.beep()
-            return
-        }
-
-        switchToTab(id: target.id)
+        tabController.jumpToMostRecentUnreadTab()
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
@@ -1401,10 +1067,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func selectTabByIndex(_ index: Int) {
-        guard index >= 0 else { return }
-        deactivateCurrentTab()
-        windowSession.selectTab(at: index)
-        activateCurrentTab()
+        tabController.selectTabByIndex(index)
     }
 
     // MARK: - Session Persistence
@@ -1475,12 +1138,11 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     // MARK: - Helpers
 
     private func cleanupTabResources(id tabID: UUID) {
-        browserManager.cleanupTab(id: tabID)
-        reviewController.cleanupTab(id: tabID)
+        tabController.cleanupTabResources(id: tabID)
     }
 
     private func belongsToThisWindow(_ view: NSView) -> Bool {
-        view.window === self.window
+        splitController.belongsToThisWindow(view)
     }
 
     private func invalidateSurfaceToTab() {
@@ -1574,11 +1236,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         }
 
         // Mark all tabs as closing to prevent notification handler interference
-        for group in windowSession.groups {
-            for tab in group.tabs {
-                closingTabIDs.insert(tab.id)
-            }
-        }
+        tabController.markAllTabsAsClosing(in: windowSession)
 
         // Destroy all surfaces in all tabs
         for group in windowSession.groups {
@@ -1634,244 +1292,23 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
 
     // MARK: - IPC
 
-    private func enableIPC() {
-        do {
-            let token = SecurityUtils.generateHexToken()
-
-            // Start server first to get the port
-            try mcpServer.start(token: token)
-            let port = mcpServer.port
-
-            // Write config to all available agent tools
-            let result = IPCConfigManager.enableIPC(port: port, token: token)
-
-            if !result.anySucceeded {
-                mcpServer.stop()
-                showIPCAlert(
-                    title: "IPC Error",
-                    message: "MCP server running on port \(port).\nNo agent configs found. Configure manually if needed."
-                )
-                return
-            }
-
-            UserDefaults.standard.set(true, forKey: "calyx.ipcAutoStart")
-            IPCAgentState.shared.startPolling()
-            showIPCAlert(
-                title: "IPC Enabled",
-                message: "MCP server running on port \(port).\n\(configStatusMessage(result))\nRestart agent instances to connect."
-            )
-        } catch {
-            showIPCAlert(title: "IPC Error", message: error.localizedDescription)
-        }
-    }
-
-    private func disableIPC() {
-        UserDefaults.standard.set(false, forKey: "calyx.ipcAutoStart")
-        mcpServer.stop()
-        IPCAgentState.shared.stopPolling()
-        IPCAgentState.shared.clearLog()
-        let result = IPCConfigManager.disableIPC()
-        showIPCAlert(
-            title: "IPC Disabled",
-            message: "MCP server stopped.\n\(configStatusMessage(result))"
-        )
-    }
-
-    private func configStatusMessage(_ result: IPCConfigResult) -> String {
-        func label(_ status: ConfigStatus, name: String) -> String {
-            switch status {
-            case .success:
-                return "\(name): configured"
-            case .skipped(let reason):
-                return "\(name): \(reason) (skipped)"
-            case .failed(let error):
-                return "\(name): error - \(error.localizedDescription)"
-            }
-        }
-        return [
-            label(result.claudeCode, name: "Claude Code"),
-            label(result.codex, name: "Codex")
-        ].joined(separator: "\n")
-    }
-
     // MARK: - IPC Notification Handlers
 
     @objc private func handleIPCEnableNotification(_ notification: Notification) {
-        enableIPC()
+        ipcController.enableIPC()
     }
 
     @objc private func handleIPCDisableNotification(_ notification: Notification) {
-        disableIPC()
+        ipcController.disableIPC()
     }
 
     @objc private func handleIPCReviewRequestedNotification(_ notification: Notification) {
-        windowSession.sidebarMode = .changes
-        windowSession.showSidebar = true
-        gitController.refreshGitStatus()
+        ipcController.handleReviewRequested()
     }
 
     @objc private func handleIPCLaunchWorkflowNotification(_ notification: Notification) {
         guard let event = CalyxIPCLaunchWorkflowEvent.from(notification) else { return }
-        let roleNames = event.roleNames
-        let autoStart = event.autoStart
-        let sessionName = event.sessionName
-        let initialTask = event.initialTask
-        let port = mcpServer.port
-
-        // Show folder picker before creating any tabs
-        let panel = NSOpenPanel()
-        panel.title = "Choose Session Directory"
-        panel.message = "All agent tabs will open in this folder."
-        panel.prompt = "Open"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
-
-        // Default to the current tab's working directory if available
-        if let tabPwd = activeTab?.pwd {
-            panel.directoryURL = URL(fileURLWithPath: tabPwd)
-        }
-
-        guard panel.runModal() == .OK, let chosenURL = panel.url else { return }
-        let pwd = chosenURL.path
-
-        // Record workflow for "Rejoin Session"
-        IPCAgentState.shared.lastWorkflow = roleNames
-
-        // Name the active group if a session name was provided
-        if !sessionName.isEmpty {
-            windowSession.activeGroup?.name = sessionName
-        }
-
-        // Create all tabs and capture references before any async work
-        var createdTabs: [Tab] = []
-        for roleName in roleNames {
-            createNewTab(pwd: pwd)
-            if let newTab = windowSession.activeGroup?.tabs.last {
-                newTab.title = roleName
-                createdTabs.append(newTab)
-            }
-        }
-
-        // Broadcast initial task to all agents once they should be registered
-        if !initialTask.isEmpty && autoStart {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) {
-                Task { @MainActor in
-                    await self.mcpServer.ensureAppPeerRegistered()
-                    guard let appPeerID = self.mcpServer.appPeerID else { return }
-                    _ = try? await self.mcpServer.store.broadcast(
-                        from: appPeerID,
-                        content: initialTask,
-                        topic: "task"
-                    )
-                }
-            }
-        }
-
-        guard autoStart, createdTabs.count == roleNames.count else { return }
-
-        for (index, (tab, roleName)) in zip(createdTabs, roleNames).enumerated() {
-            let baseDelay = Double(index) * 0.15  // slight stagger so shells init independently
-
-            // Step 1: start claude once the shell is ready
-            DispatchQueue.main.asyncAfter(deadline: .now() + baseDelay + 0.8) { [weak self] in
-                guard let self,
-                      let leafID = tab.splitTree.focusedLeafID,
-                      let controller = tab.registry.controller(for: leafID) else { return }
-                controller.sendText("claude")
-                self.sendEnterKey(to: controller)
-
-                // Step 2: send role context after claude has initialised
-                let prompt = AgentWorkflow.rolePrompt(roleName: roleName, allRoles: roleNames, port: port)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
-                    guard let self,
-                          let leafID = tab.splitTree.focusedLeafID,
-                          let controller = tab.registry.controller(for: leafID) else { return }
-                    controller.sendText(prompt)
-                    // Two enters: first confirms claude's paste dialog, second submits
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                        guard let self else { return }
-                        self.sendEnterKey(to: controller)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            self.sendEnterKey(to: controller)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func sendReviewToAgent(_ payload: String) -> ReviewSendResult {
-        // Find terminal tabs running Claude Code (title contains "claude" or "codex")
-        let agentTabs = windowSession.groups.flatMap(\.tabs).filter {
-            guard case .terminal = $0.content else { return false }
-            let title = $0.title
-            return title.localizedCaseInsensitiveContains("claude") ||
-                   title.localizedCaseInsensitiveContains("codex")
-        }
-
-        guard !agentTabs.isEmpty else {
-            showIPCAlert(title: "No AI Agent", message: "No terminal tabs running Claude Code or Codex found. Start an AI agent first.")
-            return .failed
-        }
-
-        // Select target tab
-        let targetTab: Tab
-        if agentTabs.count == 1 {
-            targetTab = agentTabs[0]
-        } else {
-            let alert = NSAlert()
-            alert.messageText = "Select Claude Code Tab"
-            alert.informativeText = "Choose which Claude Code instance to send the review to:"
-            alert.addButton(withTitle: "Send")
-            alert.addButton(withTitle: "Cancel")
-
-            let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-            for (i, tab) in agentTabs.enumerated() {
-                let groupName = windowSession.groups.first { $0.tabs.contains { $0.id == tab.id } }?.name ?? ""
-                let label = "\(tab.title) — \(groupName) (#\(i + 1))"
-                popup.addItem(withTitle: label)
-            }
-            alert.accessoryView = popup
-
-            let response = alert.runModal()
-            guard response == .alertFirstButtonReturn else { return .cancelled }
-
-            let selectedIndex = popup.indexOfSelectedItem
-            guard selectedIndex >= 0, selectedIndex < agentTabs.count else { return .failed }
-            targetTab = agentTabs[selectedIndex]
-        }
-
-        // Send review text to terminal PTY via ghostty surface
-        guard let focusedID = targetTab.splitTree.focusedLeafID,
-              let controller = targetTab.registry.controller(for: focusedID) else {
-            showIPCAlert(title: "Send Failed", message: "Could not access terminal surface.")
-            return .failed
-        }
-
-        controller.sendText(payload)
-        // Send Enter twice: first to confirm paste, second to submit
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.sendEnterKey(to: controller)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.sendEnterKey(to: controller)
-            }
-        }
-
-        // Switch to the target terminal tab
-        switchToTab(id: targetTab.id)
-
-        return .sent
-    }
-
-    private func showIPCAlert(title: String, message: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+        ipcController.handleLaunchWorkflow(event: event)
     }
 
 }

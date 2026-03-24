@@ -237,6 +237,127 @@ final class ComposeOverlayController {
 ### Risk
 Low. Clean boundary: compose overlay state and text dispatch logic is self-contained. CalyxWindowController retains ownership of focus restoration (since that requires `focusManager` and window context).
 
+## Step 9: ✅ Extract SplitController (done)
+
+### What
+Created `Calyx/Views/MainWindow/SplitController.swift`:
+
+```swift
+@MainActor
+final class SplitController {
+    private weak var window: NSWindow?
+    var getActiveTab: (() -> Tab?)?
+    var getSplitContainerView: (() -> SplitContainerView?)?
+    var onSurfaceCreated: (() -> Void)?
+
+    func belongsToThisWindow(_ view: NSView) -> Bool
+    func handleNewSplit(event: GhosttyNewSplitEvent)
+    func handleGotoSplit(event: GhosttyGotoSplitEvent)
+    func handleResizeSplit(event: GhosttyResizeSplitEvent)
+    func handleEqualizeSplits(surfaceView: SurfaceView?)
+    func handleDividerDrag(leafID: UUID, delta: Double, direction: SplitDirection)
+}
+```
+
+### What moved from CalyxWindowController
+- Full bodies of `handleNewSplitNotification`, `handleGotoSplitNotification`, `handleResizeSplitNotification`, `handleEqualizeSplitsNotification`, `handleDividerDrag`
+- `belongsToThisWindow` — CWC delegates to `splitController.belongsToThisWindow(_:)`
+- Note: `handleCloseSurfaceNotification` remains in CWC — it mixes split-tree and tab-lifecycle concerns
+
+### Risk
+Low. All split operations are self-contained in the split tree; no tab model mutation.
+
+## Step 10: ✅ Extract IPCWindowController (done)
+
+### What
+Created `Calyx/Features/IPC/IPCWindowController.swift`:
+
+```swift
+@MainActor
+final class IPCWindowController {
+    private let mcpServer: CalyxMCPServer
+    private weak var windowSession: WindowSession?
+
+    var onCreateNewTab: ((String?) -> Void)?
+    var onSwitchToTab: ((UUID) -> Void)?
+    var onSendEnterKey: ((GhosttySurfaceController) -> Void)?
+    var getActiveTabPwd: (() -> String?)?
+    var onShowGitSidebar: (() -> Void)?
+
+    func enableIPC()
+    func disableIPC()
+    func handleReviewRequested()
+    func handleLaunchWorkflow(event: CalyxIPCLaunchWorkflowEvent)
+    func sendToAgent(_ payload: String) -> ReviewSendResult
+}
+```
+
+### What moved from CalyxWindowController
+- `enableIPC()`, `disableIPC()`, `showIPCAlert()`, `configStatusMessage()` — IPC toggle cluster
+- `handleIPCLaunchWorkflowNotification` body → `handleLaunchWorkflow(event:)`
+- `handleIPCReviewRequestedNotification` body → `handleReviewRequested()`
+- `sendReviewToAgent(_:)` → `sendToAgent(_:)`
+- `reviewController.sendToAgent` callback updated to call `ipcController.sendToAgent`
+
+### Risk
+Medium. Workflow launch creates tabs (via callback) and sends keystrokes (via callback). Timing-dependent async delays unchanged.
+
+## Step 11: ✅ Extract TabLifecycleController (done)
+
+### What
+Created `Calyx/Views/MainWindow/TabLifecycleController.swift`:
+
+```swift
+@MainActor
+final class TabLifecycleController {
+    private weak var windowSession: WindowSession?
+    private let reviewController: ReviewController
+    private let browserManager: BrowserManager
+    private let focusManager: FocusManager
+    private(set) var closingTabIDs: Set<UUID> = []
+
+    func createNewTab(inheritedConfig: Any? = nil, pwd: String? = nil)
+    func createBrowserTab(url: URL)
+    func promptAndOpenBrowserTab()
+    func closeTab(id: UUID)
+    func switchToTab(id: UUID)
+    func switchToGroup(id: UUID)
+    func createNewGroup()
+    func closeActiveGroup()
+    func closeAllTabsInGroup(id: UUID)
+    func switchToNextGroup()
+    func switchToPreviousGroup()
+    func selectTabByIndex(_ index: Int)
+    func jumpToMostRecentUnreadTab()
+    func cleanupTabResources(id: UUID)
+    func markAllTabsAsClosing(in session: WindowSession)
+}
+```
+
+### What moved from CalyxWindowController
+- All tab/group creation, switching, and teardown methods
+- `closingTabIDs` guard set (was CWC property)
+- `cleanupTabResources` (now delegates to browserManager + reviewController)
+- `jumpToMostRecentUnreadTab`, `selectTabByIndex`
+- `createNewGroup`, `closeActiveGroup`, `closeAllTabsInGroup`, `switchToNextGroup`, `switchToPreviousGroup`
+
+### CWC after Step 11
+- 1,314 lines (down from 1,877 before Step 9)
+- All method stubs delegate to the appropriate controller
+- `handleCloseSurfaceNotification` remains (mixes split + tab lifecycle); reads `tabController.closingTabIDs`
+
+### Risk
+Medium. Many callbacks required (10 view-side effects). All are [weak self] closures wired in CWC.init after super.init().
+
+## Remaining Work
+
+Two notification handlers have incomplete implementations (not yet functional):
+- `handleColorChangeNotification` — logs only; background color sync to window pending theme integration
+- `handleShowChildExitedNotification` — logs only; any "shell exited" UX would go here
+
+One structural item remains:
+- `handleCloseSurfaceNotification` (~40 lines) still in CWC — mixes split-tree removal and tab teardown; deferred because both TabLifecycleController and SplitController would need to participate
+
 ## What NOT to Touch Yet
 
 | Component | Why |

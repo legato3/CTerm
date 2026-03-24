@@ -86,27 +86,23 @@ enum SecurityUtils {
 
 **Visible effect**: Reduced duplication, consistent security behavior.
 
-## 5. ⚠️ Delete unused notification names (deferred — not dead code)
+## 5. ✅ Add observers for all 9 previously-unhandled notifications (done)
 
-**What**: Grep for observers of each notification name. Delete any that have zero observers:
+**What was missing**: 9 notification names were posted by `GhosttyAction.swift` but had no observers in `CalyxWindowController`, silently discarding real libghostty callbacks.
 
-```bash
-# Run for each name:
-grep -r "ghosttyCloseTab" --include="*.swift" Calyx/
-grep -r "ghosttyCloseWindow" --include="*.swift" Calyx/
-# ... etc
-```
+**What was done**: All 9 handlers added to `CalyxWindowController` and registered in `setupNotificationObservers()`:
 
-**Why**: 28 notification names defined, but likely 10+ are unused. Reduces confusion for maintainer.
-
-**Visible effect**: Cleaner API surface; easier to understand which notifications matter.
-
-**Audit result**: 9 names (`ghosttyCloseTab`, `ghosttyCloseWindow`, `ghosttyToggleFullscreen`,
-`ghosttyRingBell`, `ghosttyShowChildExited`, `ghosttyRendererHealth`, `ghosttyColorChange`,
-`ghosttyInitialSize`, `ghosttySizeLimit`) have no observers — but they are posted from
-`GhosttyAction.swift` in response to real libghostty callbacks. Deleting them without adding
-observers would silently discard real user actions (Cmd+W from ghostty config, bell, etc.).
-These are **unimplemented handlers**, not dead code. Fix: add observers in CalyxWindowController.
+| Notification | Handler | Behavior |
+|---|---|---|
+| `ghosttyCloseTab` | `handleCloseTabNotification` | Full — supports mode (this/other/right) |
+| `ghosttyCloseWindow` | `handleCloseWindowNotification` | Full — closes window |
+| `ghosttyToggleFullscreen` | `handleToggleFullscreenNotification` | Full — toggles fullscreen |
+| `ghosttyRingBell` | `handleRingBellNotification` | Full — `NSSound.beep()` |
+| `ghosttyShowChildExited` | `handleShowChildExitedNotification` | Partial — logs only; overlay UX not yet implemented |
+| `ghosttyRendererHealth` | `handleRendererHealthNotification` | Partial — logs warning; no user-visible recovery UI |
+| `ghosttyColorChange` | `handleColorChangeNotification` | Partial — logs only; background color sync pending theme integration |
+| `ghosttyInitialSize` | `handleInitialSizeNotification` | Full — resizes window to requested cell dimensions |
+| `ghosttySizeLimit` | `handleSizeLimitNotification` | Full — clamps window to min/max cell dimensions |
 
 ## 6. ✅ Move performDebugSelect() behind #if DEBUG
 

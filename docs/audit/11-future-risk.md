@@ -4,9 +4,9 @@ Assumes active development on this fork for 12 months.
 
 ## What Will Become Painful
 
-### 1. ✅ CalyxWindowController keeps growing — MITIGATED
+### 1. ⚠️ CalyxWindowController keeps growing — PARTIALLY MITIGATED
 
-8 extraction steps completed: TabCleanupHelper, GitController, ReviewController, FocusManager, typed notifications, WindowActions environment, BrowserManager, ComposeOverlayController. File is now ~1,900 lines. Remaining responsibilities: split operations, IPC enable/disable, review dispatch, tab/group lifecycle.
+8 extraction steps completed: TabCleanupHelper, GitController, ReviewController, FocusManager, typed notifications, WindowActions environment, BrowserManager, ComposeOverlayController. File is now ~1,877 lines. Remaining responsibility clusters not yet extracted: tab/group lifecycle, split operations, IPC enable/disable, review dispatch. See `10-refactor-plan.md` for planned Steps 9+.
 
 ### 2. ✅ Ghostty submodule updates — MITIGATED
 

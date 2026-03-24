@@ -74,21 +74,21 @@ If the posting side changes the key name or value type, the receiving side silen
 
 ## Top 5 Structural Risks
 
-### 1. CalyxWindowController (1,965 lines)
+### 1. ⚠️ CalyxWindowController (~1,314 lines) — SUBSTANTIALLY MITIGATED
 
-Any feature addition touches this file. Merge conflicts guaranteed. It mixes UI coordination, data loading, IPC, git, browser, and review logic. Every callback closure in MainContentView traces back here.
+11 extraction steps completed (Steps 1-11 of `10-refactor-plan.md`). Extracted: GitController, ReviewController, FocusManager, BrowserManager, ComposeOverlayController, WindowActions, SplitController, IPCWindowController, TabLifecycleController. Remaining: `handleCloseSurfaceNotification` mixes split + tab concerns and stays in CWC. File is still large but responsibilities are cleaner.
 
-### 2. 28 NotificationCenter names with untyped payloads
+### 2. ✅ 28 NotificationCenter names with untyped payloads — FIXED
 
-Adding/changing a notification requires tracing all observers manually. Payload mismatches fail silently at runtime. The 28 names are defined in `GhosttyApp.swift:528-556` but observers are spread across `CalyxWindowController`, `AppDelegate`, `SurfaceView`, `SurfaceScrollView`, and `GhosttyAppController`.
+All 28 notification handlers now use typed event wrappers (`GhosttyNotificationEvents.swift`). Every `userInfo` payload access goes through a typed `from(_:)` factory. Payload mismatches now cause a `nil` return at the factory boundary rather than silently using wrong data.
 
-### 3. 10 singletons with no dependency injection
+### 3. ⚠️ 10 singletons with no dependency injection — PARTIALLY MITIGATED
 
-Testing requires `#if DEBUG` backdoors (e.g., `CalyxMCPServer._testSetToken()`). Singletons are accessed via `.shared` throughout, making isolation impossible. Cannot run two instances of any singleton in tests.
+`CalyxMCPServer._testSetToken()` `#if DEBUG` backdoor removed; tests now use `CalyxMCPServer(testToken:)`. `CalyxWindowController` accepts injected `mcpServer`. Remaining: `GhosttyAppController.shared`, `ClaudeUsageMonitor.shared`, and 7 other singletons still require the full app for testing.
 
-### 4. Callback-closure architecture for view-to-controller communication
+### 4. ✅ Callback-closure architecture for view-to-controller communication — FIXED
 
-`MainContentView` takes 22+ optional closures. Adding any feature requires threading another closure through the entire chain. This approach does not scale and makes the code hard to follow.
+Replaced with `WindowActions` `@Observable` environment object injected via `.environment()`. Views read only the actions they need directly. The original 22+ closures are gone.
 
 ### 5. nonisolated(unsafe) usage (25 instances)
 
