@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(grep:*)",
+      "Bash(/tmp/findings_summary.txt:*)",
+      "Read(//tmp/**)",
+      "Bash(xargs wc:*)",
+      "Bash(find /c/GitHub/Terminal -name *.swift -type f -exec grep -l \"git.*stage\\\\|git.*add\\\\|git.*commit\" {})",
+      "Bash(2)"
+    ]
+  }
+}
