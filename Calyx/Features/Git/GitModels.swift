@@ -14,6 +14,10 @@ enum SidebarMode: Sendable {
     case context
     case fileChanges
     case taskQueue
+    case agentMemory
+    case testRunner
+    case triggers
+    case auditLog
 }
 
 enum GitChangesState: Sendable {

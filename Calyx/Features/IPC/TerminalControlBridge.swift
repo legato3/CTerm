@@ -118,4 +118,16 @@ final class TerminalControlBridge {
     weak var delegate: (any TerminalControl)?
 
     private init() {}
+
+    /// Convenience: inject `text` (with Enter) into the nearest auto-accept tab,
+    /// falling back to the active tab. Used by sidebar panels that route to Claude.
+    func routeToNearestClaudePaneOrActive(text: String) {
+        guard let delegate else { return }
+        let session = delegate.terminalWindowSession
+        let allTabs = session.groups.flatMap(\.tabs)
+        let target = allTabs.first { $0.autoAcceptEnabled } ?? session.activeGroup?.activeTab
+        if let target {
+            delegate.runInPane(tabID: target.id, paneID: nil, text: text, pressEnter: true)
+        }
+    }
 }

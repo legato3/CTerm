@@ -28,6 +28,8 @@ class Tab: Identifiable {
     var autoAcceptEnabled: Bool = false
     /// Session log of auto-accepted events for this tab.
     var autoAcceptLog: [AutoAcceptEvent] = []
+    /// Most recent shell error detected in this tab. Cleared after routing or dismissal.
+    var lastShellError: ShellErrorEvent? = nil
     let registry: SurfaceRegistry
 
     init(

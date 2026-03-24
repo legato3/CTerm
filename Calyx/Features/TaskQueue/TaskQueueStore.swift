@@ -21,6 +21,47 @@ enum TaskStatus: String, Sendable, Codable, CaseIterable {
     case cancelled
 }
 
+// MARK: - TaskModel
+
+/// The Claude model to use when processing a task.
+enum TaskModel: String, Sendable, Codable, CaseIterable, Identifiable {
+    case auto
+    case haiku
+    case sonnet
+    case opus
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .auto: return "Auto"
+        case .haiku: return "Haiku"
+        case .sonnet: return "Sonnet"
+        case .opus: return "Opus"
+        }
+    }
+
+    /// The model ID passed to `--model` flag. `nil` means no flag (inherit session model).
+    var modelID: String? {
+        switch self {
+        case .auto: return nil  // resolved at inject time via keyword inference
+        case .haiku: return "claude-haiku-4-5-20251001"
+        case .sonnet: return "claude-sonnet-4-6"
+        case .opus: return "claude-opus-4-6"
+        }
+    }
+
+    /// Infer a concrete model from task description keywords.
+    static func infer(from prompt: String) -> TaskModel {
+        let lower = prompt.lowercased()
+        let opusKeywords = ["architect", "design", "plan", "analyze", "analyse", "review", "audit", "strategy"]
+        let haikuKeywords = ["explain", "summarize", "summarise", "what is", "describe", "list", "show me", "how does"]
+        if opusKeywords.contains(where: { lower.contains($0) }) { return .opus }
+        if haikuKeywords.contains(where: { lower.contains($0) }) { return .haiku }
+        return .sonnet  // default for refactor, implement, fix, write, etc.
+    }
+}
+
 // MARK: - QueuedTask
 
 struct QueuedTask: Identifiable, Sendable, Codable {
@@ -28,6 +69,8 @@ struct QueuedTask: Identifiable, Sendable, Codable {
     var prompt: String
     /// Override the queue's default target peer for this individual task.
     var targetPeerName: String?
+    /// Model to use for this task. `.auto` infers from prompt keywords at inject time.
+    var model: TaskModel
     var status: TaskStatus
     /// Brief snippet captured on completion (from peer's last IPC message).
     var resultSnippet: String?
@@ -35,10 +78,11 @@ struct QueuedTask: Identifiable, Sendable, Codable {
     var startedAt: Date?
     var completedAt: Date?
 
-    init(prompt: String, targetPeerName: String? = nil) {
+    init(prompt: String, targetPeerName: String? = nil, model: TaskModel = .auto) {
         self.id = UUID()
         self.prompt = prompt
         self.targetPeerName = targetPeerName
+        self.model = model
         self.status = .pending
         self.createdAt = .now
     }
@@ -63,6 +107,8 @@ final class TaskQueueStore {
     /// Default peer name to target (e.g. "codex-worker").  Falls back to
     /// `runInPaneMatching` with any active peer if empty.
     var defaultTargetPeerName: String = ""
+    /// Default model for newly-added tasks.
+    var defaultModel: TaskModel = .auto
     /// Minimum seconds a task must run before it can be auto-completed.
     var minRunSeconds: TimeInterval = 20
 
@@ -74,8 +120,8 @@ final class TaskQueueStore {
 
     // MARK: - Mutations (UI + MCP)
 
-    func enqueue(_ prompt: String, targetPeerName: String? = nil, at position: Int? = nil) {
-        let task = QueuedTask(prompt: prompt, targetPeerName: targetPeerName)
+    func enqueue(_ prompt: String, targetPeerName: String? = nil, model: TaskModel? = nil, at position: Int? = nil) {
+        let task = QueuedTask(prompt: prompt, targetPeerName: targetPeerName, model: model ?? defaultModel)
         if let pos = position, pos < tasks.count {
             tasks.insert(task, at: pos)
         } else {
@@ -83,6 +129,12 @@ final class TaskQueueStore {
         }
         logger.info("Queued task \(task.id): \"\(task.prompt.prefix(60))\"")
         if isProcessing { engine.kickIfNeeded() }
+    }
+
+    func setModel(_ model: TaskModel, for id: UUID) {
+        guard let idx = tasks.firstIndex(where: { $0.id == id }),
+              tasks[idx].status == .pending else { return }
+        tasks[idx].model = model
     }
 
     func cancel(id: UUID) {
@@ -93,6 +145,12 @@ final class TaskQueueStore {
 
     func clearPending() {
         tasks = tasks.filter { $0.status != .pending }
+    }
+
+    /// Enable processing and kick the engine to start the next pending task.
+    func advanceToNext() {
+        isProcessing = true
+        engine.kickIfNeeded()
     }
 
     func clearAll() {
@@ -159,9 +217,11 @@ final class TaskQueueEngine {
     func completeRunning(result: String?) {
         guard let store,
               let idx = store.tasks.firstIndex(where: { $0.status == .running }) else { return }
+        let completedPrompt = store.tasks[idx].prompt
         store.tasks[idx].status = .completed
         store.tasks[idx].completedAt = .now
         store.tasks[idx].resultSnippet = result
+        SessionAuditLogger.log(type: .taskCompleted, detail: String(completedPrompt.prefix(120)))
         runStartedAt = nil
         logger.info("Task \(store.tasks[idx].id) completed")
         // Start next after brief pause
@@ -237,6 +297,17 @@ final class TaskQueueEngine {
         if let prev = store.tasks.prefix(index).last(where: { $0.status == .completed }),
            let snippet = prev.resultSnippet, !snippet.isEmpty {
             prompt = "[Context from previous task]\n\(snippet)\n\n\(task.prompt)"
+        }
+
+        // Resolve model and prepend --model flag if a specific model is selected
+        let resolvedModel: TaskModel
+        if task.model == .auto {
+            resolvedModel = TaskModel.infer(from: task.prompt)
+        } else {
+            resolvedModel = task.model
+        }
+        if let modelID = resolvedModel.modelID {
+            prompt = "--model \(modelID)\n\(prompt)"
         }
 
         let injected: Bool

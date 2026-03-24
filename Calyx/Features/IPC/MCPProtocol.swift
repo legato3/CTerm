@@ -529,6 +529,105 @@ struct MCPRouter: Sendable {
                     required: ["peer_id", "path"]
                 )
             ),
+            MCPTool(
+                name: "get_last_error",
+                description: "Get the most recent command failure detected in any terminal tab. Returns the error output snippet, the tab title it came from, and a timestamp. Returns null if no recent error was detected. Use this to proactively check whether a command you dispatched to another pane has failed.",
+                inputSchema: schema(
+                    properties: [
+                        "tab_id": prop("string", "UUID of a specific tab to check. Omit to return the most recent error across all tabs."),
+                    ]
+                )
+            ),
+            MCPTool(
+                name: "remember",
+                description: "Store a persistent project-scoped fact in Calyx's agent memory. Facts survive across sessions and are accessible to any agent in the same project (same git repo). Use this for architecture decisions, conventions, warnings, commands, or anything worth remembering between sessions.",
+                inputSchema: schema(
+                    properties: [
+                        "key": prop("string", "Short identifier for this fact, e.g. 'auth-system', 'test-command', 'avoid'"),
+                        "value": prop("string", "The fact to remember. Can be multi-sentence."),
+                        "ttl_days": prop("integer", "Optional: delete this memory after N days. Omit for permanent storage."),
+                        "work_dir": prop("string", "Working directory to scope the memory to. Defaults to the active tab's directory."),
+                    ],
+                    required: ["key", "value"]
+                )
+            ),
+            MCPTool(
+                name: "recall",
+                description: "Search project-scoped agent memory for facts matching a query. Returns all memories whose key or value contains the query string. Call with an empty query to list all memories.",
+                inputSchema: schema(
+                    properties: [
+                        "query": prop("string", "Search string. Matches keys and values (case-insensitive). Empty string returns all."),
+                        "work_dir": prop("string", "Working directory to scope the search. Defaults to the active tab's directory."),
+                    ],
+                    required: ["query"]
+                )
+            ),
+            MCPTool(
+                name: "forget",
+                description: "Delete a specific memory by key from the project-scoped agent memory store.",
+                inputSchema: schema(
+                    properties: [
+                        "key": prop("string", "The key of the memory to delete."),
+                        "work_dir": prop("string", "Working directory to scope the deletion. Defaults to the active tab's directory."),
+                    ],
+                    required: ["key"]
+                )
+            ),
+            MCPTool(
+                name: "list_memories",
+                description: "List all persistent agent memories for this project, sorted by most recently updated. Returns key, value, age, and optional expiry for each entry.",
+                inputSchema: schema(
+                    properties: [
+                        "work_dir": prop("string", "Working directory to scope the list. Defaults to the active tab's directory."),
+                    ]
+                )
+            ),
+            MCPTool(
+                name: "get_project_context",
+                description: """
+                    Get live project context for the current working directory: CLAUDE.md content, \
+                    current git branch, last 5 commits, dirty files, agent memories, failing tests, \
+                    and active peers. Call this at the start of a session to orient yourself without \
+                    asking the user to re-explain the project.
+                    """,
+                inputSchema: schema(
+                    properties: [
+                        "work_dir": prop("string", "Working directory to gather context for. Defaults to the active tab's directory."),
+                    ]
+                )
+            ),
+            MCPTool(
+                name: "get_session_summary",
+                description: "Get a summary of the current Calyx session: total events, commands injected, errors routed, memories written, test runs, tasks completed, and checkpoints created. Use this at the end of a session to include an activity summary in a handoff message or status report.",
+                inputSchema: schema(properties: [:])
+            ),
+            MCPTool(
+                name: "get_test_results",
+                description: "Get the current test run results from Calyx's Test Runner sidebar. Returns pass/fail counts and a list of failing tests. Returns empty results if no test run has been performed yet.",
+                inputSchema: schema(properties: [:])
+            ),
+            MCPTool(
+                name: "run_tests",
+                description: "Trigger a test run in Calyx's Test Runner sidebar. If a command is provided it overrides the saved command. Use get_test_results after a delay to read the outcome.",
+                inputSchema: schema(
+                    properties: [
+                        "command": prop("string", "Test command to run, e.g. 'xcodebuild test -scheme CalyxTests'. Omit to use the previously saved command."),
+                        "work_dir": prop("string", "Working directory for the test run. Defaults to the active tab's directory."),
+                    ]
+                )
+            ),
+            MCPTool(
+                name: "search_terminal_output",
+                description: "Full-text search across all terminal output captured by Calyx (current and past sessions in the scroll index). Useful for finding previous command output, error messages, or checking if a command was already run. Supports FTS5 syntax: \"exact phrase\", word*, column:value.",
+                inputSchema: schema(
+                    properties: [
+                        "query": prop("string", "Search query. Plain text for substring match, or FTS5 expressions like \\\"exact phrase\\\", word*."),
+                        "pane_id": prop("string", "Optional surface UUID to restrict search to a single pane. Omit to search all panes."),
+                        "limit": prop("integer", "Maximum results to return (default 30, max 100)."),
+                    ],
+                    required: ["query"]
+                )
+            ),
         ]
     }
 

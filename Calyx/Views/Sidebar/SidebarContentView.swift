@@ -60,6 +60,14 @@ struct SidebarContentView: View {
                     .help("Context").tag(SidebarMode.context)
                 Image(systemName: "clock.arrow.circlepath")
                     .help("File Changes").tag(SidebarMode.fileChanges)
+                Image(systemName: "brain.head.profile")
+                    .help("Agent Memory").tag(SidebarMode.agentMemory)
+                Image(systemName: "testtube.2")
+                    .help("Test Runner").tag(SidebarMode.testRunner)
+                Image(systemName: "bolt.fill")
+                    .help("Triggers").tag(SidebarMode.triggers)
+                Image(systemName: "clock.arrow.circlepath")
+                    .help("Session Log").tag(SidebarMode.auditLog)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -150,6 +158,18 @@ struct SidebarContentView: View {
                     .padding(.top, 4)
             } else if sidebarMode == .taskQueue {
                 TaskQueueView()
+                    .padding(.top, 4)
+            } else if sidebarMode == .agentMemory {
+                AgentMemoryView()
+                    .padding(.top, 4)
+            } else if sidebarMode == .testRunner {
+                TestRunnerView()
+                    .padding(.top, 4)
+            } else if sidebarMode == .triggers {
+                TriggerEngineView()
+                    .padding(.top, 4)
+            } else if sidebarMode == .auditLog {
+                SessionAuditView()
                     .padding(.top, 4)
             } else if sidebarMode == .usage {
                 ClaudeUsageView()

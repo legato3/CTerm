@@ -32,6 +32,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private var autoAcceptMonitors: [UUID: AutoAcceptMonitor] = [:]
     // Token-budget HUD monitors keyed by tab ID (always running, not user-toggled).
     private var paneUsageMonitors: [UUID: PaneUsageMonitor] = [:]
+    // Shell error monitors keyed by tab ID (always running, not user-toggled).
+    private var shellErrorMonitors: [UUID: ShellErrorMonitor] = [:]
+    // Terminal search indexers keyed by tab ID (always running).
+    private var terminalIndexers: [UUID: TerminalIndexer] = [:]
 
     // O(1) surface-to-tab reverse lookup. Rebuilt lazily after any structural change.
     private var surfaceToTab: [UUID: (tab: Tab, group: TabGroup)] = [:]
@@ -161,6 +165,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         startUsageMonitorsForExistingTabs()
         if !restoring { setupTerminalSurface() }
         registerNotificationObservers()
+        TriggerEngine.shared.start()
+        SessionAuditLogger.shared.start()
         focusManager.onFocusFailed = { [weak self] in
             self?.splitContainerView?.focusLostIndicator = true
         }
@@ -208,6 +214,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         manager.register(modifiers: [.command, .shift], keyCode: 14) { [weak self] in
             self?.toggleComposeOverlay()
         }
+        // Cmd+Shift+F → terminal search history (keyCode 3 = F)
+        manager.register(modifiers: [.command, .shift], keyCode: 3) { [weak self] in
+            self?.windowSession.showTerminalSearch = true
+        }
 
         calyxWindow.shortcutManager = manager
     }
@@ -252,6 +262,14 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         commandRegistry.register(Command(id: "edit.find", title: "Find in Terminal", shortcut: "Cmd+F", category: "Edit") { [weak self] in
             guard let controller = self?.focusedController else { return }
             controller.performAction("start_search")
+        })
+        commandRegistry.register(Command(
+            id: "edit.searchHistory",
+            title: "Search Terminal History",
+            shortcut: "Cmd+Shift+F",
+            category: "Edit"
+        ) { [weak self] in
+            self?.windowSession.showTerminalSearch = true
         })
         commandRegistry.register(Command(
             id: "edit.compose",
@@ -676,6 +694,29 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             composeController.broadcastEnabled.toggle()
             windowActions.composeBroadcastEnabled = composeController.broadcastEnabled
         }
+        windowActions.onRouteShellError = { [weak self] tabID in self?.routeShellError(fromTabID: tabID) }
+        windowActions.onDismissShellError = { [weak self] tabID in self?.dismissShellError(fromTabID: tabID) }
+        windowActions.onJumpToSearchPane = { [weak self] paneID in self?.jumpToSearchPane(paneID: paneID) }
+    }
+
+    private func jumpToSearchPane(paneID: String) {
+        // paneID is a surface UUID string; find the tab that owns it.
+        let surfaceID = UUID(uuidString: paneID)
+        for group in windowSession.groups {
+            for tab in group.tabs {
+                let found: Bool
+                if let sid = surfaceID {
+                    found = tab.registry.controller(for: sid) != nil || tab.id.uuidString == paneID
+                } else {
+                    found = tab.id.uuidString == paneID
+                }
+                if found {
+                    windowSession.activeGroupID = group.id
+                    group.activeTabID = tab.id
+                    return
+                }
+            }
+        }
     }
 
     private func buildMainContentView() -> MainContentView {
@@ -873,6 +914,47 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             autoAcceptMonitors[tab.id]?.stop()
             autoAcceptMonitors.removeValue(forKey: tab.id)
         }
+    }
+
+    // MARK: - Shell Error Routing
+
+    /// Routes the captured error in `fromTabID` to the best available Claude pane.
+    private func routeShellError(fromTabID tabID: UUID) {
+        let allTabs = windowSession.groups.flatMap(\.tabs)
+        guard let sourceTab = allTabs.first(where: { $0.id == tabID }),
+              let event = sourceTab.lastShellError else { return }
+
+        // Prefer an auto-accept tab (Claude is actively running there).
+        // Fall back to any other non-source tab.
+        let target = allTabs.first { $0.id != tabID && $0.autoAcceptEnabled }
+                  ?? allTabs.first { $0.id != tabID }
+
+        let message = """
+        The last command in tab "\(event.tabTitle)" failed:
+
+        \(event.snippet)
+
+        Please investigate and fix the error.
+        """
+
+        if let target {
+            runInPane(tabID: target.id, paneID: nil, text: message, pressEnter: true)
+        } else {
+            // No other tab — inject into the source tab itself so Claude in that pane sees it.
+            runInPane(tabID: tabID, paneID: nil, text: message, pressEnter: true)
+        }
+
+        // Clear the badge regardless of routing success.
+        sourceTab.lastShellError = nil
+        SessionAuditLogger.log(type: .errorRouted,
+                               detail: String(event.snippet.prefix(120)),
+                               tabTitle: event.tabTitle)
+    }
+
+    /// Clears the error badge without routing.
+    private func dismissShellError(fromTabID tabID: UUID) {
+        let allTabs = windowSession.groups.flatMap(\.tabs)
+        allTabs.first { $0.id == tabID }?.lastShellError = nil
     }
 
     private func sendEnterKey(to controller: GhosttySurfaceController) {
@@ -1385,6 +1467,16 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         let monitor = PaneUsageMonitor(tab: tab)
         monitor.start()
         paneUsageMonitors[tab.id] = monitor
+
+        guard shellErrorMonitors[tab.id] == nil else { return }
+        let errorMonitor = ShellErrorMonitor(tab: tab)
+        errorMonitor.start()
+        shellErrorMonitors[tab.id] = errorMonitor
+
+        guard terminalIndexers[tab.id] == nil else { return }
+        let indexer = TerminalIndexer(tab: tab)
+        indexer.start()
+        terminalIndexers[tab.id] = indexer
     }
 
     private func startUsageMonitorsForExistingTabs() {
@@ -1400,6 +1492,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         autoAcceptMonitors.removeValue(forKey: tabID)
         paneUsageMonitors[tabID]?.stop()
         paneUsageMonitors.removeValue(forKey: tabID)
+        shellErrorMonitors[tabID]?.stop()
+        shellErrorMonitors.removeValue(forKey: tabID)
+        terminalIndexers[tabID]?.stop()
+        terminalIndexers.removeValue(forKey: tabID)
         tabController.cleanupTabResources(id: tabID)
     }
 
@@ -1654,6 +1750,8 @@ extension CalyxWindowController: TerminalControl {
         if pressEnter {
             sendEnterKey(to: controller)
         }
+        let snippet = String(text.prefix(120)).replacingOccurrences(of: "\n", with: " ")
+        SessionAuditLogger.log(type: .commandInjected, detail: snippet, tabTitle: tab.title)
         return true
     }
 

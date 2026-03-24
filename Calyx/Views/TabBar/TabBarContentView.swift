@@ -12,6 +12,8 @@ struct TabBarContentView: View {
     var onNewTab: (() -> Void)?
     var onCloseTab: ((UUID) -> Void)?
     var onMoveTab: ((Int, Int) -> Void)?
+    var onRouteShellError: ((UUID) -> Void)?
+    var onDismissShellError: ((UUID) -> Void)?
     var activeGroupID: UUID? = nil
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -24,12 +26,7 @@ struct TabBarContentView: View {
                     GlassEffectContainer(spacing: 10) {
                         HStack(spacing: 10) {
                             ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
-                                TabItemButton(
-                                    tab: tab,
-                                    isActive: tab.id == activeTabID,
-                                    onSelected: { onTabSelected?(tab.id) },
-                                    onClose: { onCloseTab?(tab.id) }
-                                )
+                                tabButton(for: tab)
                                 .id(tab.id)
                                 .background(
                                     GeometryReader { geo in
@@ -349,11 +346,29 @@ private struct TabBarBackgroundModifier: ViewModifier {
     }
 }
 
+// MARK: - Helpers
+
+extension TabBarContentView {
+    @ViewBuilder
+    func tabButton(for tab: Tab) -> some View {
+        TabItemButton(
+            tab: tab,
+            isActive: tab.id == activeTabID,
+            onSelected: { onTabSelected?(tab.id) },
+            onClose: { onCloseTab?(tab.id) },
+            onRouteShellError: onRouteShellError.map { f in { f(tab.id) } },
+            onDismissShellError: onDismissShellError.map { f in { f(tab.id) } }
+        )
+    }
+}
+
 private struct TabItemButton: View {
     let tab: Tab
     let isActive: Bool
     var onSelected: (() -> Void)?
     var onClose: (() -> Void)?
+    var onRouteShellError: (() -> Void)?
+    var onDismissShellError: (() -> Void)?
     @State private var isHovering = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -379,6 +394,21 @@ private struct TabItemButton: View {
                 Text("⚡")
                     .font(.system(size: 10))
                     .help("Auto-accept mode active — Claude confirmations are auto-approved")
+            }
+
+            if let error = tab.lastShellError {
+                Button(action: { onRouteShellError?() }) {
+                    Text("⚠")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.orange)
+                }
+                .buttonStyle(.plain)
+                .help("Command failed — click to route to Claude\n\n\(error.snippet.prefix(200))")
+                .contextMenu {
+                    Button("Route to Claude") { onRouteShellError?() }
+                    Button("Dismiss") { onDismissShellError?() }
+                }
+                .transition(.scale.combined(with: .opacity))
             }
 
             if tab.processExited {

@@ -10,6 +10,7 @@ struct TaskQueueView: View {
     @State private var store: TaskQueueStore = .shared
     @State private var agentState: IPCAgentState = .shared
     @State private var newTaskText: String = ""
+    @State private var newTaskModel: TaskModel = .auto
     @State private var showingAddField: Bool = false
     @FocusState private var addFieldFocused: Bool
 
@@ -119,7 +120,7 @@ struct TaskQueueView: View {
     private var addTaskRow: some View {
         VStack(spacing: 0) {
             Divider()
-            // Target peer picker
+            // Target peer + default model pickers
             HStack(spacing: 6) {
                 Text("Target:")
                     .font(.system(size: 10))
@@ -133,6 +134,19 @@ struct TaskQueueView: View {
                 .labelsHidden()
                 .font(.system(size: 10))
                 .frame(maxWidth: .infinity)
+
+                Text("Model:")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Picker("", selection: $store.defaultModel) {
+                    ForEach(TaskModel.allCases) { m in
+                        Text(m.displayName).tag(m)
+                    }
+                }
+                .labelsHidden()
+                .font(.system(size: 10))
+                .frame(width: 72)
+                .help("Default model for new tasks")
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -180,8 +194,23 @@ struct TaskQueueView: View {
                 }
 
             HStack {
+                // Model picker for this task
+                Picker("", selection: $newTaskModel) {
+                    ForEach(TaskModel.allCases) { m in
+                        Text(m.displayName).tag(m)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .font(.system(size: 10))
+                .frame(width: 72)
+                .help("Model to use for this task")
+
+                Spacer()
+
                 Button("Cancel") {
                     newTaskText = ""
+                    newTaskModel = .auto
                     showingAddField = false
                 }
                 .buttonStyle(.plain)
@@ -213,8 +242,9 @@ struct TaskQueueView: View {
     private func submitNewTask() {
         let trimmed = newTaskText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        store.enqueue(trimmed)
+        store.enqueue(trimmed, model: newTaskModel)
         newTaskText = ""
+        newTaskModel = .auto
         showingAddField = false
     }
 }
@@ -239,19 +269,40 @@ private struct TaskRowView: View {
                     .foregroundStyle(task.status == .cancelled ? .tertiary : .primary)
 
                 if let started = task.startedAt, task.status == .running {
-                    Text("Running \(elapsedString(from: started))")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                } else if let target = task.targetPeerName {
-                    Text("→ \(target)")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
+                    HStack(spacing: 4) {
+                        Text("Running \(elapsedString(from: started))")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        modelBadge(for: task.model)
+                    }
+                } else if task.status == .pending {
+                    HStack(spacing: 4) {
+                        if let target = task.targetPeerName {
+                            Text("→ \(target)")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.tertiary)
+                        }
+                        modelBadge(for: task.model)
+                    }
                 }
             }
 
             Spacer(minLength: 0)
 
             if task.status == .pending {
+                Picker("", selection: Binding(
+                    get: { task.model },
+                    set: { store.setModel($0, for: task.id) }
+                )) {
+                    ForEach(TaskModel.allCases) { m in
+                        Text(m.displayName).tag(m)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .font(.system(size: 9))
+                .frame(width: 60)
+
                 Button {
                     store.cancel(id: task.id)
                 } label: {
@@ -289,6 +340,18 @@ private struct TaskRowView: View {
             }
         }
         .font(.system(size: 11))
+    }
+
+    @ViewBuilder
+    private func modelBadge(for model: TaskModel) -> some View {
+        if model != .auto {
+            Text(model.displayName)
+                .font(.system(size: 8, weight: .medium))
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Color.accentColor.opacity(0.15), in: Capsule())
+                .foregroundStyle(Color.accentColor)
+        }
     }
 
     private func elapsedString(from date: Date) -> String {

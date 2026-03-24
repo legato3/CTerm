@@ -19,6 +19,7 @@ class WindowSession: Identifiable {
     var showSidebar: Bool
     var showCommandPalette: Bool = false
     var showComposeOverlay: Bool = false
+    var showTerminalSearch: Bool = false
     var composeOverlayHeight: CGFloat = 120
     var sidebarMode: SidebarMode = .tabs
     let git = GitState()

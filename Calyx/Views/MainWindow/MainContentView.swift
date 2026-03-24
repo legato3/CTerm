@@ -94,6 +94,8 @@ struct MainContentView: View {
                                 onMoveTab: activeGroup != nil
                                     ? { from, to in actions.onMoveTab?(activeGroup!.id, from, to) }
                                     : nil,
+                                onRouteShellError: actions.onRouteShellError,
+                                onDismissShellError: actions.onDismissShellError,
                                 activeGroupID: activeGroup?.id
                             )
                         }
@@ -209,6 +211,16 @@ struct MainContentView: View {
                             Spacer()
                         }
                         .padding(.top, 40)
+                    }
+
+                    if windowSession.showTerminalSearch {
+                        TerminalSearchContainer(
+                            onDismiss: { windowSession.showTerminalSearch = false },
+                            onJumpToPane: { paneID in
+                                actions.onJumpToSearchPane?(paneID)
+                                windowSession.showTerminalSearch = false
+                            }
+                        )
                     }
                 }
             }

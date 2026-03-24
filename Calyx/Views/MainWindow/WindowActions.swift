@@ -41,6 +41,12 @@ final class WindowActions {
     var onToggleComposeBroadcast: (() -> Void)?
     var onOpenDiff: ((DiffSource) -> Void)?
     var onOpenAggregateDiff: ((String) -> Void)?
+    /// Route the shell error captured in the given tab to the nearest Claude pane.
+    var onRouteShellError: ((UUID) -> Void)?
+    /// Dismiss (clear) the shell error badge on a tab without routing.
+    var onDismissShellError: ((UUID) -> Void)?
+    /// Jump to the pane whose surface UUID string matches (from terminal search results).
+    var onJumpToSearchPane: ((String) -> Void)?
     /// Reflects `ComposeOverlayController.broadcastEnabled` for the SwiftUI overlay.
     var composeBroadcastEnabled: Bool = false
 }

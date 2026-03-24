@@ -309,6 +309,36 @@ final class CalyxMCPServer {
         case "clear_queue":
             return handleClearQueue(id: id)
 
+        case "get_last_error":
+            return handleGetLastError(id: id, arguments: arguments)
+
+        case "remember":
+            return handleRemember(id: id, arguments: arguments)
+
+        case "recall":
+            return handleRecall(id: id, arguments: arguments)
+
+        case "forget":
+            return handleForget(id: id, arguments: arguments)
+
+        case "list_memories":
+            return handleListMemories(id: id, arguments: arguments)
+
+        case "get_project_context":
+            return handleGetProjectContext(id: id, arguments: arguments)
+
+        case "get_session_summary":
+            return handleGetSessionSummary(id: id)
+
+        case "get_test_results":
+            return handleGetTestResults(id: id)
+
+        case "run_tests":
+            return handleRunTests(id: id, arguments: arguments)
+
+        case "search_terminal_output":
+            return handleSearchTerminalOutput(id: id, arguments: arguments)
+
         default:
             return toolError(id: id, text: "Unknown tool: \(toolName)")
         }
@@ -323,12 +353,32 @@ final class CalyxMCPServer {
         let name = (arguments?["name"] as? String) ?? ""
         let role = (arguments?["role"] as? String) ?? ""
         let peer = await store.registerPeer(name: name, role: role)
-        let json = "{\"peerId\":\"\(peer.id.uuidString)\"}"
 
         // Auto-checkpoint the active tab's repo before Claude starts editing.
         let pwd = await TerminalControlBridge.shared.delegate?.activeTabPwd
         await CheckpointManager.shared.maybeAutoCheckpoint(workDir: pwd)
 
+        // Notify trigger engine of peer connection.
+        NotificationCenter.default.post(
+            name: .peerRegistered,
+            object: nil,
+            userInfo: ["name": peer.name, "role": peer.role]
+        )
+
+        // Build response — include project context when auto-inject is enabled (default: on).
+        let autoInject = UserDefaults.standard.object(forKey: "CalyxAutoInjectContext") as? Bool ?? true
+        var result: [String: Any] = ["peerId": peer.id.uuidString]
+
+        if autoInject, let workDir = pwd {
+            let ctx = ProjectContextProvider.gather(workDir: workDir)
+            result["project_context"] = ctx
+            result["context_hint"] = "Project context is included above. Use it to orient yourself without asking the user to re-explain the project."
+        }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: result),
+              let json = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{\"peerId\":\"\(peer.id.uuidString)\"}")
+        }
         return toolSuccess(id: id, text: json)
     }
 
@@ -713,6 +763,239 @@ final class CalyxMCPServer {
             TaskQueueStore.shared.clearPending()
         }
         return toolSuccess(id: id, text: "{\"cleared\":true}")
+    }
+
+    private func handleGetLastError(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
+        let filterTabID = (arguments?["tab_id"] as? String).flatMap { UUID(uuidString: $0) }
+
+        let result: [String: Any]
+        if let event = findLastError(tabID: filterTabID) {
+            result = [
+                "found": true,
+                "tab_id": event.tabID.uuidString,
+                "tab_title": event.tabTitle,
+                "snippet": event.snippet,
+                "timestamp": ISO8601DateFormatter().string(from: event.timestamp),
+            ]
+        } else {
+            result = ["found": false]
+        }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: result),
+              let text = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{\"found\":false}")
+        }
+        return toolSuccess(id: id, text: text)
+    }
+
+    // MARK: - Agent Memory
+
+    private func handleRemember(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
+        guard let key = arguments?["key"] as? String, !key.isEmpty,
+              let value = arguments?["value"] as? String, !value.isEmpty else {
+            return toolError(id: id, text: "remember requires non-empty 'key' and 'value'")
+        }
+        let ttlDays = arguments?["ttl_days"] as? Int
+        let workDir = arguments?["work_dir"] as? String
+        let projectKey = resolvedProjectKey(workDir: workDir)
+
+        let entry = AgentMemoryStore.shared.remember(
+            projectKey: projectKey,
+            key: key,
+            value: value,
+            ttlDays: ttlDays
+        )
+        NotificationCenter.default.post(name: .agentMemoryChanged, object: nil)
+
+        let result: [String: Any] = [
+            "stored": true,
+            "key": entry.key,
+            "project_key": projectKey,
+            "expires_at": entry.expiresAt.map { ISO8601DateFormatter().string(from: $0) } as Any,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: result),
+              let text = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{\"stored\":true}")
+        }
+        return toolSuccess(id: id, text: text)
+    }
+
+    private func handleRecall(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
+        let query = arguments?["query"] as? String ?? ""
+        let workDir = arguments?["work_dir"] as? String
+        let projectKey = resolvedProjectKey(workDir: workDir)
+
+        let entries = AgentMemoryStore.shared.recall(projectKey: projectKey, query: query)
+        let list = entries.map { e -> [String: Any] in
+            var item: [String: Any] = ["key": e.key, "value": e.value, "age": e.age]
+            if let exp = e.expiresAt { item["expires_at"] = ISO8601DateFormatter().string(from: exp) }
+            return item
+        }
+        let result: [String: Any] = ["project_key": projectKey, "count": list.count, "memories": list]
+        guard let data = try? JSONSerialization.data(withJSONObject: result),
+              let text = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{\"count\":0,\"memories\":[]}")
+        }
+        return toolSuccess(id: id, text: text)
+    }
+
+    private func handleForget(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
+        guard let key = arguments?["key"] as? String, !key.isEmpty else {
+            return toolError(id: id, text: "forget requires 'key'")
+        }
+        let workDir = arguments?["work_dir"] as? String
+        let projectKey = resolvedProjectKey(workDir: workDir)
+        let removed = AgentMemoryStore.shared.forget(projectKey: projectKey, key: key)
+        if removed { NotificationCenter.default.post(name: .agentMemoryChanged, object: nil) }
+
+        let result: [String: Any] = ["removed": removed, "key": key]
+        guard let data = try? JSONSerialization.data(withJSONObject: result),
+              let text = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{\"removed\":\(removed)}")
+        }
+        return toolSuccess(id: id, text: text)
+    }
+
+    private func handleListMemories(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
+        let workDir = arguments?["work_dir"] as? String
+        let projectKey = resolvedProjectKey(workDir: workDir)
+
+        let entries = AgentMemoryStore.shared.listAll(projectKey: projectKey)
+        let list = entries.map { e -> [String: Any] in
+            var item: [String: Any] = ["key": e.key, "value": e.value, "age": e.age, "updated_at": ISO8601DateFormatter().string(from: e.updatedAt)]
+            if let exp = e.expiresAt { item["expires_at"] = ISO8601DateFormatter().string(from: exp) }
+            return item
+        }
+        let result: [String: Any] = ["project_key": projectKey, "count": list.count, "memories": list]
+        guard let data = try? JSONSerialization.data(withJSONObject: result),
+              let text = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{\"count\":0,\"memories\":[]}")
+        }
+        return toolSuccess(id: id, text: text)
+    }
+
+    /// Derives the project key from a work_dir string (or falls back to the active tab's pwd).
+    private func resolvedProjectKey(workDir: String?) -> String {
+        AgentMemoryStore.key(for: workDir ?? resolvedWorkDir())
+    }
+
+    /// Returns the most recent `ShellErrorEvent` across all tabs (or the specific tab if given).
+    private func findLastError(tabID: UUID?) -> ShellErrorEvent? {
+        // This is called from a network thread but reads @MainActor Tab properties.
+        // We use a synchronous dispatch to the main actor for a brief read.
+        var result: ShellErrorEvent?
+        DispatchQueue.main.sync {
+            let session = TerminalControlBridge.shared.delegate?.terminalWindowSession
+            let allTabs = session?.groups.flatMap(\.tabs) ?? []
+            let candidates = tabID != nil
+                ? allTabs.filter { $0.id == tabID }
+                : allTabs
+            result = candidates
+                .compactMap(\.lastShellError)
+                .sorted { $0.timestamp > $1.timestamp }
+                .first
+        }
+        return result
+    }
+
+    // MARK: - Session Audit
+
+    private func handleGetSessionSummary(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
+        var summary: [String: Any] = [:]
+        DispatchQueue.main.sync {
+            summary = SessionAuditLogger.shared.summaryDict()
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: summary),
+              let text = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{}")
+        }
+        return toolSuccess(id: id, text: text)
+    }
+
+    // MARK: - Terminal Search
+
+    private func handleSearchTerminalOutput(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
+        guard let query = arguments?["query"] as? String, !query.isEmpty else {
+            return toolError(id: id, text: "query is required")
+        }
+        let paneID = arguments?["pane_id"] as? String
+        let limit  = (arguments?["limit"] as? Int).map { min($0, 100) } ?? 30
+
+        let results = TerminalSearchIndex.shared.search(query: query, paneID: paneID, limit: limit)
+        let dicts = results.map { r -> [String: Any] in
+            [
+                "pane_id":    r.paneID,
+                "pane_title": r.paneTitle,
+                "timestamp":  ISO8601DateFormatter().string(from: r.timestamp),
+                "line":       r.line
+            ]
+        }
+        let payload: [String: Any] = ["query": query, "count": dicts.count, "results": dicts]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let text = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{\"count\":0,\"results\":[]}")
+        }
+        return toolSuccess(id: id, text: text)
+    }
+
+    // MARK: - Project Context
+
+    private func handleGetProjectContext(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
+        let workDir = arguments?["work_dir"] as? String ?? resolvedWorkDir()
+        let ctx = ProjectContextProvider.gather(workDir: workDir)
+        guard let data = try? JSONSerialization.data(withJSONObject: ctx),
+              let text = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{\"cwd\":\"\(workDir)\"}")
+        }
+        return toolSuccess(id: id, text: text)
+    }
+
+    /// Active tab's pwd, resolved on the main thread.
+    private func resolvedWorkDir() -> String {
+        var pwd: String?
+        DispatchQueue.main.sync { pwd = TerminalControlBridge.shared.delegate?.activeTabPwd }
+        return pwd ?? FileManager.default.currentDirectoryPath
+    }
+
+    // MARK: - Test Runner
+
+    private func handleGetTestResults(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
+        var result: [String: Any] = [:]
+        DispatchQueue.main.sync {
+            let store = TestRunnerStore.shared
+            let failures = store.failures.map { f -> [String: Any] in
+                ["name": f.name, "duration": f.duration as Any]
+            }
+            result = [
+                "pass_count": store.passCount,
+                "fail_count": store.failCount,
+                "is_running": store.isRunning,
+                "failures": failures,
+            ]
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: result),
+              let text = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{\"pass_count\":0,\"fail_count\":0,\"is_running\":false,\"failures\":[]}")
+        }
+        return toolSuccess(id: id, text: text)
+    }
+
+    private func handleRunTests(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
+        let command = arguments?["command"] as? String
+        let workDir = arguments?["work_dir"] as? String
+
+        DispatchQueue.main.async {
+            let store = TestRunnerStore.shared
+            if let wd = workDir { store.workDir = wd }
+            store.run(command: command)
+        }
+
+        let result: [String: Any] = ["started": true, "command": command as Any]
+        guard let data = try? JSONSerialization.data(withJSONObject: result),
+              let text = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{\"started\":true}")
+        }
+        return toolSuccess(id: id, text: text)
     }
 
     // MARK: - Response Helpers

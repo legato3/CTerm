@@ -63,6 +63,7 @@ final class CheckpointManager {
             lastCheckpointHash = hash
             lastCheckpointDate = Date()
             logger.info("Checkpoint created: \(hash) at \(root)")
+            SessionAuditLogger.log(type: .checkpointCreated, detail: "\(hash.prefix(8)) at \(root)")
             return hash
         } catch {
             logger.error("Checkpoint failed: \(error.localizedDescription)")
