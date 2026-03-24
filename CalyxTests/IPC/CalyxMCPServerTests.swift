@@ -31,9 +31,7 @@ final class CalyxMCPServerTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        server = CalyxMCPServer()
-        // Direct token set for testing, bypassing start() / NWListener
-        server._testSetToken(testToken)
+        server = CalyxMCPServer(testToken: testToken)
     }
 
     override func tearDown() {

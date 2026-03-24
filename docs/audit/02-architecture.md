@@ -19,25 +19,13 @@
 
 ## Where Separation is Broken
 
-### 1. CalyxWindowController is a 1,965-line god class
+### 1. ✅ CalyxWindowController god class — PARTIALLY RESOLVED
 
-It handles:
-- Tab management (create, close, switch, reorder)
-- Split operations (new split, close surface, resize, equalize)
-- Git status loading, commit history, file expansion
-- Diff tab lifecycle and loading
-- IPC enable/disable
-- Browser tab lifecycle
-- Review submission to AI agents
-- Compose overlay
-- Session snapshots
-- 10 notification handlers
-- Menu actions
-- Focus management with retry logic
+8 extraction steps complete (see `docs/audit/10-refactor-plan.md`). Extracted: GitController, ReviewController, FocusManager, BrowserManager, ComposeOverlayController + WindowActions environment + typed notification events. File reduced from 1,965 lines. Remaining: split operations, IPC enable/disable, review dispatch, tab/group lifecycle.
 
-### 2. MainContentView takes 22 callback closures
+### 2. ✅ MainContentView callback closures — RESOLVED
 
-This is a symptom of the god controller. The view is essentially a puppet with no autonomy:
+Replaced the 22-closure pattern with a `WindowActions` `@Observable` environment object injected via `.environment()`. Views read actions they need directly without closures being threaded through the hierarchy. The original closures were:
 
 ```swift
 var onTabSelected: ((UUID) -> Void)?

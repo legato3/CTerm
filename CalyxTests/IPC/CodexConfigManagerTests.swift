@@ -457,6 +457,75 @@ final class CodexConfigManagerTests: XCTestCase {
         XCTAssertTrue(content.contains("http://localhost:41830/mcp"))
     }
 
+    // MARK: - TOML Edge Cases
+
+    func test_enableIPC_multilineStringWithBracketLine() throws {
+        // Given: a multi-line TOML string value that contains a line starting with '['
+        // The parser treats lines by content — a bracket line inside a multi-line
+        // string would be incorrectly treated as a section boundary.
+        // This test documents the current known limitation.
+        let existing = """
+        [general]
+        description = \"\"\"
+        [not_a_section]
+        This is inside a multi-line string
+        \"\"\"
+        model = "gpt-4"
+        """
+        writeConfig(existing)
+
+        // When
+        try CodexConfigManager.enableIPC(port: 41830, token: "tok", configPath: configPath)
+
+        // Then: at minimum the calyx-ipc section is appended and [general] is present.
+        // The multi-line string content may be partially affected (known limitation).
+        let content = readConfig()
+        XCTAssertTrue(content.contains("[general]"))
+        XCTAssertTrue(content.contains("model = \"gpt-4\""))
+        XCTAssertTrue(content.contains("[mcp_servers.calyx-ipc]"))
+        XCTAssertTrue(content.contains("http://localhost:41830/mcp"))
+    }
+
+    func test_enableIPC_inlineCommentOnSectionHeader() throws {
+        // Given: calyx-ipc section header has a trailing comment
+        let existing = """
+        [mcp_servers.calyx-ipc] # added by Calyx
+        url = "http://localhost:40000/mcp"
+        http_headers = { "Authorization" = "Bearer old" }
+        """
+        writeConfig(existing)
+
+        // When
+        try CodexConfigManager.enableIPC(port: 41830, token: "new-tok", configPath: configPath)
+
+        // Then: header with inline comment is recognised and old section is replaced
+        let content = readConfig()
+        XCTAssertFalse(content.contains("http://localhost:40000/mcp"))
+        XCTAssertFalse(content.contains("Bearer old"))
+        XCTAssertTrue(content.contains("[mcp_servers.calyx-ipc]"))
+        XCTAssertTrue(content.contains("http://localhost:41830/mcp"))
+        XCTAssertTrue(content.contains("Bearer new-tok"))
+    }
+
+    func test_enableIPC_bracketInValueNotMistakenForHeader() throws {
+        // Given: a value that contains '[' but not at the start of a line
+        let existing = """
+        [general]
+        pattern = "foo [bar] baz"
+        matrix = [1, 2, 3]
+        """
+        writeConfig(existing)
+
+        // When
+        try CodexConfigManager.enableIPC(port: 41830, token: "tok", configPath: configPath)
+
+        // Then: inline brackets in values are preserved correctly
+        let content = readConfig()
+        XCTAssertTrue(content.contains("pattern = \"foo [bar] baz\""))
+        XCTAssertTrue(content.contains("matrix = [1, 2, 3]"))
+        XCTAssertTrue(content.contains("[mcp_servers.calyx-ipc]"))
+    }
+
     // MARK: - Concurrency
 
     func test_concurrentEnableDisable_noCorruption() throws {

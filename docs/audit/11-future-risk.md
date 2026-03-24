@@ -4,27 +4,17 @@ Assumes active development on this fork for 12 months.
 
 ## What Will Become Painful
 
-### 1. CalyxWindowController keeps growing
+### 1. ✅ CalyxWindowController keeps growing — MITIGATED
 
-Every new feature (AI integrations, new tab types, workspace features) adds code here. At 1,965 lines today, expect 3,000+ in a year without extraction. Effects:
-- Merge conflicts on every PR that touches window behavior
-- Increasing cognitive load -- understanding one feature requires reading 2,000 lines of context
-- Test isolation becomes impossible -- can't test git logic without instantiating the full window controller
+8 extraction steps completed: TabCleanupHelper, GitController, ReviewController, FocusManager, typed notifications, WindowActions environment, BrowserManager, ComposeOverlayController. File is now ~1,900 lines. Remaining responsibilities: split operations, IPC enable/disable, review dispatch, tab/group lifecycle.
 
-### 2. Ghostty submodule updates
+### 2. ✅ Ghostty submodule updates — MITIGATED
 
-libghostty is actively developed. C API changes will require updating:
-- `GhosttyFFI` (all wrapper methods)
-- All 10 notification handlers in CalyxWindowController
-- `SurfaceView` input handling
-- `GhosttyConfig` key loading
+All 28 notification handlers now use typed event wrappers. A C API change that renames a `userInfo` key will be caught at the `from(_:)` factory and return `nil` — handler silently no-ops — rather than silently using wrong data. Still requires manual audit of `GhosttyFFI` and `SurfaceView` input handling on each update.
 
-Without typed events, each update is a manual audit of 28 notification paths. A single missed `userInfo` key change causes silent feature breakage.
+### 3. ✅ macOS API evolution — MITIGATED (focus management)
 
-### 3. macOS API evolution
-
-Apple is pushing SwiftUI and Liquid Glass APIs forward. The `NSHostingView` bridge works but:
-- macOS 27 SwiftUI changes could affect layout timing, breaking the focus management retry loop
+The timing-dependent polling loop was replaced with `SplitContainerView.onDeferredLayoutComplete` callback. Focus restoration no longer depends on undocumented layout timing. Remaining risks:
 - New Glass APIs may require different view hierarchy structures
 - Metal layer hosting rules may change
 
@@ -35,32 +25,21 @@ The MCP server currently supports basic tool calls (8 tools). As AI coding tools
 - `CalyxWindowController.sendReviewToAgent()` is tightly coupled to the terminal surface
 - Hard-coded timing delays (500ms) for paste confirmation won't work for all AI tools
 
-### 5. Testing complexity
+### 5. ✅ Testing complexity — PARTIALLY MITIGATED
 
-10 singletons with `static let shared` make unit testing require `#if DEBUG` escape hatches. As the app grows:
-- New features that depend on `GhosttyAppController.shared` can't be tested without the full app
-- `CalyxMCPServer.shared` requires `_testSetToken()` backdoor
-- Test parallelism is impossible (singletons share global state)
+- `CalyxMCPServer._testSetToken()` `#if DEBUG` backdoor eliminated — replaced with `init(testToken:)`
+- `CalyxWindowController` already accepts injected `mcpServer: CalyxMCPServer = .shared`
+- Remaining: `GhosttyAppController.shared`, `ClaudeUsageMonitor.shared`, and 7 other singletons still require full app for testing
 
 ## What Will Break First
 
-### Focus management
+### ✅ Focus management — FIXED
 
-The 500ms retry with 10ms backoff is timing-dependent. A macOS update that changes SwiftUI layout scheduling will break this silently. Symptom: terminal appears but doesn't accept keyboard input. This is the most likely user-facing regression because:
-- It depends on undocumented SwiftUI layout timing
-- There's no diagnostic logging for the failure path
-- The deferred callback fallback has a race condition
+~~The 500ms retry with 10ms backoff is timing-dependent.~~ Replaced with `SplitContainerView.onDeferredLayoutComplete` callback. Focus failures now show an amber border indicator and are logged at `warning` level.
 
-### Session restore with new tab types
+### ✅ Session restore with new tab types — GUARDED
 
-Adding any new `TabContent` case requires updating:
-- `TabContent` enum
-- `SessionSnapshot` / `WindowSnapshot` / `TabSnapshot`
-- `restoreWindow()` in AppDelegate
-- `windowSnapshot()` in CalyxWindowController
-- JSON codec (both encode and decode)
-
-Missing any one causes silent data loss. The tab appears to close but is actually not persisted. There's no test that verifies round-trip serialization for all tab types.
+~~There's no test that verifies round-trip serialization for all tab types.~~ Tests `test_tabContent_terminal_roundtrip`, `test_tabContent_browser_roundtrip`, and `test_tabContent_diff_excluded_from_persistence` now guard against silent data loss. Adding a new persistable `TabContent` case still requires updating the snapshot codec; the tests will catch any missed step.
 
 ## What Will Slow Development
 
@@ -72,81 +51,37 @@ Current cost to add a tab type (e.g., "markdown preview"):
 3. Add restore logic in AppDelegate
 4. Add view rendering in MainContentView
 5. Add lifecycle management in CalyxWindowController (creation, activation, deactivation, cleanup)
-6. Thread callbacks through MainContentView's 22 closures
+6. ~~Thread callbacks through MainContentView's 22 closures~~ — now uses `WindowActions` environment object
 7. Update `closeTab`, `closeActiveGroup`, `closeAllTabsInGroup`, `windowWillClose`
 
-Steps 5-7 all touch the god class. This is at least a full day of work for what should be a modular feature.
+Steps 5 and 7 still touch the controller. This is now closer to half a day of focused work.
 
 ### Adding a new sidebar mode
 
-Current cost: modify `SidebarMode` enum, add view in `SidebarContentView` (626 lines), add callbacks through `MainContentView`, add handlers in `CalyxWindowController`. The callback chain makes simple features feel heavy.
+Current cost: modify `SidebarMode` enum, add view in `SidebarContentView`, add handlers in `CalyxWindowController`. The `WindowActions` environment object has reduced callback churn here.
 
-### Debugging notification-based bugs
+### ✅ Debugging notification-based bugs — IMPROVED
 
-When something stops working (titles not updating, splits not creating), the debugging process is:
-1. Set breakpoint in notification handler
-2. Verify notification is posted (go to GhosttyApp.swift callback)
-3. Verify `userInfo` has expected keys and types
-4. Verify `as?` cast succeeds
-5. Verify `belongsToThisWindow` returns true
-6. Verify `activeTab` is non-nil
-
-This takes 30+ minutes per bug. With typed events, most of these steps are compile-time errors.
+~~`userInfo` type mismatches fail silently at runtime.~~ All notification handlers now use typed event wrappers. A missing or renamed key now causes `from(_:)` to return `nil` at the factory boundary, not deep inside handler logic. Debugging narrows to: was the notification posted? Did `from(_:)` return nil?
 
 ## Fix NOW to Avoid Future Pain
 
-### 1. Extract from CalyxWindowController (Priority: Critical)
+### 1. ✅ Extract from CalyxWindowController (Priority: Critical) — DONE
 
-The git/diff/review controllers described in the refactor plan (Phase 10, Steps 2-4). Do this before adding any new features. Every week of delay makes the extraction harder because new code gets added to the god class.
+Steps 1-8 completed: TabCleanupHelper, GitController, ReviewController, FocusManager, typed notifications, WindowActions environment, BrowserManager, ComposeOverlayController.
 
-### 2. Type the top 5 notifications (Priority: High)
+### 2. ✅ Type all notifications (Priority: High) — DONE
 
-`.ghosttyNewSplit`, `.ghosttyCloseSurface`, `.ghosttySetTitle`, `.ghosttySetPwd`, `.ghosttyGotoSplit`. These are the most-used and most-fragile notification paths. Adding type safety here catches the most common class of bugs.
+All 28 notification handlers now use typed event wrappers in `GhosttyNotificationEvents.swift`.
 
-### 3. Add TabContent round-trip test (Priority: High)
+### 3. ✅ Add TabContent round-trip test (Priority: High) — DONE
 
-A test that verifies every `TabContent` case can be encoded -> decoded -> restored:
+Tests `test_tabContent_terminal_roundtrip`, `test_tabContent_browser_roundtrip`, and `test_tabContent_diff_excluded_from_persistence` in `SessionPersistenceTests.swift`.
 
-```swift
-func testAllTabContentTypesRoundTrip() {
-    let cases: [TabContent] = [
-        .terminal,
-        .browser(url: URL(string: "https://example.com")!),
-        // .diff is excluded from persistence (by design)
-    ]
-    for content in cases {
-        let tab = Tab(content: content)
-        let snapshot = TabSnapshot(from: tab)
-        let data = try! JSONEncoder().encode(snapshot)
-        let restored = try! JSONDecoder().decode(TabSnapshot.self, from: data)
-        // Verify restored content matches original
-    }
-}
-```
+### 4. ✅ Replace restoreFocus timing hack (Priority: Medium) — DONE
 
-This catches silent data loss when adding new tab types.
+Polling loop replaced with `SplitContainerView.onDeferredLayoutComplete` callback.
 
-### 4. Replace restoreFocus timing hack (Priority: Medium)
+### 5. ✅ Add dependency injection for testability (Priority: Medium) — DONE
 
-Use `NSView.viewDidMoveToWindow` or `viewDidLayout` callbacks instead of polling:
-
-```swift
-// Instead of 10ms retry loop:
-surfaceView.onReadyForFocus = { [weak self] in
-    self?.window?.makeFirstResponder(surfaceView)
-}
-```
-
-This survives macOS layout timing changes and eliminates the 500ms timeout race.
-
-### 5. Add dependency injection for testability (Priority: Medium)
-
-Start with one singleton: `CalyxMCPServer`. Instead of `.shared`, inject it:
-
-```swift
-init(mcpServer: CalyxMCPServer = .shared) {
-    self.mcpServer = mcpServer
-}
-```
-
-This pattern can be gradually extended to other singletons as tests require it.
+`CalyxMCPServer._testSetToken()` `#if DEBUG` backdoor removed. Tests now use `CalyxMCPServer(testToken:)`. `CalyxWindowController` already accepts injected `mcpServer: CalyxMCPServer = .shared`. Pattern can be extended to other singletons as needed.

@@ -210,6 +210,33 @@ final class BrowserManager {
 ### Risk
 Low. Clean boundary: browser lifecycle doesn't interact with split/tab model directly.
 
+## Step 8: ✅ Extract ComposeOverlayController (done)
+
+### What
+Created `ComposeOverlayController` in `Calyx/Features/ComposeOverlay/ComposeOverlayController.swift`:
+
+```swift
+@MainActor
+final class ComposeOverlayController {
+    private(set) var targetSurfaceID: UUID?
+
+    func toggle(windowSession:, focusedControllerID:)
+    func retargetIfNeeded(windowSession:, focusedControllerID:)
+    func dismiss(windowSession:, onDismiss:)
+    func send(_:activeTab:focusedController:sendEnterKey:) -> Bool
+}
+```
+
+### What moved from CalyxWindowController
+- `composeOverlayTargetSurfaceID` → `composeController.targetSurfaceID`
+- `toggleComposeOverlay()` → delegates to `composeController.toggle(...)`
+- `retargetComposeOverlayIfNeeded()` → delegates to `composeController.retargetIfNeeded(...)`
+- `dismissComposeOverlay()` → delegates to `composeController.dismiss(...)` with focus restore callback
+- `sendComposeText(_:)` body → delegates to `composeController.send(...)`
+
+### Risk
+Low. Clean boundary: compose overlay state and text dispatch logic is self-contained. CalyxWindowController retains ownership of focus restoration (since that requires `focusManager` and window context).
+
 ## What NOT to Touch Yet
 
 | Component | Why |

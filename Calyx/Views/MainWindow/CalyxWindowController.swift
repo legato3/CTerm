@@ -22,7 +22,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     private let gitController: GitController
     private let reviewController: ReviewController
     private var clipboardConfirmationController: ClipboardConfirmationController?
-    private var composeOverlayTargetSurfaceID: UUID?
+    private let composeController = ComposeOverlayController()
     private let windowViewState = WindowViewState()
     let mcpServer: CalyxMCPServer
 
@@ -842,26 +842,17 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc func toggleComposeOverlay() {
-        if windowSession.showComposeOverlay {
-            dismissComposeOverlay()
-        } else {
-            guard let tab = activeTab, case .terminal = tab.content else { return }
-            composeOverlayTargetSurfaceID = focusedController?.id
-            windowSession.showComposeOverlay = true
-        }
+        composeController.toggle(windowSession: windowSession, focusedControllerID: focusedController?.id)
     }
 
     private func retargetComposeOverlayIfNeeded() {
-        guard windowSession.showComposeOverlay else { return }
-        composeOverlayTargetSurfaceID = focusedController?.id
+        composeController.retargetIfNeeded(windowSession: windowSession, focusedControllerID: focusedController?.id)
     }
 
     private func dismissComposeOverlay() {
-        guard windowSession.showComposeOverlay else { return }
-        windowSession.showComposeOverlay = false
-        composeOverlayTargetSurfaceID = nil
-        if case .terminal = activeTab?.content {
-            focusManager.restoreFocus(window: window, tab: activeTab, splitContainerView: splitContainerView)
+        composeController.dismiss(windowSession: windowSession) { [weak self] in
+            guard let self, case .terminal = self.activeTab?.content else { return }
+            self.focusManager.restoreFocus(window: self.window, tab: self.activeTab, splitContainerView: self.splitContainerView)
         }
     }
 
@@ -880,42 +871,12 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func sendComposeText(_ text: String) -> Bool {
-        guard !text.isEmpty else { return false }
-
-        let targetController: GhosttySurfaceController?
-        if let targetID = composeOverlayTargetSurfaceID,
-           let tab = activeTab,
-           let controller = tab.registry.controller(for: targetID) {
-            targetController = controller
-        } else {
-            targetController = focusedController
-        }
-
-        guard let controller = targetController else { return false }
-
-        // Check if the target is an AI agent (same detection as sendReviewToAgent)
-        let isAgent = activeTab.map { tab -> Bool in
-            guard case .terminal = tab.content else { return false }
-            let title = tab.title
-            return title.localizedCaseInsensitiveContains("claude") ||
-                   title.localizedCaseInsensitiveContains("codex")
-        } ?? false
-
-        controller.sendText(text)
-
-        if isAgent {
-            // AI agent: confirm paste then submit, with timing delays
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.sendEnterKey(to: controller)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    self.sendEnterKey(to: controller)
-                }
-            }
-        } else {
-            // Regular terminal: single Enter, immediate
-            sendEnterKey(to: controller)
-        }
-        return true
+        composeController.send(
+            text,
+            activeTab: activeTab,
+            focusedController: focusedController,
+            sendEnterKey: { [weak self] controller in self?.sendEnterKey(to: controller) }
+        )
     }
 
     // MARK: - Split Operations
@@ -1093,13 +1054,14 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func handleResizeSplitNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard let event = GhosttyResizeSplitEvent.from(notification) else { return }
+        let surfaceView = event.surfaceView
         guard let tab = activeTab else { return }
         guard let surfaceID = tab.registry.id(for: surfaceView) else { return }
         guard belongsToThisWindow(surfaceView) else { return }
         guard let contentView = window?.contentView else { return }
 
-        guard let resize = notification.userInfo?["resize"] as? ghostty_action_resize_split_s else { return }
+        let resize = event.resize
 
         let direction: SplitDirection
         switch resize.direction {
@@ -1164,11 +1126,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func handleGotoTabNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
-        guard findTab(for: surfaceView) != nil else { return }
-        guard let rawValue = notification.userInfo?["tab"] as? Int32 else { return }
+        guard let event = GhosttyGotoTabEvent.from(notification) else { return }
+        if let sv = event.surfaceView { guard findTab(for: sv) != nil else { return } }
 
-        switch rawValue {
+        switch event.tab {
         case GHOSTTY_GOTO_TAB_NEXT.rawValue:
             selectNextTab(nil)
         case GHOSTTY_GOTO_TAB_PREVIOUS.rawValue:
@@ -1184,14 +1145,13 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func handleConfirmClipboardNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard let event = GhosttyConfirmClipboardEvent.from(notification) else { return }
+        let surfaceView = event.surfaceView
         guard belongsToThisWindow(surfaceView) else { return }
-        guard let userInfo = notification.userInfo else { return }
-        guard let contents = userInfo["contents"] as? String else { return }
-        guard let surface = userInfo["surface"] as? ghostty_surface_t else { return }
-        guard let requestRaw = userInfo["request"] as? ghostty_clipboard_request_e else { return }
-        guard let request = ClipboardRequest.from(requestRaw) else { return }
-        let state = userInfo["state"] as? UnsafeMutableRawPointer
+        guard let request = ClipboardRequest.from(event.request) else { return }
+        let contents = event.contents
+        let surface = event.surface
+        let state = event.state
 
         let controller = ClipboardConfirmationController(
             surface: surface,
@@ -1215,10 +1175,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func handleDesktopNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
-        guard let (owningTab, _) = findTab(for: surfaceView) else { return }
-        guard let title = notification.userInfo?["title"] as? String else { return }
-        let body = notification.userInfo?["body"] as? String ?? ""
+        guard let event = GhosttyDesktopNotificationEvent.from(notification) else { return }
+        guard let (owningTab, _) = findTab(for: event.surfaceView) else { return }
+        let title = event.title
+        let body = event.body
 
         let isActiveAndVisible = owningTab.id == activeTab?.id && (window?.isKeyWindow ?? false)
         guard !isActiveAndVisible else { return }
@@ -1235,10 +1195,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func handleCloseTabNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
-        guard let (tab, group) = findTab(for: surfaceView) else { return }
-        let mode = notification.userInfo?["mode"] as? ghostty_action_close_tab_mode_e
-        switch mode {
+        guard let event = GhosttyCloseTabEvent.from(notification) else { return }
+        guard let (tab, group) = findTab(for: event.surfaceView) else { return }
+        switch event.mode {
         case GHOSTTY_ACTION_CLOSE_TAB_MODE_OTHER:
             // Close all tabs in the group except the one containing this surface
             let otherIDs = group.tabs.filter { $0.id != tab.id }.map { $0.id }
@@ -1275,32 +1234,32 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func handleShowChildExitedNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
-        guard let (tab, _) = findTab(for: surfaceView) else { return }
-        let exitCode = notification.userInfo?["exit_code"] as? UInt32 ?? 0
-        logger.info("[ChildExited] tab \(tab.id) exit_code=\(exitCode) — surface will close via ghosttyCloseSurface")
+        guard let event = GhosttyShowChildExitedEvent.from(notification) else { return }
+        guard let (tab, _) = findTab(for: event.surfaceView) else { return }
+        logger.info("[ChildExited] tab \(tab.id) exit_code=\(event.exitCode) — surface will close via ghosttyCloseSurface")
     }
 
     @objc private func handleRendererHealthNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
-        guard findTab(for: surfaceView) != nil else { return }
-        logger.warning("[RendererHealth] health changed for surface \(String(describing: ObjectIdentifier(surfaceView)))")
+        guard let event = GhosttyRendererHealthEvent.from(notification) else { return }
+        guard findTab(for: event.surfaceView) != nil else { return }
+        logger.warning("[RendererHealth] health=\(event.health.rawValue) for surface \(String(describing: ObjectIdentifier(event.surfaceView)))")
     }
 
     @objc private func handleColorChangeNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
-        guard belongsToThisWindow(surfaceView) else { return }
+        guard let event = GhosttyColorChangeEvent.from(notification) else { return }
+        guard belongsToThisWindow(event.surfaceView) else { return }
         // Color changes sync the terminal background color to the window.
         // Full implementation pending theme integration.
-        logger.debug("[ColorChange] received for surface \(String(describing: ObjectIdentifier(surfaceView)))")
+        logger.debug("[ColorChange] kind=\(event.change.kind.rawValue) for surface \(String(describing: ObjectIdentifier(event.surfaceView)))")
     }
 
     @objc private func handleInitialSizeNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard let event = GhosttyInitialSizeEvent.from(notification) else { return }
+        let surfaceView = event.surfaceView
         guard belongsToThisWindow(surfaceView) else { return }
         guard let window else { return }
-        guard let width = notification.userInfo?["width"] as? UInt32,
-              let height = notification.userInfo?["height"] as? UInt32 else { return }
+        let width = event.width
+        let height = event.height
 
         let cellSize = surfaceView.cachedCellSize
         guard cellSize.width > 0, cellSize.height > 0 else {
@@ -1323,7 +1282,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func handleSizeLimitNotification(_ notification: Notification) {
-        guard let surfaceView = notification.object as? SurfaceView else { return }
+        guard let event = GhosttySizeLimitEvent.from(notification) else { return }
+        let surfaceView = event.surfaceView
         guard belongsToThisWindow(surfaceView) else { return }
         guard let window else { return }
 
@@ -1333,10 +1293,10 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             return
         }
 
-        let minW = notification.userInfo?["min_width"] as? UInt32 ?? 0
-        let minH = notification.userInfo?["min_height"] as? UInt32 ?? 0
-        let maxW = notification.userInfo?["max_width"] as? UInt32 ?? 0
-        let maxH = notification.userInfo?["max_height"] as? UInt32 ?? 0
+        let minW = event.minWidth
+        let minH = event.minHeight
+        let maxW = event.maxWidth
+        let maxH = event.maxHeight
 
         // Measure chrome: content view area minus the surface area
         let contentSize = window.contentView?.bounds.size ?? .zero
@@ -1751,10 +1711,11 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func handleIPCLaunchWorkflowNotification(_ notification: Notification) {
-        guard let roleNames = notification.userInfo?["roleNames"] as? [String], !roleNames.isEmpty else { return }
-        let autoStart = (notification.userInfo?["autoStart"] as? Bool) ?? false
-        let sessionName = (notification.userInfo?["sessionName"] as? String) ?? ""
-        let initialTask = (notification.userInfo?["initialTask"] as? String) ?? ""
+        guard let event = CalyxIPCLaunchWorkflowEvent.from(notification) else { return }
+        let roleNames = event.roleNames
+        let autoStart = event.autoStart
+        let sessionName = event.sessionName
+        let initialTask = event.initialTask
         let port = mcpServer.port
 
         // Show folder picker before creating any tabs

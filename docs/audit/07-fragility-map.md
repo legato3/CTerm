@@ -1,9 +1,12 @@
 # Phase 7: Fragility Map
 
-## 1. CalyxWindowController Notification Handlers
+## 1. ✅ CalyxWindowController Notification Handlers (fixed)
 
-### Why fragile
-All ghostty events arrive as untyped `NotificationCenter` posts. Each handler does `as?` casts on `notification.object` and `notification.userInfo`. If ghostty changes the shape of its callback data, these fail silently.
+### What was fragile
+All ghostty events arrived as untyped `NotificationCenter` posts. Each handler did `as?` casts on `notification.object` and `notification.userInfo`. If ghostty changed the shape of its callback data, these failed silently.
+
+### Fix
+All 28 notification handlers now use typed event wrappers (`GhosttyNotificationEvents.swift`). Every handler that had userInfo payload access now goes through a typed struct with a `from(_:)` factory method.
 
 ### What breaks it
 Any ghostty submodule update that changes callback signatures, notification names, or userInfo keys.
@@ -41,26 +44,16 @@ struct GhosttyNewSplitEvent {
 ### Fix
 Marked `savePath`, `backupPath`, `recoveryMarkerPath` as `nonisolated(unsafe)` (write-once in init). Made `restore()`, `migrateFromLegacyPath()`, `loadFromPath()`, and all recovery counter methods `nonisolated`. Added `saveImmediatelySync()` for the shutdown path. All spin-loops in `AppDelegate` replaced with direct synchronous calls.
 
-## 3. Focus Management Retry Loop
+## 3. ✅ Focus Management Retry Loop (fixed)
 
-### Why fragile
-`restoreFocus()` -> `attemptFocusRestore()` retries with 10ms backoff up to 500ms, then falls back to a deferred callback on `SplitContainerView.onDeferredLayoutComplete`. If the view layout is already complete when the callback is registered, it will never fire.
+### What was fragile
+`restoreFocus()` -> `attemptFocusRestore()` used 10ms polling with 500ms timeout. Timing-dependent; would break on macOS layout schedule changes.
 
-### What breaks it
-- SwiftUI layout timing changes (new macOS version)
-- Adding views that delay layout
-- Focus being stolen by another component (command palette, compose overlay)
-- Multiple rapid tab switches (focus request ID invalidation)
+### Fix
+Polling loop replaced with `SplitContainerView.onDeferredLayoutComplete` callback. `FocusManager` waits for the next layout pass instead of polling. Added `onFocusFailed`/`onFocusRestored` callbacks — amber border indicator appears when focus fails and clears automatically. Failure logged at `warning` level.
 
-### Symptoms
-Terminal pane visible but not accepting keyboard input. User must click to re-focus.
-
-### ✅ Partial fix
-Added `onFocusFailed`/`onFocusRestored` callbacks to `FocusManager`. When `makeFirstResponder` fails, an amber border appears on `SplitContainerView` (via `CALayer.borderColor`). Cleared automatically when the user clicks or focus is successfully restored. Failure is now logged at `warning` level.
-
-### Remaining
-- Add a `windowDidUpdate` or `viewDidLayout` observer as a final fallback
-- Use `NSView.viewDidMoveToWindow` callback instead of polling
+### Remaining edge case
+If the surface view is in the window hierarchy but has zero bounds (not yet laid out), `makeFirstResponder` may fail silently with no retry. Low probability but still possible on very first tab creation.
 
 ## 4. GhosttyAppController Singleton + C Callbacks
 
@@ -78,39 +71,28 @@ Hard crash (EXC_BAD_ACCESS) in C callback handler.
 - The current `Unmanaged.passUnretained` is correct for a true singleton
 - Consider adding an assertion in `deinit` to catch accidental deallocation
 
-## 5. Browser Automation Security Model
+## 5. ✅ Browser Automation Security Model (fixed)
 
-### Why fragile
-`BrowserServer` writes `~/.config/calyx/browser.json` with port and token. The token is generated via `SecRandomCopyBytes` but the return value is not checked. File permissions are 0o600 (owner-only), which is correct but any process running as the same user can read it.
+### What was fragile
+`BrowserServer` token generation did not check the `SecRandomCopyBytes` return value. A failure would produce an all-zero predictable token, creating a theoretical auth bypass.
 
-### What breaks it
-- `SecRandomCopyBytes` failure produces all-zero token (predictable)
-- A malicious local process reads the token and controls browser tabs
-- State file not cleaned up if app crashes (stale token in file)
+### Fix
+`SecRandomCopyBytes` return value is now checked; failure triggers `fatalError`. Shared `SecurityUtils.generateHexToken()` utility used by both `BrowserServer` and `CalyxMCPServer`.
 
-### Symptoms
-Browser tabs navigating to unexpected URLs, data exfiltration via `browser_eval` command.
+### Remaining
+- Any malicious local process running as the same user can still read `~/.config/calyx/browser.json` (inherent to local IPC)
+- State file not cleaned up if app crashes (stale token) — acceptable: token regenerated on next `start()`
 
-### Stabilize
-- **Fix**: Check `SecRandomCopyBytes` return value (matches what MCP server already does)
-- The 0o600 permissions are appropriate for local-user security
-- Consider per-session token rotation on app restart (already happens -- token regenerated on `start()`)
-- Add PID verification in CLI client before using state file
+## 6. ✅ TOML Parser for Codex Config (hardened)
 
-## 6. TOML Parser for Codex Config
+### What was fragile
+`CodexConfigManager` used hand-coded line-by-line TOML parsing with regex. No actual TOML parser library.
 
-### Why fragile
-`CodexConfigManager` uses hand-coded line-by-line TOML parsing with regex. No actual TOML parser library.
+### What was done
+Added 3 edge-case tests to `CodexConfigManagerTests.swift`:
+- Inline comment on section header (`[mcp_servers.calyx-ipc] # added by Calyx`)
+- Brackets inside values not mistaken for section headers (`matrix = [1, 2, 3]`)
+- Multi-line string with a header-like line (documents known limitation)
 
-### What breaks it
-- TOML features like inline tables, multi-line strings, or comments within the calyx section
-- User manually editing the file with different formatting
-- Codex changing their config format
-
-### Symptoms
-IPC configuration silently not applied or corrupted. User's other Codex config may be damaged.
-
-### Stabilize
-- Consider using a proper TOML parser library
-- Or keep the regex approach but add comprehensive tests for edge cases (already has 520 lines of tests, which helps)
-- Add config validation after write (read back and verify calyx section exists)
+### Remaining known limitation
+A TOML multi-line string value whose content starts a line with `[` will be incorrectly treated as a section boundary by `isAnyTableHeader`. This is extremely unlikely in Codex configs but is documented in the test suite.

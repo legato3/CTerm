@@ -169,17 +169,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleNewTab(_ notification: Notification) {
+        let event = GhosttyNewTabEvent.from(notification)
+        let inheritedConfig = event?.inheritedConfig
         // Find the window controller that owns the source surface
-        guard let surfaceView = notification.object as? SurfaceView,
+        guard let surfaceView = event?.surfaceView,
               let window = surfaceView.window,
               let wc = windowControllers.first(where: { $0.window === window }) else {
             // No source — create tab in the key window's controller
             if let keyWC = windowControllers.first(where: { $0.window?.isKeyWindow == true }) {
-                keyWC.createNewTab(inheritedConfig: notification.userInfo?["inherited_config"])
+                keyWC.createNewTab(inheritedConfig: inheritedConfig)
             }
             return
         }
-        wc.createNewTab(inheritedConfig: notification.userInfo?["inherited_config"])
+        wc.createNewTab(inheritedConfig: inheritedConfig)
     }
 
     @objc private func handleNewWindow(_ notification: Notification) {

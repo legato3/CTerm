@@ -37,12 +37,11 @@ final class CalyxMCPServer {
 
     init() {}
 
-    #if DEBUG
-    /// For testing only — sets the token without starting the listener.
-    func _testSetToken(_ token: String) {
-        self.token = token
+    /// Initializer for testing: creates a server with a pre-set token so tests can
+    /// exercise handleJSONRPC without going through start() / NWListener.
+    init(testToken: String) {
+        self.token = testToken
     }
-    #endif
 
     // MARK: - Lifecycle
 
