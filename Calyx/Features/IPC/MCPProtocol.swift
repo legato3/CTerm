@@ -135,6 +135,11 @@ struct AnyCodable: @unchecked Sendable, Codable, Equatable {
         return d.compactMapValues { $0.rawValue }
     }
 
+    var anyCodableDictionaryValue: [String: AnyCodable]? {
+        guard case .dictionary(let d) = storage else { return nil }
+        return d
+    }
+
     /// Unwraps the stored value to a plain Swift/Foundation type.
     var rawValue: Any? {
         switch storage {

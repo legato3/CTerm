@@ -78,7 +78,7 @@ enum GitService {
     static func commit(message: String, workDir: String) async throws -> String {
         let output = try await run(args: ["commit", "-m", message], workDir: workDir)
         // Parse the short hash from the first line, e.g. "[main abcd123] message"
-        if let match = output.firstMatch(of: /\[[\w/]+ ([0-9a-f]+)\]/) {
+        if let match = output.firstMatch(of: #/\[[\w/]+ ([0-9a-f]+)\]/#) {
             return String(match.output.1)
         }
         return output.trimmingCharacters(in: .whitespacesAndNewlines)

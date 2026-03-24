@@ -541,9 +541,9 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         let name = input.stringValue.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
 
-        guard let snapshot = windowSnapshot() else { return }
+        let windowSnap = windowSnapshot()
         do {
-            try WorkspaceManager.save(snapshot, name: name)
+            try WorkspaceManager.save(SessionSnapshot(windows: [windowSnap]), name: name)
         } catch {
             let err = NSAlert(error: error)
             err.runModal()
@@ -1023,8 +1023,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             let lastIndex = (windowSession.activeGroup?.tabs.count ?? 1) - 1
             selectTabByIndex(lastIndex)
         default:
-            if rawValue >= 0 {
-                selectTabByIndex(Int(rawValue))
+            if event.tab >= 0 {
+                selectTabByIndex(Int(event.tab))
             }
         }
     }
@@ -1675,7 +1675,7 @@ extension CalyxWindowController: TerminalControl {
         guard let pwd = activeTab?.pwd else { return }
         let alert = NSAlert()
         alert.messageText = "Roll back to checkpoint?"
-        alert.informativeText = "This will run git reset --hard \(commit.shortHash) and discard all changes made since:\n\n"\(commit.message)"\n\nThis cannot be undone."
+        alert.informativeText = "This will run git reset --hard \(commit.shortHash) and discard all changes made since:\n\n\"\(commit.message)\"\n\nThis cannot be undone."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Roll Back")
         alert.addButton(withTitle: "Cancel")
@@ -1689,7 +1689,7 @@ extension CalyxWindowController: TerminalControl {
                     self.gitController.refreshGitStatus()
                 } catch {
                     let errAlert = NSAlert(error: error)
-                    if let w = self.window { errAlert.beginSheetModal(for: w) }
+                    if let w = self.window { _ = await errAlert.beginSheetModal(for: w) }
                 }
             }
         }

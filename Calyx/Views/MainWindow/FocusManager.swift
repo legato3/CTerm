@@ -1,8 +1,11 @@
 import AppKit
+import OSLog
 import QuartzCore
 
 /// Manages focus restoration after tab switches, splits, and layout changes.
 /// Owned by CalyxWindowController; call sites pass current window/tab state.
+private let logger = Logger(subsystem: "com.calyx", category: "FocusManager")
+
 @MainActor
 final class FocusManager {
     private var focusRequestID: UInt64 = 0

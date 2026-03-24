@@ -6,6 +6,7 @@
 //  routes to MCPRouter / IPCStore for IPC tool calls.
 //
 
+import AppKit
 import Foundation
 import Network
 
@@ -470,7 +471,7 @@ final class CalyxMCPServer {
     }
 
     private func handleShowQuickTerminal(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
-        QuickTerminalController.shared.toggle()
+        (NSApp.delegate as? AppDelegate)?.toggleQuickTerminal()
         return toolSuccess(id: id, text: "{\"toggled\":true}")
     }
 
@@ -676,9 +677,9 @@ final class CalyxMCPServer {
         dict[key]?.stringValue
     }
 
-    /// Extract a [String: Any] dictionary from an AnyCodable value at the given key.
-    private func extractDict(_ dict: [String: AnyCodable], _ key: String) -> [String: Any]? {
-        dict[key]?.dictionaryValue
+    /// Extract a [String: AnyCodable] dictionary from an AnyCodable value at the given key.
+    private func extractDict(_ dict: [String: AnyCodable], _ key: String) -> [String: AnyCodable]? {
+        dict[key]?.anyCodableDictionaryValue
     }
 
     /// Extract the client name from an initialize request's clientInfo.

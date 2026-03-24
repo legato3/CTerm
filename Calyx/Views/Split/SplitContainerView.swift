@@ -143,7 +143,7 @@ class SplitContainerView: NSView {
 
     // MARK: - Broadcast Input Indicator
 
-    private weak var broadcastBadge: NSView?
+    private weak var broadcastBadge: NSTextField?
 
     private func installBroadcastOverlay() {
         guard broadcastBadge == nil else { return }

@@ -69,7 +69,7 @@ final class ClaudeUsageMonitor {
     #if DEBUG
     /// Test-only: inject a custom home directory to avoid reading from the real ~/.claude.
     /// Set before calling `start()` or `reload()`.
-    static var _testHomeOverride: String? = nil
+    nonisolated(unsafe) static var _testHomeOverride: String? = nil
 
     /// Returns the effective monitor instance, respecting any test override.
     /// Production callers should use `ClaudeUsageMonitor.shared` directly.
