@@ -138,6 +138,9 @@ enum GitService {
             workDir = wd
         case .untracked(let path, let wd):
             return try await untrackedFileDiff(path: path, workDir: wd)
+        case .allChanges(let wd):
+            args = ["diff", "HEAD"]
+            workDir = wd
         }
 
         let output = try await run(args: args, workDir: workDir)

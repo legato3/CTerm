@@ -78,7 +78,7 @@ When a Claude session registers via IPC (`register_peer`):
 
 ---
 
-### 6. File Change Tracker
+### 6. File Change Tracker ✅ **(Implemented)**
 
 Sidebar tab listing all files modified *in this session* by Claude:
 - Grouped by agent/pane
@@ -137,7 +137,7 @@ Queue multiple tasks for a Codex pane to process one after another:
 ○  Phase 3:           Context bridge / output capture
 ○  Phase 4:           Prompt library + system prompts
 ○  Phase 5:           Pre-edit checkpoint commits
-○  Phase 6:           File change tracker
+✅ Phase 6:           File change tracker
 ○  Phase 7:           Auto-accept mode
 ○  Phase 8-10:        Visual mesh, token HUD, task queue
 ```

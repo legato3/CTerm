@@ -61,6 +61,8 @@ final class ReviewController {
                 switch source {
                 case .unstaged(let p, _), .staged(let p, _), .commit(_, let p, _), .untracked(let p, _):
                     path = p
+                case .allChanges:
+                    path = "all"
                 }
                 let parsed = DiffParser.parse(rawDiff, path: path)
                 guard !Task.isCancelled else { return }
@@ -103,6 +105,8 @@ final class ReviewController {
         switch source {
         case .unstaged(let p, _), .staged(let p, _), .commit(_, let p, _), .untracked(let p, _):
             filePath = p
+        case .allChanges:
+            filePath = "all"
         }
 
         let payload = store.formatForSubmission(filePath: filePath)

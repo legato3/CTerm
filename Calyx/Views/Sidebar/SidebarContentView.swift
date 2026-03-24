@@ -29,6 +29,8 @@ struct SidebarContentView: View {
     var onExpandCommit: ((String) -> Void)?
     var onRollbackToCheckpoint: ((GitCommit) -> Void)?
     var onMoveTab: ((UUID, Int, Int) -> Void)?
+    var onOpenDiff: ((DiffSource) -> Void)?
+    var onOpenAggregateDiff: ((String) -> Void)?
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private var agentState: IPCAgentState { IPCAgentState.shared }
@@ -52,6 +54,8 @@ struct SidebarContentView: View {
                     .help("Usage").tag(SidebarMode.usage)
                 Image(systemName: "doc.text.fill")
                     .help("Context").tag(SidebarMode.context)
+                Image(systemName: "clock.arrow.circlepath")
+                    .help("File Changes").tag(SidebarMode.fileChanges)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -140,6 +144,12 @@ struct SidebarContentView: View {
             } else if sidebarMode == .usage {
                 ClaudeUsageView()
                     .padding(.top, 4)
+            } else if sidebarMode == .fileChanges {
+                FileChangesView(
+                    onOpenDiff: onOpenDiff,
+                    onOpenAggregateDiff: onOpenAggregateDiff
+                )
+                .padding(.top, 4)
             } else {
                 ContextView(pwd: activeTab?.pwd)
                     .padding(.top, 4)

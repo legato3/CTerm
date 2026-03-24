@@ -162,6 +162,8 @@ class DiffReviewStore {
         switch source {
         case .unstaged(let p, _), .staged(let p, _), .commit(_, let p, _), .untracked(let p, _):
             return p
+        case .allChanges:
+            return "all"
         }
     }
 
@@ -171,6 +173,7 @@ class DiffReviewStore {
         case .unstaged: return "unstaged"
         case .commit(let hash, _, _): return String(hash.prefix(7))
         case .untracked: return "untracked"
+        case .allChanges: return "all changes"
         }
     }
 
@@ -180,6 +183,7 @@ class DiffReviewStore {
         case .unstaged: return 1
         case .commit: return 2
         case .untracked: return 3
+        case .allChanges: return 4
         }
     }
 

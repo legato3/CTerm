@@ -62,7 +62,9 @@ struct MainContentView: View {
                         onLoadMoreCommits: actions.onLoadMoreCommits,
                         onExpandCommit: actions.onExpandCommit,
                         onRollbackToCheckpoint: actions.onRollbackToCheckpoint,
-                        onMoveTab: actions.onMoveTab
+                        onMoveTab: actions.onMoveTab,
+                        onOpenDiff: actions.onOpenDiff,
+                        onOpenAggregateDiff: actions.onOpenAggregateDiff
                     )
                     .frame(width: windowSession.sidebarWidth)
                     .overlay(alignment: .trailing) {

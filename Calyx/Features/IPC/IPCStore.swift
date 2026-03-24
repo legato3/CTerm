@@ -113,6 +113,11 @@ actor IPCStore {
         }
     }
 
+    /// Returns the peer if it exists (regardless of TTL).
+    func getPeer(id: UUID) -> Peer? {
+        peers[id]
+    }
+
     /// Returns the peer if it exists and has not TTL-expired.
     func peerStatus(id: UUID) -> Peer? {
         guard let peer = peers[id] else { return nil }

@@ -632,6 +632,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         windowActions.onLoadMoreCommits = { [weak self] in self?.gitController.loadMoreCommits() }
         windowActions.onExpandCommit = { [weak self] hash in self?.gitController.expandCommit(hash: hash) }
         windowActions.onRollbackToCheckpoint = { [weak self] commit in self?.confirmAndRollbackToCheckpoint(commit) }
+        windowActions.onOpenDiff = { [weak self] source in self?.openDiffTab(source: source) }
+        windowActions.onOpenAggregateDiff = { [weak self] workDir in self?.openDiffTab(source: .allChanges(workDir: workDir)) }
         windowActions.onSidebarWidthChanged = { [weak self] width in self?.windowSession.sidebarWidth = SidebarLayout.clampWidth(width) }
         windowActions.onCollapseToggled = { [weak self] in self?.requestSave() }
         windowActions.onCloseAllTabsInGroup = { [weak self] groupID in self?.closeAllTabsInGroup(id: groupID) }
@@ -1493,6 +1495,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         switch source {
         case .unstaged(let path, _), .staged(let path, _), .commit(_, let path, _), .untracked(let path, _):
             fileName = (path as NSString).lastPathComponent
+        case .allChanges:
+            fileName = "All Changes"
         }
 
         let tab = Tab(title: fileName, content: .diff(source: source))

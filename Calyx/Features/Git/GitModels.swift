@@ -11,6 +11,7 @@ enum SidebarMode: Sendable {
     case agents
     case usage
     case context
+    case fileChanges
 }
 
 enum GitChangesState: Sendable {
@@ -98,4 +99,5 @@ enum DiffSource: Sendable, Equatable {
     case staged(path: String, workDir: String)
     case commit(hash: String, path: String, workDir: String)
     case untracked(path: String, workDir: String)
+    case allChanges(workDir: String)
 }

@@ -80,6 +80,13 @@ struct DiffToolbarView: View {
                 Text(String(hash.prefix(7)))
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
+            case .allChanges:
+                Text("all changes")
+                    .font(.caption)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.blue.opacity(0.2)))
+                    .foregroundStyle(.blue)
             case .untracked:
                 Text("untracked")
                     .font(.caption)
@@ -143,6 +150,7 @@ struct DiffToolbarView: View {
         case .staged(let path, _): path
         case .commit(_, let path, _): path
         case .untracked(let path, _): path
+        case .allChanges: "all changes"
         }
     }
 }

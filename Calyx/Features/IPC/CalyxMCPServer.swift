@@ -294,6 +294,9 @@ final class CalyxMCPServer {
         case "get_pane_output":
             return handleGetPaneOutput(id: id, arguments: arguments)
 
+        case "report_file_change":
+            return await handleReportFileChange(id: id, arguments: arguments)
+
         default:
             return toolError(id: id, text: "Unknown tool: \(toolName)")
         }
@@ -618,6 +621,33 @@ final class CalyxMCPServer {
                             .replacingOccurrences(of: "\"", with: "\\\"")
                             .replacingOccurrences(of: "\n", with: "\\n")
         return toolSuccess(id: id, text: "{\"output\":\"\(escaped)\"}")
+    }
+
+    private func handleReportFileChange(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) async -> (statusCode: Int, body: Data?) {
+        guard let peerIDStr = arguments?["peer_id"]?.stringValue,
+              let peerID = UUID(uuidString: peerIDStr) else {
+            return toolError(id: id, text: "Missing or invalid peer_id")
+        }
+        guard let path = arguments?["path"]?.stringValue, !path.isEmpty else {
+            return toolError(id: id, text: "Missing path")
+        }
+        let workDir = arguments?["work_dir"]?.stringValue
+            ?? TerminalControlBridge.shared.delegate?.activeTabPwd
+            ?? NSHomeDirectory()
+
+        // look up peer name
+        let peer = await store.getPeer(id: peerID)
+        let peerName = peer?.name ?? "unknown"
+
+        await MainActor.run {
+            FileChangeStore.shared.report(path: path, workDir: workDir, peerID: peerID, peerName: peerName)
+        }
+        let escapedPath = path.replacingOccurrences(of: "\\", with: "\\\\")
+                             .replacingOccurrences(of: "\"", with: "\\\"")
+        return toolSuccess(id: id, text: "{\"recorded\":true,\"path\":\"\(escapedPath)\"}")
     }
 
     // MARK: - Response Helpers

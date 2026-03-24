@@ -486,6 +486,18 @@ struct MCPRouter: Sendable {
                     ]
                 )
             ),
+            MCPTool(
+                name: "report_file_change",
+                description: "Report that you modified a file. Call this after each file edit so Calyx can track changes in the File Changes sidebar. The path can be relative (to work_dir) or absolute.",
+                inputSchema: schema(
+                    properties: [
+                        "peer_id": prop("string", "Your peer ID"),
+                        "path": prop("string", "Path of the modified file (relative to work_dir or absolute)"),
+                        "work_dir": prop("string", "Git repository root (working directory). Defaults to the active tab's directory."),
+                    ],
+                    required: ["peer_id", "path"]
+                )
+            ),
         ]
     }
 
