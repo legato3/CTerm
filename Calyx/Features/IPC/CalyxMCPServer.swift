@@ -361,10 +361,10 @@ final class CalyxMCPServer {
 
     private func handleRegisterPeer(
         id: JSONRPCId,
-        arguments: [String: Any]?
+        arguments: [String: AnyCodable]?
     ) async -> (statusCode: Int, body: Data?) {
-        let name = (arguments?["name"] as? String) ?? ""
-        let role = (arguments?["role"] as? String) ?? ""
+        let name = arguments?["name"]?.stringValue ?? ""
+        let role = arguments?["role"]?.stringValue ?? ""
         let peer = await store.registerPeer(name: name, role: role)
 
         // Auto-checkpoint the active tab's repo before Claude starts editing.
@@ -410,11 +410,11 @@ final class CalyxMCPServer {
 
     private func handleSendMessage(
         id: JSONRPCId,
-        arguments: [String: Any]?
+        arguments: [String: AnyCodable]?
     ) async -> (statusCode: Int, body: Data?) {
-        guard let fromStr = arguments?["from"] as? String,
-              let toStr = arguments?["to"] as? String,
-              let content = arguments?["content"] as? String,
+        guard let fromStr = arguments?["from"]?.stringValue,
+              let toStr = arguments?["to"]?.stringValue,
+              let content = arguments?["content"]?.stringValue,
               let fromUUID = UUID(uuidString: fromStr) else {
             return toolError(id: id, text: "Missing or invalid from/to/content")
         }
@@ -429,8 +429,8 @@ final class CalyxMCPServer {
             return toolError(id: id, text: "Peer not found: \"\(toStr)\". Use list_peers to see available peers.")
         }
 
-        let topic = arguments?["topic"] as? String
-        let replyTo = arguments?["reply_to"] as? String
+        let topic = arguments?["topic"]?.stringValue
+        let replyTo = arguments?["reply_to"]?.stringValue
 
         do {
             let message = try await store.sendMessage(from: fromUUID, to: toUUID, content: content, topic: topic, replyTo: replyTo)
@@ -445,15 +445,15 @@ final class CalyxMCPServer {
 
     private func handleBroadcast(
         id: JSONRPCId,
-        arguments: [String: Any]?
+        arguments: [String: AnyCodable]?
     ) async -> (statusCode: Int, body: Data?) {
-        guard let fromStr = arguments?["from"] as? String,
-              let content = arguments?["content"] as? String,
+        guard let fromStr = arguments?["from"]?.stringValue,
+              let content = arguments?["content"]?.stringValue,
               let fromUUID = UUID(uuidString: fromStr) else {
             return toolError(id: id, text: "Missing or invalid from/content")
         }
 
-        let topic = arguments?["topic"] as? String
+        let topic = arguments?["topic"]?.stringValue
 
         do {
             let messages = try await store.broadcast(from: fromUUID, content: content, topic: topic)
@@ -468,16 +468,16 @@ final class CalyxMCPServer {
 
     private func handleReceiveMessages(
         id: JSONRPCId,
-        arguments: [String: Any]?
+        arguments: [String: AnyCodable]?
     ) async -> (statusCode: Int, body: Data?) {
-        guard let peerStr = arguments?["peer_id"] as? String,
+        guard let peerStr = arguments?["peer_id"]?.stringValue,
               let peerUUID = UUID(uuidString: peerStr) else {
             return toolError(id: id, text: "Missing or invalid peer_id")
         }
 
         // Parse optional 'since' cursor
-        let since: Date? = (arguments?["since"] as? String).flatMap { Self.iso8601.date(from: $0) }
-        let topic = arguments?["topic"] as? String
+        let since: Date? = arguments?["since"]?.stringValue.flatMap { Self.iso8601.date(from: $0) }
+        let topic = arguments?["topic"]?.stringValue
 
         let messages = await store.receiveMessages(for: peerUUID, since: since, topic: topic)
 
@@ -496,13 +496,13 @@ final class CalyxMCPServer {
 
     private func handleAckMessages(
         id: JSONRPCId,
-        arguments: [String: Any]?
+        arguments: [String: AnyCodable]?
     ) async -> (statusCode: Int, body: Data?) {
-        guard let peerStr = arguments?["peer_id"] as? String,
-              let peerUUID = UUID(uuidString: peerStr),
-              let messageIdStrings = arguments?["message_ids"] as? [String] else {
+        guard let peerStr = arguments?["peer_id"]?.stringValue,
+              let peerUUID = UUID(uuidString: peerStr) else {
             return toolError(id: id, text: "Missing or invalid peer_id/message_ids")
         }
+        let messageIdStrings = (arguments?["message_ids"]?.rawValue as? [Any])?.compactMap { $0 as? String } ?? []
 
         let messageUUIDs = messageIdStrings.compactMap { UUID(uuidString: $0) }
         await store.ackMessages(ids: messageUUIDs, for: peerUUID)
@@ -512,9 +512,9 @@ final class CalyxMCPServer {
 
     private func handleGetPeerStatus(
         id: JSONRPCId,
-        arguments: [String: Any]?
+        arguments: [String: AnyCodable]?
     ) async -> (statusCode: Int, body: Data?) {
-        guard let peerStr = arguments?["peer_id"] as? String,
+        guard let peerStr = arguments?["peer_id"]?.stringValue,
               let peerUUID = UUID(uuidString: peerStr) else {
             return toolError(id: id, text: "Missing or invalid peer_id")
         }
@@ -533,9 +533,9 @@ final class CalyxMCPServer {
 
     private func handleHeartbeat(
         id: JSONRPCId,
-        arguments: [String: Any]?
+        arguments: [String: AnyCodable]?
     ) async -> (statusCode: Int, body: Data?) {
-        guard let peerStr = arguments?["peer_id"] as? String,
+        guard let peerStr = arguments?["peer_id"]?.stringValue,
               let peerUUID = UUID(uuidString: peerStr) else {
             return toolError(id: id, text: "Missing or invalid peer_id")
         }
@@ -771,8 +771,8 @@ final class CalyxMCPServer {
         return toolSuccess(id: id, text: "{\"cleared\":true}")
     }
 
-    private func handleGetLastError(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
-        let filterTabID = (arguments?["tab_id"] as? String).flatMap { UUID(uuidString: $0) }
+    private func handleGetLastError(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
+        let filterTabID = arguments?["tab_id"]?.stringValue.flatMap { UUID(uuidString: $0) }
 
         let result: [String: Any]
         if let event = findLastError(tabID: filterTabID) {
@@ -796,13 +796,13 @@ final class CalyxMCPServer {
 
     // MARK: - Agent Memory
 
-    private func handleRemember(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
-        guard let key = arguments?["key"] as? String, !key.isEmpty,
-              let value = arguments?["value"] as? String, !value.isEmpty else {
+    private func handleRemember(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
+        guard let key = arguments?["key"]?.stringValue, !key.isEmpty,
+              let value = arguments?["value"]?.stringValue, !value.isEmpty else {
             return toolError(id: id, text: "remember requires non-empty 'key' and 'value'")
         }
-        let ttlDays = arguments?["ttl_days"] as? Int
-        let workDir = arguments?["work_dir"] as? String
+        let ttlDays = arguments?["ttl_days"]?.rawValue as? Int
+        let workDir = arguments?["work_dir"]?.stringValue
         let projectKey = resolvedProjectKey(workDir: workDir)
 
         let entry = AgentMemoryStore.shared.remember(
@@ -826,9 +826,9 @@ final class CalyxMCPServer {
         return toolSuccess(id: id, text: text)
     }
 
-    private func handleRecall(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
-        let query = arguments?["query"] as? String ?? ""
-        let workDir = arguments?["work_dir"] as? String
+    private func handleRecall(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
+        let query = arguments?["query"]?.stringValue ?? ""
+        let workDir = arguments?["work_dir"]?.stringValue
         let projectKey = resolvedProjectKey(workDir: workDir)
 
         let entries = AgentMemoryStore.shared.recall(projectKey: projectKey, query: query)
@@ -845,11 +845,11 @@ final class CalyxMCPServer {
         return toolSuccess(id: id, text: text)
     }
 
-    private func handleForget(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
-        guard let key = arguments?["key"] as? String, !key.isEmpty else {
+    private func handleForget(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
+        guard let key = arguments?["key"]?.stringValue, !key.isEmpty else {
             return toolError(id: id, text: "forget requires 'key'")
         }
-        let workDir = arguments?["work_dir"] as? String
+        let workDir = arguments?["work_dir"]?.stringValue
         let projectKey = resolvedProjectKey(workDir: workDir)
         let removed = AgentMemoryStore.shared.forget(projectKey: projectKey, key: key)
         if removed { NotificationCenter.default.post(name: .agentMemoryChanged, object: nil) }
@@ -862,8 +862,8 @@ final class CalyxMCPServer {
         return toolSuccess(id: id, text: text)
     }
 
-    private func handleListMemories(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
-        let workDir = arguments?["work_dir"] as? String
+    private func handleListMemories(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
+        let workDir = arguments?["work_dir"]?.stringValue
         let projectKey = resolvedProjectKey(workDir: workDir)
 
         let entries = AgentMemoryStore.shared.listAll(projectKey: projectKey)
@@ -887,25 +887,21 @@ final class CalyxMCPServer {
 
     /// Returns the most recent `ShellErrorEvent` across all tabs (or the specific tab if given).
     private func findLastError(tabID: UUID?) -> ShellErrorEvent? {
-        MainActor.assumeIsolated {
-            let session = TerminalControlBridge.shared.delegate?.terminalWindowSession
-            let allTabs = session?.groups.flatMap(\.tabs) ?? []
-            let candidates = tabID != nil
-                ? allTabs.filter { $0.id == tabID }
-                : allTabs
-            return candidates
-                .compactMap(\.lastShellError)
-                .sorted { $0.timestamp > $1.timestamp }
-                .first
-        }
+        let session = TerminalControlBridge.shared.delegate?.terminalWindowSession
+        let allTabs = session?.groups.flatMap(\.tabs) ?? []
+        let candidates = tabID != nil
+            ? allTabs.filter { $0.id == tabID }
+            : allTabs
+        return candidates
+            .compactMap(\.lastShellError)
+            .sorted { $0.timestamp > $1.timestamp }
+            .first
     }
 
     // MARK: - Session Audit
 
     private func handleGetSessionSummary(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
-        let summary: [String: Any] = MainActor.assumeIsolated {
-            SessionAuditLogger.shared.summaryDict()
-        }
+        let summary: [String: Any] = SessionAuditLogger.shared.summaryDict()
         guard let data = try? JSONSerialization.data(withJSONObject: summary),
               let text = String(data: data, encoding: .utf8) else {
             return toolSuccess(id: id, text: "{}")
@@ -915,12 +911,12 @@ final class CalyxMCPServer {
 
     // MARK: - Terminal Search
 
-    private func handleSearchTerminalOutput(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
-        guard let query = arguments?["query"] as? String, !query.isEmpty else {
+    private func handleSearchTerminalOutput(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
+        guard let query = arguments?["query"]?.stringValue, !query.isEmpty else {
             return toolError(id: id, text: "query is required")
         }
-        let paneID = arguments?["pane_id"] as? String
-        let limit  = (arguments?["limit"] as? Int).map { min($0, 100) } ?? 30
+        let paneID = arguments?["pane_id"]?.stringValue
+        let limit  = (arguments?["limit"]?.rawValue as? Int).map { min($0, 100) } ?? 30
 
         let results = TerminalSearchIndex.shared.search(query: query, paneID: paneID, limit: limit)
         let dicts = results.map { r -> [String: Any] in
@@ -941,8 +937,8 @@ final class CalyxMCPServer {
 
     // MARK: - Project Context
 
-    private func handleGetProjectContext(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
-        let workDir = arguments?["work_dir"] as? String ?? resolvedWorkDir()
+    private func handleGetProjectContext(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
+        let workDir = arguments?["work_dir"]?.stringValue ?? resolvedWorkDir()
         let ctx = ProjectContextProvider.gather(workDir: workDir)
         guard let data = try? JSONSerialization.data(withJSONObject: ctx),
               let text = String(data: data, encoding: .utf8) else {
@@ -953,25 +949,23 @@ final class CalyxMCPServer {
 
     /// Active tab's pwd, resolved on the main actor.
     private func resolvedWorkDir() -> String {
-        let pwd = MainActor.assumeIsolated { TerminalControlBridge.shared.delegate?.activeTabPwd }
+        let pwd = TerminalControlBridge.shared.delegate?.activeTabPwd
         return pwd ?? FileManager.default.currentDirectoryPath
     }
 
     // MARK: - Test Runner
 
     private func handleGetTestResults(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
-        let result: [String: Any] = MainActor.assumeIsolated {
-            let store = TestRunnerStore.shared
-            let failures = store.failures.map { f -> [String: Any] in
-                ["name": f.name, "duration": f.duration as Any]
-            }
-            return [
-                "pass_count": store.passCount,
-                "fail_count": store.failCount,
-                "is_running": store.isRunning,
-                "failures": failures,
-            ]
+        let store = TestRunnerStore.shared
+        let failures = store.failures.map { f -> [String: Any] in
+            ["name": f.name, "duration": f.duration as Any]
         }
+        let result: [String: Any] = [
+            "pass_count": store.passCount,
+            "fail_count": store.failCount,
+            "is_running": store.isRunning,
+            "failures": failures,
+        ]
         guard let data = try? JSONSerialization.data(withJSONObject: result),
               let text = String(data: data, encoding: .utf8) else {
             return toolSuccess(id: id, text: "{\"pass_count\":0,\"fail_count\":0,\"is_running\":false,\"failures\":[]}")
@@ -979,9 +973,9 @@ final class CalyxMCPServer {
         return toolSuccess(id: id, text: text)
     }
 
-    private func handleRunTests(id: JSONRPCId, arguments: [String: Any]?) -> (statusCode: Int, body: Data?) {
-        let command = arguments?["command"] as? String
-        let workDir = arguments?["work_dir"] as? String
+    private func handleRunTests(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
+        let command = arguments?["command"]?.stringValue
+        let workDir = arguments?["work_dir"]?.stringValue
 
         DispatchQueue.main.async {
             let store = TestRunnerStore.shared

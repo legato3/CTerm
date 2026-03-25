@@ -604,7 +604,7 @@ final class CodexConfigManagerTests: XCTestCase {
         writeConfig(content)
 
         // When: disable IPC (which calls removeSections internally)
-        CodexConfigManager.disableIPC(configPath: configPath)
+        try CodexConfigManager.disableIPC(configPath: configPath)
 
         // Then: the real calyx-ipc section is removed, but string content is intact
         let result = readConfig()
