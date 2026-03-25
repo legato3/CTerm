@@ -40,7 +40,7 @@ struct IPCMeshView: View {
 
             if !agentState.isRunning {
                 offlineView
-            } else if visiblePeers.isEmpty {
+            } else if externalPeers.isEmpty {
                 emptyView
             } else {
                 GeometryReader { geo in
@@ -259,7 +259,7 @@ struct IPCMeshView: View {
         let hubPeerID = CalyxMCPServer.shared.appPeerID
 
         var nodes: [MeshNode] = []
-        let nonHub = visiblePeers.filter { $0.id != hubPeerID }
+        let nonHub = externalPeers
         let now = Date()
 
         // Hub node (calyx-app)
@@ -348,12 +348,16 @@ struct IPCMeshView: View {
         agentState.peers
     }
 
+    private var externalPeers: [Peer] {
+        visiblePeers.filter { $0.name != "calyx-app" }
+    }
+
     private var peerNameMap: [UUID: String] {
         Dictionary(uniqueKeysWithValues: agentState.peers.map { ($0.id, $0.name) })
     }
 
     private var meshHeight: CGFloat {
-        let count = max(1, visiblePeers.count)
+        let count = max(1, externalPeers.count)
         return count <= 2 ? 160 : count <= 4 ? 200 : 240
     }
 

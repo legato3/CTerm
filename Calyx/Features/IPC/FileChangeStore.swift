@@ -11,16 +11,47 @@ struct TrackedFileChange: Identifiable, Sendable, Equatable {
     let timestamp: Date
 
     init(path: String, workDir: String, peerID: UUID, peerName: String) {
+        let normalizedWorkDir = (workDir as NSString).standardizingPath
         self.id = UUID()
-        self.path = path
-        self.workDir = workDir
+        self.path = Self.normalizePath(path, workDir: normalizedWorkDir)
+        self.workDir = normalizedWorkDir
         self.peerID = peerID
         self.peerName = peerName
         self.timestamp = Date()
     }
 
     var fileName: String { (path as NSString).lastPathComponent }
-    var relativePath: String { path }
+
+    var relativePath: String {
+        if (path as NSString).isAbsolutePath {
+            return resolvedPath.hasPrefix(workDirPrefix)
+                ? String(resolvedPath.dropFirst(workDirPrefix.count))
+                : path
+        }
+        return path
+    }
+
+    var resolvedPath: String {
+        if (path as NSString).isAbsolutePath {
+            return (path as NSString).standardizingPath
+        }
+        return (workDir as NSString).appendingPathComponent(path)
+    }
+
+    private var workDirPrefix: String {
+        workDir.hasSuffix("/") ? workDir : workDir + "/"
+    }
+
+    private static func normalizePath(_ path: String, workDir: String) -> String {
+        let standardizedPath = (path as NSString).standardizingPath
+        guard (standardizedPath as NSString).isAbsolutePath else { return standardizedPath }
+
+        let workDirPrefix = workDir.hasSuffix("/") ? workDir : workDir + "/"
+        if standardizedPath.hasPrefix(workDirPrefix) {
+            return String(standardizedPath.dropFirst(workDirPrefix.count))
+        }
+        return standardizedPath
+    }
 }
 
 @MainActor @Observable
@@ -36,7 +67,7 @@ final class FileChangeStore {
         let change = TrackedFileChange(path: path, workDir: workDir, peerID: peerID, peerName: peerName)
         var list = changesByPeer[peerID] ?? []
         // deduplicate: remove older entry for same path if present
-        list.removeAll { $0.path == path }
+        list.removeAll { $0.path == change.path && $0.workDir == change.workDir }
         list.append(change)
         changesByPeer[peerID] = list
     }
@@ -47,6 +78,11 @@ final class FileChangeStore {
 
     func clearAll() {
         changesByPeer.removeAll()
+    }
+
+    var trackedWorkDirs: [String] {
+        let dirs = changesByPeer.values.flatMap { $0.map(\.workDir) }
+        return Array(Set(dirs)).sorted()
     }
 
     /// All unique (path, workDir) pairs across all peers, for aggregate diff.

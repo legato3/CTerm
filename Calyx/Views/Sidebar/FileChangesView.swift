@@ -9,7 +9,7 @@ struct FileChangesView: View {
     var onOpenDiff: ((DiffSource) -> Void)?
     var onOpenAggregateDiff: ((String) -> Void)?  // workDir
 
-    private var store: FileChangeStore { FileChangeStore.shared }
+    @State private var store: FileChangeStore = .shared
 
     // MARK: - Body
 
@@ -60,7 +60,10 @@ struct FileChangesView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .help("Open aggregate diff for all tracked files")
+            .disabled(aggregateWorkDir == nil)
+            .help(aggregateWorkDir == nil
+                ? "All Changes is only available when tracked files belong to a single repository."
+                : "Open aggregate diff for all tracked files")
 
             Spacer()
 
@@ -100,28 +103,18 @@ struct FileChangesView: View {
     }
 
     private func openDiffForChange(_ change: TrackedFileChange) {
-        let resolvedPath: String
-        if (change.path as NSString).isAbsolutePath {
-            resolvedPath = change.path
-        } else {
-            resolvedPath = (change.workDir as NSString).appendingPathComponent(change.path)
-        }
-        // Use relative path if within workDir
-        let relative = resolvedPath.hasPrefix(change.workDir + "/")
-            ? String(resolvedPath.dropFirst(change.workDir.count + 1))
-            : change.path
-        onOpenDiff?(.unstaged(path: relative, workDir: change.workDir))
+        onOpenDiff?(.unstaged(path: change.path, workDir: change.workDir))
     }
 
     private func openAggregateDiff() {
-        // Find most common workDir across all changes
-        var counts: [String: Int] = [:]
-        for changes in store.changesByPeer.values {
-            for c in changes { counts[c.workDir, default: 0] += 1 }
-        }
-        let bestDir = counts.max(by: { $0.value < $1.value })?.key
-            ?? NSHomeDirectory()
-        onOpenAggregateDiff?(bestDir)
+        guard let aggregateWorkDir else { return }
+        onOpenAggregateDiff?(aggregateWorkDir)
+    }
+
+    private var aggregateWorkDir: String? {
+        let workDirs = store.trackedWorkDirs
+        guard workDirs.count == 1 else { return nil }
+        return workDirs[0]
     }
 }
 

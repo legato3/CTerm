@@ -133,7 +133,6 @@ final class IPCAgentState {
 
     func clearLog() {
         activityLog.removeAll()
-        seenMessageIDs.removeAll()
         unreadCount = 0
     }
 }
