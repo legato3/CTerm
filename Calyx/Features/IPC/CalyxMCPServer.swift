@@ -69,11 +69,24 @@ final class CalyxMCPServer {
                         self?.handleConnection(connection)
                     }
                 }
+                // Set isRunning only after the listener confirms it's bound and accepting.
+                nl.stateUpdateHandler = { [weak self] state in
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        switch state {
+                        case .ready:
+                            self.isRunning = true
+                        case .failed, .cancelled:
+                            self.isRunning = false
+                        default:
+                            break
+                        }
+                    }
+                }
                 nl.start(queue: .main)
 
                 self.listener = nl
                 self.port = tryPort
-                self.isRunning = true
                 self.peerRegistrationTask = Task {
                     let peer = await self.store.registerPeer(name: "calyx-app", role: "review-ui")
                     self.appPeerID = peer.id
@@ -200,10 +213,10 @@ final class CalyxMCPServer {
         // 4. Route by method
         switch request.method {
         case "initialize":
-            // Auto-register the connecting client as a peer
-            let clientName = extractClientName(from: request.params) ?? "claude-code"
-            let peer = await store.registerPeer(name: clientName, role: "claude-code")
-            let resp = MCPRouter.buildInitializeResponse(id: requestId, peerID: peer.id)
+            // Do NOT auto-register here — all Claude Code clients send clientInfo.name="claude-code"
+            // which causes every agent to collide on the same peer UUID and share one inbox.
+            // Agents must call register_peer explicitly to get a unique peer_id.
+            let resp = MCPRouter.buildInitializeResponse(id: requestId, peerID: nil)
             return (200, encode(resp))
 
         case "tools/list":
@@ -704,9 +717,7 @@ final class CalyxMCPServer {
         let peer = await store.getPeer(id: peerID)
         let peerName = peer?.name ?? "unknown"
 
-        await MainActor.run {
-            FileChangeStore.shared.report(path: path, workDir: workDir, peerID: peerID, peerName: peerName)
-        }
+        FileChangeStore.shared.report(path: path, workDir: workDir, peerID: peerID, peerName: peerName)
         let escapedPath = path.replacingOccurrences(of: "\\", with: "\\\\")
                              .replacingOccurrences(of: "\"", with: "\\\"")
         return toolSuccess(id: id, text: "{\"recorded\":true,\"path\":\"\(escapedPath)\"}")
@@ -723,10 +734,9 @@ final class CalyxMCPServer {
         }
         let targetPeer = arguments?["target_peer"]?.stringValue
         let position = arguments?["position"]?.rawValue as? Int
-        Task { @MainActor in
-            TaskQueueStore.shared.enqueue(prompt, targetPeerName: targetPeer, at: position)
-        }
-        return toolSuccess(id: id, text: "{\"queued\":true,\"pending\":\(TaskQueueStore.shared.pendingCount + 1)}")
+        // CalyxMCPServer is @MainActor — call directly so pendingCount reflects the enqueue.
+        TaskQueueStore.shared.enqueue(prompt, targetPeerName: targetPeer, at: position)
+        return toolSuccess(id: id, text: "{\"queued\":true,\"pending\":\(TaskQueueStore.shared.pendingCount)}")
     }
 
     private func handleGetQueue(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
@@ -752,16 +762,12 @@ final class CalyxMCPServer {
         arguments: [String: AnyCodable]?
     ) -> (statusCode: Int, body: Data?) {
         let result = arguments?["result"]?.stringValue
-        Task { @MainActor in
-            TaskQueueStore.shared.completeCurrent(result: result)
-        }
+        TaskQueueStore.shared.completeCurrent(result: result)
         return toolSuccess(id: id, text: "{\"advanced\":true}")
     }
 
     private func handleClearQueue(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
-        Task { @MainActor in
-            TaskQueueStore.shared.clearPending()
-        }
+        TaskQueueStore.shared.clearPending()
         return toolSuccess(id: id, text: "{\"cleared\":true}")
     }
 
@@ -881,29 +887,24 @@ final class CalyxMCPServer {
 
     /// Returns the most recent `ShellErrorEvent` across all tabs (or the specific tab if given).
     private func findLastError(tabID: UUID?) -> ShellErrorEvent? {
-        // This is called from a network thread but reads @MainActor Tab properties.
-        // We use a synchronous dispatch to the main actor for a brief read.
-        var result: ShellErrorEvent?
-        DispatchQueue.main.sync {
+        MainActor.assumeIsolated {
             let session = TerminalControlBridge.shared.delegate?.terminalWindowSession
             let allTabs = session?.groups.flatMap(\.tabs) ?? []
             let candidates = tabID != nil
                 ? allTabs.filter { $0.id == tabID }
                 : allTabs
-            result = candidates
+            return candidates
                 .compactMap(\.lastShellError)
                 .sorted { $0.timestamp > $1.timestamp }
                 .first
         }
-        return result
     }
 
     // MARK: - Session Audit
 
     private func handleGetSessionSummary(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
-        var summary: [String: Any] = [:]
-        DispatchQueue.main.sync {
-            summary = SessionAuditLogger.shared.summaryDict()
+        let summary: [String: Any] = MainActor.assumeIsolated {
+            SessionAuditLogger.shared.summaryDict()
         }
         guard let data = try? JSONSerialization.data(withJSONObject: summary),
               let text = String(data: data, encoding: .utf8) else {
@@ -950,23 +951,21 @@ final class CalyxMCPServer {
         return toolSuccess(id: id, text: text)
     }
 
-    /// Active tab's pwd, resolved on the main thread.
+    /// Active tab's pwd, resolved on the main actor.
     private func resolvedWorkDir() -> String {
-        var pwd: String?
-        DispatchQueue.main.sync { pwd = TerminalControlBridge.shared.delegate?.activeTabPwd }
+        let pwd = MainActor.assumeIsolated { TerminalControlBridge.shared.delegate?.activeTabPwd }
         return pwd ?? FileManager.default.currentDirectoryPath
     }
 
     // MARK: - Test Runner
 
     private func handleGetTestResults(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
-        var result: [String: Any] = [:]
-        DispatchQueue.main.sync {
+        let result: [String: Any] = MainActor.assumeIsolated {
             let store = TestRunnerStore.shared
             let failures = store.failures.map { f -> [String: Any] in
                 ["name": f.name, "duration": f.duration as Any]
             }
-            result = [
+            return [
                 "pass_count": store.passCount,
                 "fail_count": store.failCount,
                 "is_running": store.isRunning,

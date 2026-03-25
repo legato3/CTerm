@@ -185,7 +185,7 @@ struct SidebarContentView: View {
                     .padding(.top, 4)
             }
         }
-        .frame(minWidth: SidebarLayout.minWidth)
+        .frame(minWidth: SidebarLayout.minWidth, maxHeight: .infinity, alignment: .top)
         .modifier(SidebarBackgroundModifier(reduceTransparency: reduceTransparency))
         .accessibilityIdentifier(AccessibilityID.Sidebar.container)
     }

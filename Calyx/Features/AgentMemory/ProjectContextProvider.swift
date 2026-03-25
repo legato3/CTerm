@@ -53,17 +53,16 @@ enum ProjectContextProvider {
             ctx["memories"] = memories.map { ["key": $0.key, "value": $0.value] }
         }
 
-        // Failing tests (main-actor read) — use Sendable [String] to cross isolation.
-        var failureNames: [String] = []
-        DispatchQueue.main.sync {
-            failureNames = TestRunnerStore.shared.failures.map(\.name)
+        // Failing tests (main-actor read). MCP handler runs on main; use assumeIsolated
+        // to avoid deadlocking with DispatchQueue.main.sync from the main thread itself.
+        let failureNames: [String] = MainActor.assumeIsolated {
+            TestRunnerStore.shared.failures.map(\.name)
         }
         if !failureNames.isEmpty { ctx["failing_tests"] = failureNames }
 
         // Active peers (main-actor read via IPCAgentState mirror).
-        var peerPairs: [[String: String]] = []
-        DispatchQueue.main.sync {
-            peerPairs = IPCAgentState.shared.peers.map { ["name": $0.name, "role": $0.role] }
+        let peerPairs: [[String: String]] = MainActor.assumeIsolated {
+            IPCAgentState.shared.peers.map { ["name": $0.name, "role": $0.role] }
         }
         if !peerPairs.isEmpty { ctx["active_peers"] = peerPairs }
 
