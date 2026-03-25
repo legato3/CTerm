@@ -17,7 +17,19 @@
       "Bash(xcodegen generate:*)",
       "mcp__xcodebuild__session_show_defaults",
       "mcp__xcodebuild__session_set_defaults",
-      "mcp__xcodebuild__build_sim"
+      "mcp__xcodebuild__build_sim",
+      "Bash(lsof -iTCP -sTCP:LISTEN)",
+      "mcp__calyx-ipc__register_peer",
+      "mcp__calyx-ipc__list_peers",
+      "mcp__calyx-ipc__receive_messages",
+      "mcp__calyx-ipc__get_project_context",
+      "Skill(yume--commit)",
+      "mcp__calyx-ipc__get_queue",
+      "mcp__calyx-ipc__get_workspace_state",
+      "mcp__calyx-ipc__send_message",
+      "mcp__xcodebuild__discover_projs",
+      "Bash(git commit:*)",
+      "Bash(peer_id\" for valid UUIDs. Changed all affected handlers to [String: AnyCodable]? and:*)"
     ]
   }
 }
