@@ -523,4 +523,5 @@ extension Notification.Name {
     static let ghosttyGotoTab = Notification.Name("com.calyx.ghostty.gotoTab")
     static let glassOpacityDidChange = Notification.Name("com.calyx.glassOpacityDidChange")
     static let ghosttyConfirmClipboard = Notification.Name("com.calyx.ghostty.confirmClipboard")
+    static let smoothScrollSettingChanged = Notification.Name("com.calyx.smoothScrollSettingChanged")
 }

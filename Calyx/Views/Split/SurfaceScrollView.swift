@@ -143,10 +143,17 @@ class SurfaceScrollView: NSView {
     init(surfaceView: SurfaceView) {
         self.surfaceView = surfaceView
         super.init(frame: .zero)
+
+        // Enable clipping so CATransform3D shift during smooth scroll
+        // does not overflow the view's top edge.
+        wantsLayer = true
+        layer?.masksToBounds = true
+
         setupScrollView()
         setupObservers()
         setupSearchObservers()
         surfaceView.scrollbarUpdateHandler = { [weak self] state in
+            self?.surfaceView.checkScrollbarStateTransitions()
             self?.handleScrollbarUpdate(state)
         }
     }
@@ -383,6 +390,7 @@ class SurfaceScrollView: NSView {
 
     @objc private func scrollViewWillStartLiveScroll(_ notification: Notification) {
         isLiveScrolling = true
+        surfaceView.resetSmoothScrollOffset()
     }
 
     @objc private func scrollViewDidLiveScroll(_ notification: Notification) {
