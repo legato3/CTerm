@@ -143,12 +143,6 @@ class SurfaceScrollView: NSView {
     init(surfaceView: SurfaceView) {
         self.surfaceView = surfaceView
         super.init(frame: .zero)
-
-        // Enable clipping so CATransform3D shift during smooth scroll
-        // does not overflow the view's top edge.
-        wantsLayer = true
-        layer?.masksToBounds = true
-
         setupScrollView()
         setupObservers()
         setupSearchObservers()
@@ -265,6 +259,13 @@ class SurfaceScrollView: NSView {
 
     override func layout() {
         super.layout()
+
+        // Enable clipping for smooth scroll CATransform3D overflow.
+        // Done here (not init) because the layer needs a non-zero bounds first.
+        if let layer, !layer.masksToBounds {
+            layer.masksToBounds = true
+        }
+
         synchronizeLayout()
     }
 

@@ -82,12 +82,15 @@ class SurfaceView: NSView {
     /// Track scrollback availability for reset.
     private var lastHadScrollback: Bool = false
 
-    /// Synthetic pixel drip state for discrete (mouse wheel) smooth scrolling.
-    /// Converts discrete ticks into gradual pixel-level events sent to ghostty.
-    private var syntheticScrollRemaining: CGFloat = 0
-    private var syntheticScrollTimer: Timer?
-    private static let syntheticScrollFrameInterval: CFTimeInterval = 1.0 / 120.0
-    private static let syntheticScrollFramesPerRow: CGFloat = 18  // ~150ms per row at 120Hz
+    /// Virtual momentum state for discrete (mouse wheel) smooth scrolling.
+    /// Estimates scroll velocity from notch timing and generates synthetic pixel events.
+    private var scrollVelocity: CGFloat = 0  // pixels per second (fb-pixel space)
+    private var lastNotchTime: CFTimeInterval = 0
+    private var virtualMomentumTimer: Timer?
+    private static let momentumFrameInterval: CFTimeInterval = 1.0 / 120.0
+    private static let momentumFriction: CGFloat = 0.94  // deceleration per frame
+    private static let momentumStopThreshold: CGFloat = 10.0  // px/sec to stop
+    private static let defaultRowDuration: CFTimeInterval = 0.15  // 150ms per row for single notch
 
     /// Observer for smooth scroll setting changes from Settings UI.
     private var smoothScrollSettingObserver: NSObjectProtocol?
@@ -116,7 +119,7 @@ class SurfaceView: NSView {
     deinit {
         MainActor.assumeIsolated {
             smoothScrollResetTimer?.invalidate()
-            syntheticScrollTimer?.invalidate()
+            virtualMomentumTimer?.invalidate()
             if let obs = smoothScrollSettingObserver {
                 NotificationCenter.default.removeObserver(obs)
             }
@@ -773,7 +776,7 @@ class SurfaceView: NSView {
         // When smooth scrolling is active for discrete events, we intercept and
         // drip-feed pixels to ghostty instead of sending the original tick event.
         if !event.hasPreciseScrollingDeltas && isSmoothScrollActive() {
-            startSyntheticPixelScroll(ticks: event.scrollingDeltaY)
+            startVirtualMomentumScroll(ticks: event.scrollingDeltaY)
             return
         }
 
@@ -866,7 +869,7 @@ class SurfaceView: NSView {
         smoothScrollPixelOffset = 0
         smoothScrollResetTimer?.invalidate()
         smoothScrollResetTimer = nil
-        stopSyntheticScroll()
+        stopVirtualMomentum()
         applySmoothScrollTransform()
     }
 
@@ -892,56 +895,65 @@ class SurfaceView: NSView {
         }
     }
 
-    /// Convert discrete mouse wheel ticks into gradual pixel-level events and
-    /// feed them to ghostty as synthetic precision scroll events. This uses the
-    /// exact same accumulator + transform path as trackpad scrolling.
-    private func startSyntheticPixelScroll(ticks: CGFloat) {
-        guard cachedCellSize.height > 0 else { return }
-        // Accumulate total fb pixels to drip. Multiple rapid ticks add up.
-        syntheticScrollRemaining += ticks * cachedCellSize.height
-        guard syntheticScrollTimer == nil else { return }
-        syntheticScrollTimer = Timer.scheduledTimer(
-            withTimeInterval: Self.syntheticScrollFrameInterval,
+    /// Start or update virtual momentum scrolling from a discrete mouse wheel notch.
+    /// Estimates velocity from the interval between notch events.
+    private func startVirtualMomentumScroll(ticks: CGFloat) {
+        let cellH = cachedCellSize.height
+        guard cellH > 0 else { return }
+
+        let now = CACurrentMediaTime()
+        let timeSinceLastNotch = now - lastNotchTime
+        let direction: CGFloat = ticks >= 0 ? 1 : -1
+
+        if lastNotchTime > 0 && timeSinceLastNotch < 0.5 && timeSinceLastNotch > 0.001 {
+            // Continuous scrolling: velocity from notch interval
+            let notchVelocity = cellH / CGFloat(timeSinceLastNotch) * direction
+            // Blend with current velocity for smoothness
+            scrollVelocity = scrollVelocity * 0.3 + notchVelocity * 0.7
+        } else {
+            // Fresh start or long pause: use default speed
+            scrollVelocity = cellH / CGFloat(Self.defaultRowDuration) * direction
+        }
+
+        lastNotchTime = now
+
+        guard virtualMomentumTimer == nil else { return }
+        virtualMomentumTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.momentumFrameInterval,
             repeats: true
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.tickSyntheticScroll()
+                self?.tickVirtualMomentum()
             }
         }
-        tickSyntheticScroll()
     }
 
-    /// Drip one frame's worth of synthetic pixels to ghostty.
-    private func tickSyntheticScroll() {
-        let pixelsPerFrame = cachedCellSize.height / Self.syntheticScrollFramesPerRow
-        let direction: CGFloat = syntheticScrollRemaining >= 0 ? 1 : -1
-        let amount = min(abs(syntheticScrollRemaining), pixelsPerFrame) * direction
+    /// Generate one frame's worth of synthetic pixels based on current velocity.
+    private func tickVirtualMomentum() {
+        let pixelsThisFrame = scrollVelocity * CGFloat(Self.momentumFrameInterval)
 
-        syntheticScrollRemaining -= amount
+        // Send to ghostty as precision scroll (same path as trackpad)
+        let precisionMods = ghostty_input_scroll_mods_t(1)
+        surfaceController?.sendMouseScroll(x: 0, y: Double(pixelsThisFrame), mods: precisionMods)
 
-        // Send to ghostty as a precision scroll event (same as trackpad).
-        // The value is in the "adjusted" space (fb pixels), matching adjustScrollDeltas output.
-        let precisionMods = ghostty_input_scroll_mods_t(1) // bit 0 = precision flag
-        surfaceController?.sendMouseScroll(x: 0, y: Double(amount), mods: precisionMods)
+        // Feed through accumulator (rawDelta = amount / 2.0 to match adjustScrollDeltas 2x)
+        updateSmoothScrollOffset(rawDeltaY: pixelsThisFrame / 2.0)
 
-        // Feed through the same accumulator as trackpad.
-        // ghostty receives `amount` fb pixels. Our accumulator mirrors: rawDelta * 2.0.
-        // Since amount = rawDelta * 2.0 (adjustScrollDeltas equivalence), rawDelta = amount / 2.
-        updateSmoothScrollOffset(rawDeltaY: amount / 2.0)
+        // Decelerate
+        scrollVelocity *= Self.momentumFriction
 
-        if abs(syntheticScrollRemaining) < 0.5 {
-            syntheticScrollRemaining = 0
-            syntheticScrollTimer?.invalidate()
-            syntheticScrollTimer = nil
+        // Stop when velocity is negligible
+        if abs(scrollVelocity) < Self.momentumStopThreshold {
+            stopVirtualMomentum()
             scheduleResetTimer()
         }
     }
 
-    /// Stop synthetic pixel drip.
-    private func stopSyntheticScroll() {
-        syntheticScrollTimer?.invalidate()
-        syntheticScrollTimer = nil
-        syntheticScrollRemaining = 0
+    /// Stop virtual momentum scrolling.
+    private func stopVirtualMomentum() {
+        virtualMomentumTimer?.invalidate()
+        virtualMomentumTimer = nil
+        scrollVelocity = 0
     }
 
     /// Check scrollbar state transitions and reset smooth scroll if needed.
