@@ -380,6 +380,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             onNewGroup: { [weak self] in self?.createNewGroup() },
             onCloseTab: { [weak self] tabID in self?.closeTab(id: tabID) },
             onGroupRenamed: { [weak self] in self?.requestSave() },
+            onTabRenamed: { [weak self] in self?.requestSave() },
             onToggleSidebar: { [weak self] in self?.toggleSidebar() },
             onDismissCommandPalette: { [weak self] in self?.dismissCommandPalette() },
             onWorkingFileSelected: { [weak self] entry in self?.handleWorkingFileSelected(entry) },
@@ -1200,8 +1201,8 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         if let focusedID = tab.splitTree.focusedLeafID,
            let focusedView = tab.registry.view(for: focusedID),
            focusedView === surfaceView {
-            window?.title = title
             tab.title = title
+            window?.title = tab.titleOverride ?? title
             refreshHostingView()
         }
     }
@@ -1410,6 +1411,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
                 return TabSnapshot(
                     id: tab.id,
                     title: tab.title,
+                    titleOverride: tab.titleOverride,
                     pwd: tab.pwd,
                     splitTree: tab.splitTree,
                     browserURL: browserURL
@@ -1862,7 +1864,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
             for (i, tab) in agentTabs.enumerated() {
                 let groupName = windowSession.groups.first { $0.tabs.contains { $0.id == tab.id } }?.name ?? ""
-                let label = "\(tab.title) — \(groupName) (#\(i + 1))"
+                let label = "\(tab.titleOverride ?? tab.title) — \(groupName) (#\(i + 1))"
                 popup.addItem(withTitle: label)
             }
             alert.accessoryView = popup

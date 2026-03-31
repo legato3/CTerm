@@ -29,6 +29,7 @@ struct MainContentView: View {
     var onNewGroup: (() -> Void)?
     var onCloseTab: ((UUID) -> Void)?
     var onGroupRenamed: (() -> Void)?
+    var onTabRenamed: (() -> Void)?
     var onToggleSidebar: (() -> Void)?
     var onDismissCommandPalette: (() -> Void)?
     var onWorkingFileSelected: ((GitFileEntry) -> Void)?
@@ -88,6 +89,7 @@ struct MainContentView: View {
                         onNewGroup: onNewGroup,
                         onCloseTab: onCloseTab,
                         onGroupRenamed: onGroupRenamed,
+                        onTabRenamed: onTabRenamed,
                         onCollapseToggled: onCollapseToggled,
                         onCloseAllTabsInGroup: onCloseAllTabsInGroup,
                         onWorkingFileSelected: onWorkingFileSelected,
@@ -125,6 +127,7 @@ struct MainContentView: View {
                                 onMoveTab: activeGroup != nil
                                     ? { from, to in onMoveTab?(activeGroup!.id, from, to) }
                                     : nil,
+                                onTabRenamed: onTabRenamed,
                                 activeGroupID: activeGroup?.id
                             )
                         }
