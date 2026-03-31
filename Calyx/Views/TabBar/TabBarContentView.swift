@@ -12,6 +12,7 @@ struct TabBarContentView: View {
     var onNewTab: (() -> Void)?
     var onCloseTab: ((UUID) -> Void)?
     var onMoveTab: ((Int, Int) -> Void)?
+    var onTabRenamed: (() -> Void)?
     var activeGroupID: UUID? = nil
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -28,7 +29,8 @@ struct TabBarContentView: View {
                                     tab: tab,
                                     isActive: tab.id == activeTabID,
                                     onSelected: { onTabSelected?(tab.id) },
-                                    onClose: { onCloseTab?(tab.id) }
+                                    onClose: { onCloseTab?(tab.id) },
+                                    onTabRenamed: onTabRenamed
                                 )
                                 .id(tab.id)
                                 .background(
@@ -354,17 +356,40 @@ private struct TabItemButton: View {
     let isActive: Bool
     var onSelected: (() -> Void)?
     var onClose: (() -> Void)?
+    var onTabRenamed: (() -> Void)?
     @State private var isHovering = false
+    @State private var isEditing = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
+        let visibleTitle = tab.titleOverride ?? tab.title
+
         HStack(spacing: 6) {
-            Text(tab.title.isEmpty ? fallbackTitle : tab.title)
-                .lineLimit(1)
-                .font(.system(size: 12.5, weight: isActive ? .semibold : .medium, design: .rounded))
-                .tracking(0.18)
-                .foregroundStyle(isActive ? .primary : .secondary)
+            if isEditing {
+                InlineTextField(
+                    initialText: visibleTitle.isEmpty ? fallbackTitle : visibleTitle,
+                    accessibilityID: AccessibilityID.TabBar.tabNameTextField(tab.id),
+                    fontSize: 12.5,
+                    fontWeight: isActive ? .semibold : .medium,
+                    onCommit: { text in
+                        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        tab.titleOverride = trimmed.isEmpty ? nil : trimmed
+                        isEditing = false
+                        onTabRenamed?()
+                    },
+                    onCancel: {
+                        isEditing = false
+                    }
+                )
                 .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(visibleTitle.isEmpty ? fallbackTitle : visibleTitle)
+                    .lineLimit(1)
+                    .font(.system(size: 12.5, weight: isActive ? .semibold : .medium, design: .rounded))
+                    .tracking(0.18)
+                    .foregroundStyle(isActive ? .primary : .secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             if tab.unreadNotifications > 0 {
                 Text(tab.unreadNotifications > 99 ? "99+" : "\(tab.unreadNotifications)")
@@ -392,14 +417,15 @@ private struct TabItemButton: View {
             }
             .buttonStyle(.plain)
             .opacity(isHovering || isActive ? 1 : 0)
-            .allowsHitTesting(isHovering || isActive)
+            .allowsHitTesting((isHovering || isActive) && !isEditing)
             .accessibilityIdentifier(AccessibilityID.TabBar.tabCloseButton(tab.id))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 4)
         .frame(minWidth: 72, maxWidth: 180)
         .contentShape(Rectangle())
-        .onTapGesture { onSelected?() }
+        .onTapGesture { if !isEditing { onSelected?() } }
+        .highPriorityGesture(TapGesture(count: 2).onEnded { if !isEditing { isEditing = true } })
         .modifier(TabChromeModifier(
             isActive: isActive,
             cornerRadius: 8,
@@ -407,7 +433,7 @@ private struct TabItemButton: View {
         ))
         .onHover { isHovering = $0 }
         .accessibilityIdentifier(AccessibilityID.TabBar.tab(tab.id))
-        .accessibilityLabel(tab.title)
+        .accessibilityLabel(visibleTitle.isEmpty ? fallbackTitle : visibleTitle)
     }
 
     private var fallbackTitle: String {
