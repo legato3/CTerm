@@ -119,20 +119,16 @@ final class TerminalControlBridge {
 
     private init() {}
 
-    /// Convenience: inject `text` (with Enter) into the best available Claude/Codex pane,
+    /// Convenience: inject `text` (with Enter) into the best available AI agent pane,
     /// falling back to the active terminal tab, then any active tab.
     @discardableResult
-    func routeToNearestClaudePaneOrActive(text: String) -> Bool {
+    func routeToNearestAgentPaneOrActive(text: String) -> Bool {
         guard let delegate else { return false }
         let session = delegate.terminalWindowSession
         let allTabs = session.groups.flatMap(\.tabs)
 
         let target = allTabs.first { $0.autoAcceptEnabled }
-            ?? allTabs.first { tab in
-                guard case .terminal = tab.content else { return false }
-                let title = tab.title.lowercased()
-                return title.contains("claude") || title.contains("codex")
-            }
+            ?? allTabs.first(where: \.isAIAgentTab)
             ?? {
                 guard let active = session.activeGroup?.activeTab,
                       case .terminal = active.content else { return nil }
@@ -148,5 +144,10 @@ final class TerminalControlBridge {
             return delegate.runInPane(tabID: target.id, paneID: nil, text: text, pressEnter: true)
         }
         return false
+    }
+
+    @discardableResult
+    func routeToNearestClaudePaneOrActive(text: String) -> Bool {
+        routeToNearestAgentPaneOrActive(text: text)
     }
 }

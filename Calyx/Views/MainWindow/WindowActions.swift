@@ -39,6 +39,9 @@ final class WindowActions {
     var onComposeOverlaySend: ((String) -> Bool)?
     var onDismissComposeOverlay: (() -> Void)?
     var onToggleComposeBroadcast: (() -> Void)?
+    var onApplyComposeAssistantEntry: ((UUID, Bool) -> Bool)?
+    var onExplainComposeAssistantEntry: ((UUID) -> Void)?
+    var onFixComposeAssistantEntry: ((UUID) -> Void)?
     var onOpenDiff: ((DiffSource) -> Void)?
     var onOpenAggregateDiff: ((String) -> Void)?
     /// Route the shell error captured in the given tab to the nearest Claude pane.
@@ -50,4 +53,5 @@ final class WindowActions {
     var onJumpToSearchPane: ((String) -> Void)?
     /// Reflects `ComposeOverlayController.broadcastEnabled` for the SwiftUI overlay.
     var composeBroadcastEnabled: Bool = false
+    var composeAssistantState: ComposeAssistantState?
 }

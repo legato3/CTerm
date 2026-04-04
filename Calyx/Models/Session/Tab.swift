@@ -25,6 +25,10 @@ class Tab: Identifiable {
     var lastExitCode: UInt32? = nil
     /// When `true`, compose overlay broadcasts text to all panes in this tab's split tree.
     var broadcastInputEnabled: Bool = false
+    /// Explicit runtime marker for tabs launched as AI agents.
+    var agentRuntime: AgentRuntimePreset? = nil
+    /// Controls how Calyx should submit prompts into this agent tab.
+    var agentInputStyle: AgentInputStyle? = nil
     /// When `true`, Claude Code confirmation prompts are automatically accepted.
     var autoAcceptEnabled: Bool = false
     /// Session log of auto-accepted events for this tab.
@@ -49,6 +53,18 @@ class Tab: Identifiable {
         self.splitTree = splitTree
         self.content = content
         self.registry = registry
+    }
+
+    var isAIAgentTab: Bool {
+        guard case .terminal = content else { return false }
+        return agentRuntime != nil || autoAcceptEnabled || AgentRuntimeConfiguration.isLikelyAgentTitle(title)
+    }
+
+    var preferredAgentInputStyle: AgentInputStyle {
+        if let agentInputStyle {
+            return agentInputStyle
+        }
+        return AgentRuntimeConfiguration.isLikelyAgentTitle(title) ? .confirmPasteThenSubmit : .submitOnce
     }
 
     func clearUnreadNotifications() {

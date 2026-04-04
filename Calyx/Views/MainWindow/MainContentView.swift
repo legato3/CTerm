@@ -13,13 +13,15 @@ struct MainContentView: View {
     let splitContainerView: SplitContainerView
     let viewState: WindowViewState
 
-    @Binding var sidebarMode: SidebarMode
+    @Binding var sidebarMode: SidebarMode?
 
     @Environment(WindowActions.self) private var actions
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @AppStorage(AppStorageKeys.terminalGlassOpacity) private var glassOpacity = 0.7
     @AppStorage(AppStorageKeys.themeColorPreset) private var themePreset = "original"
     @AppStorage(AppStorageKeys.themeColorCustomHex) private var customHex = "#050D1C"
+    @AppStorage(AppStorageKeys.ollamaModel) private var ollamaModel = OllamaCommandService.defaultModel
+    @AppStorage(AppStorageKeys.ollamaEndpoint) private var ollamaEndpoint = OllamaCommandService.defaultEndpoint
     private var secureInput: SecureInput { SecureInput.shared }
     @State private var ghosttyProvider = GhosttyThemeProvider.shared
 
@@ -33,6 +35,7 @@ struct MainContentView: View {
 
     var body: some View {
         let activeGroup = windowSession.activeGroup
+        let activeTab = activeGroup?.activeTab
         let activeTabs = activeGroup?.tabs ?? []
         let activeTabID = activeGroup?.activeTabID
         let chromeTint = Color(nsColor: GlassTheme.chromeTint(for: themeColor, glassOpacity: glassOpacity))
@@ -40,6 +43,7 @@ struct MainContentView: View {
         GlassEffectContainer {
             HStack(spacing: 0) {
                 if windowSession.showSidebar {
+                    let sidebarFrameWidth = sidebarMode == nil ? 40 : windowSession.sidebarWidth
                     SidebarContentView(
                         groups: windowSession.groups,
                         activeGroupID: windowSession.activeGroupID,
@@ -50,33 +54,29 @@ struct MainContentView: View {
                         gitCommits: windowSession.git.commits,
                         expandedCommitIDs: windowSession.git.expandedCommitIDs,
                         commitFiles: windowSession.git.commitFiles,
-                        onGroupSelected: actions.onGroupSelected,
                         onTabSelected: actions.onTabSelected,
-                        onNewGroup: actions.onNewGroup,
                         onCloseTab: actions.onCloseTab,
-                        onGroupRenamed: actions.onGroupRenamed,
                         onTabRenamed: actions.onTabRenamed,
-                        onCollapseToggled: actions.onCollapseToggled,
-                        onCloseAllTabsInGroup: actions.onCloseAllTabsInGroup,
                         onWorkingFileSelected: actions.onWorkingFileSelected,
                         onCommitFileSelected: actions.onCommitFileSelected,
                         onRefreshGitStatus: actions.onRefreshGitStatus,
                         onLoadMoreCommits: actions.onLoadMoreCommits,
                         onExpandCommit: actions.onExpandCommit,
                         onRollbackToCheckpoint: actions.onRollbackToCheckpoint,
-                        onMoveTab: actions.onMoveTab,
                         onOpenDiff: actions.onOpenDiff,
                         onOpenAggregateDiff: actions.onOpenAggregateDiff
                     )
-                    .frame(width: windowSession.sidebarWidth)
+                    .frame(width: sidebarFrameWidth)
                     .overlay(alignment: .trailing) {
-                        SidebarResizeHandle(
-                            currentWidth: windowSession.sidebarWidth,
-                            onWidthChanged: { actions.onSidebarWidthChanged?($0) },
-                            onDragCommitted: { actions.onSidebarDragCommitted?() }
-                        )
-                        .offset(x: 0)
-                        .zIndex(1)
+                        if sidebarMode != nil {
+                            SidebarResizeHandle(
+                                currentWidth: windowSession.sidebarWidth,
+                                onWidthChanged: { actions.onSidebarWidthChanged?($0) },
+                                onDragCommitted: { actions.onSidebarDragCommitted?() }
+                            )
+                            .offset(x: 0)
+                            .zIndex(1)
+                        }
                     }
 
                     if reduceTransparency {
@@ -172,26 +172,25 @@ struct MainContentView: View {
                                             onHeightChanged: { windowSession.composeOverlayHeight = $0 }
                                         )
 
-                                        ZStack(alignment: .topTrailing) {
-                                            ComposeOverlayContainerView(
-                                                onSend: actions.onComposeOverlaySend,
-                                                onDismiss: actions.onDismissComposeOverlay
+                                        if let assistant = actions.composeAssistantState {
+                                            let composeBarHeight = max(
+                                                windowSession.composeOverlayHeight,
+                                                assistant.interactions.isEmpty ? 120 : 220
                                             )
-                                            .frame(height: windowSession.composeOverlayHeight)
-
-                                            Button(action: { actions.onToggleComposeBroadcast?() }) {
-                                                Image(systemName: actions.composeBroadcastEnabled
-                                                      ? "antenna.radiowaves.left.and.right.circle.fill"
-                                                      : "antenna.radiowaves.left.and.right.circle")
-                                                    .font(.system(size: 14))
-                                                    .foregroundStyle(actions.composeBroadcastEnabled
-                                                                     ? Color.accentColor : Color.secondary)
-                                            }
-                                            .buttonStyle(.plain)
-                                            .padding(8)
-                                            .help(actions.composeBroadcastEnabled
-                                                  ? "Broadcast: ON — sending to all panes"
-                                                  : "Broadcast: OFF — sending to focused pane")
+                                            ComposeCommandBarView(
+                                                assistant: assistant,
+                                                shellError: activeTab?.lastShellError,
+                                                ollamaModel: ollamaModel,
+                                                ollamaEndpoint: ollamaEndpoint,
+                                                broadcastEnabled: actions.composeBroadcastEnabled,
+                                                onToggleBroadcast: { actions.onToggleComposeBroadcast?() },
+                                                onSend: actions.onComposeOverlaySend,
+                                                onDismiss: actions.onDismissComposeOverlay,
+                                                onApplyEntry: actions.onApplyComposeAssistantEntry,
+                                                onExplainEntry: actions.onExplainComposeAssistantEntry,
+                                                onFixEntry: actions.onFixComposeAssistantEntry
+                                            )
+                                            .frame(height: composeBarHeight)
                                         }
                                     }
                                     .glassEffect(.clear.tint(chromeTint), in: .rect)
@@ -333,6 +332,275 @@ final class DiffGlassHostView: NSView {
         } else {
             layer?.backgroundColor = NSColor.clear.cgColor
         }
+    }
+}
+
+private struct ComposeCommandBarView: View {
+    @Bindable var assistant: ComposeAssistantState
+    let shellError: ShellErrorEvent?
+    let ollamaModel: String
+    let ollamaEndpoint: String
+    let broadcastEnabled: Bool
+    let onToggleBroadcast: () -> Void
+    let onSend: ((String) -> Bool)?
+    let onDismiss: (() -> Void)?
+    let onApplyEntry: ((UUID, Bool) -> Bool)?
+    let onExplainEntry: ((UUID) -> Void)?
+    let onFixEntry: ((UUID) -> Void)?
+
+    var body: some View {
+        VStack(spacing: 10) {
+            header
+
+            if let shellError {
+                errorBanner(shellError)
+            }
+
+            if assistant.interactions.isEmpty {
+                emptyState
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(assistant.interactions) { entry in
+                            ComposeAssistantEntryCard(
+                                entry: entry,
+                                onEdit: { _ = onApplyEntry?(entry.id, false) },
+                                onRun: { _ = onApplyEntry?(entry.id, true) },
+                                onExplain: { onExplainEntry?(entry.id) },
+                                onFix: { onFixEntry?(entry.id) }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 1)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .layoutPriority(1)
+                .scrollIndicators(.hidden)
+            }
+
+            VStack(spacing: 6) {
+                ComposeOverlayContainerView(
+                    text: Binding(
+                        get: { assistant.draftText },
+                        set: { assistant.setDraftText($0) }
+                    ),
+                    onSend: onSend,
+                    onDismiss: onDismiss,
+                    placeholderText: assistant.placeholderText
+                )
+                .frame(minHeight: 78, maxHeight: 108)
+
+                HStack {
+                    Text(assistant.mode == .ollamaCommand
+                         ? "Return asks Ollama for a command. Shift-Return inserts a newline."
+                         : "Return sends the command. Shift-Return inserts a newline.")
+                    Spacer()
+                    Text("Esc closes")
+                }
+                .font(.system(size: 10, design: .rounded))
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Picker(
+                "",
+                selection: Binding(
+                    get: { assistant.mode },
+                    set: { assistant.mode = $0 }
+                )
+            ) {
+                ForEach(ComposeAssistantMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 180)
+
+            if assistant.mode == .ollamaCommand {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(ollamaModel.isEmpty ? OllamaCommandService.defaultModel : ollamaModel)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    Text(ollamaEndpoint.isEmpty ? OllamaCommandService.defaultEndpoint : ollamaEndpoint)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            } else {
+                Text("Warp-style command bar")
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            if assistant.isBusy {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Thinking…")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            if !assistant.interactions.isEmpty {
+                Button("Clear") { assistant.clearHistory() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+
+            Button(action: onToggleBroadcast) {
+                Image(systemName: broadcastEnabled
+                      ? "antenna.radiowaves.left.and.right.circle.fill"
+                      : "antenna.radiowaves.left.and.right.circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(broadcastEnabled ? Color.accentColor : Color.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(broadcastEnabled
+                  ? "Broadcast: ON — sending to all panes"
+                  : "Broadcast: OFF — sending to focused pane")
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Ask for a command, run shell input, then use Explain or Fix on the resulting card.")
+                .font(.system(size: 11, design: .rounded))
+                .foregroundStyle(.secondary)
+            Text("This is the first Warp-style pass: command suggestions, reusable cards, and output-aware follow-ups all stay in one command bar.")
+                .font(.system(size: 10, design: .rounded))
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+    }
+
+    @ViewBuilder
+    private func errorBanner(_ shellError: ShellErrorEvent) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Latest shell error", systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.orange)
+                Spacer()
+                if let entry = assistant.latestRunnableEntry {
+                    HStack(spacing: 6) {
+                        Button("Explain") { onExplainEntry?(entry.id) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        Button("Fix") { onFixEntry?(entry.id) }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                    }
+                }
+            }
+
+            Text(shellError.snippet)
+                .font(.system(size: 10, design: .monospaced))
+                .textSelection(.enabled)
+                .lineLimit(5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.orange.opacity(0.08))
+        )
+    }
+}
+
+private struct ComposeAssistantEntryCard: View {
+    let entry: ComposeAssistantEntry
+    let onEdit: () -> Void
+    let onRun: () -> Void
+    let onExplain: () -> Void
+    let onFix: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(entry.kind.title)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Color.white.opacity(0.08)))
+
+                Text(entry.status.label)
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(entry.status == .failed ? .red : .secondary)
+
+                Spacer()
+
+                Text(entry.createdAt.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
+
+            if entry.kind == .explanation {
+                Text(entry.primaryText)
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(entry.status == .failed ? .red : .primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(entry.primaryText)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(entry.status == .failed ? .red : .primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if let contextSnippet = entry.contextSnippet,
+               !contextSnippet.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Context")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                    Text(contextSnippet)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .lineLimit(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            HStack(spacing: 8) {
+                if entry.canInsert {
+                    Button("Edit", action: onEdit)
+                }
+                if entry.canRun {
+                    Button(entry.kind == .shellDispatch ? "Run Again" : "Run", action: onRun)
+                }
+                if entry.canExplain {
+                    Button("Explain", action: onExplain)
+                }
+                if entry.canFix {
+                    Button("Fix", action: onFix)
+                }
+                Spacer()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+        )
     }
 }
 

@@ -39,6 +39,13 @@ class ComposeOverlayView: NSView {
 
     var onSend: ((String) -> Bool)?
     var onDismiss: (() -> Void)?
+    var onTextChange: ((String) -> Void)?
+    var placeholderText: String = "Type here..." {
+        didSet { placeholderLabel.stringValue = placeholderText }
+    }
+    var text: String = "" {
+        didSet { syncTextIfNeeded() }
+    }
 
     // MARK: - Initializers
 
@@ -112,6 +119,7 @@ class ComposeOverlayView: NSView {
         placeholderLabel.drawsBackground = false
         placeholderLabel.isEditable = false
         placeholderLabel.isSelectable = false
+        placeholderLabel.stringValue = placeholderText
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(placeholderLabel)
 
@@ -133,6 +141,12 @@ class ComposeOverlayView: NSView {
     func focusTextView() {
         guard window != nil else { return }
         window?.makeFirstResponder(textView)
+    }
+
+    private func syncTextIfNeeded() {
+        guard textView.string != text else { return }
+        textView.string = text
+        updatePlaceholder()
     }
 
     // MARK: - Key Handling (overrides on the view itself for when textView doesn't handle)
@@ -161,6 +175,7 @@ class ComposeOverlayView: NSView {
         let sent = onSend?(textView.string) ?? false
         if sent {
             textView.string = ""
+            onTextChange?("")
             updatePlaceholder()
         }
     }
@@ -190,6 +205,7 @@ class ComposeOverlayView: NSView {
 extension ComposeOverlayView: NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
+        onTextChange?(textView.string)
         updatePlaceholder()
     }
 

@@ -7,19 +7,47 @@ import SwiftUI
 import AppKit
 
 struct ComposeOverlayContainerView: NSViewRepresentable {
+    @Binding var text: String
     var onSend: ((String) -> Bool)?
     var onDismiss: (() -> Void)?
+    var placeholderText: String = "Type here..."
 
     func makeNSView(context: Context) -> ComposeOverlayView {
         let view = ComposeOverlayView()
+        view.text = text
+        view.onTextChange = { newValue in
+            context.coordinator.text.wrappedValue = newValue
+        }
         view.onSend = onSend
         view.onDismiss = onDismiss
+        view.placeholderText = placeholderText
         return view
     }
 
     func updateNSView(_ nsView: ComposeOverlayView, context: Context) {
+        context.coordinator.text.wrappedValue = text
+        nsView.text = text
+        nsView.onTextChange = { newValue in
+            context.coordinator.text.wrappedValue = newValue
+        }
         nsView.onSend = onSend
         nsView.onDismiss = onDismiss
+        nsView.placeholderText = placeholderText
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+}
+
+extension ComposeOverlayContainerView {
+    @MainActor
+    final class Coordinator {
+        var text: Binding<String>
+
+        init(text: Binding<String>) {
+            self.text = text
+        }
     }
 }
 

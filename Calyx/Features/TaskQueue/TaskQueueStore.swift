@@ -312,7 +312,7 @@ final class TaskQueueEngine {
 
         let injected: Bool
         if targetName.isEmpty {
-            injected = TerminalControlBridge.shared.routeToNearestClaudePaneOrActive(text: prompt)
+            injected = TerminalControlBridge.shared.routeToNearestAgentPaneOrActive(text: prompt)
         } else {
             injected = (TerminalControlBridge.shared.delegate?.runInPaneMatching(
                 titleContains: targetName, text: prompt, pressEnter: true) ?? false)

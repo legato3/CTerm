@@ -675,7 +675,7 @@ class SurfaceView: NSView {
         menu.addItem(.separator())
 
         let sendItem = NSMenuItem(
-            title: "Send to Claude",
+            title: "Send to AI Agent",
             action: #selector(sendSelectionToClaude),
             keyEquivalent: ""
         )
@@ -684,7 +684,7 @@ class SurfaceView: NSView {
         menu.addItem(sendItem)
 
         let explainItem = NSMenuItem(
-            title: "Ask Claude to explain",
+            title: "Ask AI Agent to explain",
             action: #selector(explainSelectionWithClaude),
             keyEquivalent: ""
         )
@@ -704,12 +704,11 @@ class SurfaceView: NSView {
     @objc private func sendSelectionToClaude() {
         guard let text = contextBridgeText, !text.isEmpty else { return }
         contextBridgeText = nil
-        let sent = TerminalControlBridge.shared.delegate?
-            .runInPaneMatching(titleContains: "claude", text: text, pressEnter: true) ?? false
+        let sent = TerminalControlBridge.shared.routeToNearestAgentPaneOrActive(text: text)
         if !sent {
             NotificationManager.shared.sendNotification(
-                title: "No Claude pane found",
-                body: "Start 'claude' in a split pane first, then try again.",
+                title: "No AI agent pane found",
+                body: "Start an AI agent in another tab or split first, then try again.",
                 tabID: UUID()
             )
         }
@@ -719,12 +718,11 @@ class SurfaceView: NSView {
         guard let text = contextBridgeText, !text.isEmpty else { return }
         contextBridgeText = nil
         let prompt = "Explain this terminal output:\n```\n\(text)\n```"
-        let sent = TerminalControlBridge.shared.delegate?
-            .runInPaneMatching(titleContains: "claude", text: prompt, pressEnter: true) ?? false
+        let sent = TerminalControlBridge.shared.routeToNearestAgentPaneOrActive(text: prompt)
         if !sent {
             NotificationManager.shared.sendNotification(
-                title: "No Claude pane found",
-                body: "Start 'claude' in a split pane first, then try again.",
+                title: "No AI agent pane found",
+                body: "Start an AI agent in another tab or split first, then try again.",
                 tabID: UUID()
             )
         }
@@ -1267,4 +1265,3 @@ extension SurfaceView {
         surfaceController?.performAction("start_search")
     }
 }
-

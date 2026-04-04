@@ -428,9 +428,9 @@ private struct TabItemButton: View {
                         .foregroundStyle(Color.orange)
                 }
                 .buttonStyle(.plain)
-                .help("Command failed — click to route to Claude\n\n\(error.snippet.prefix(200))")
+                .help("Command failed — click to route to your AI agent\n\n\(error.snippet.prefix(200))")
                 .contextMenu {
-                    Button("Route to Claude") { onRouteShellError?() }
+                    Button("Route to Agent") { onRouteShellError?() }
                     Button("Dismiss") { onDismissShellError?() }
                 }
                 .transition(.scale.combined(with: .opacity))

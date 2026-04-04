@@ -95,6 +95,7 @@ final class IPCWindowController {
         let autoStart = event.autoStart
         let sessionName = event.sessionName
         let initialTask = event.initialTask
+        let runtime = event.runtime
         let port = mcpServer.port
 
         let panel = NSOpenPanel()
@@ -124,11 +125,13 @@ final class IPCWindowController {
             onCreateNewTab?(pwd)
             if let newTab = windowSession?.activeGroup?.tabs.last {
                 newTab.title = roleName
+                newTab.agentRuntime = runtime.preset
+                newTab.agentInputStyle = runtime.inputStyle
                 createdTabs.append(newTab)
             }
         }
 
-        if !initialTask.isEmpty && autoStart {
+        if !initialTask.isEmpty && autoStart && runtime.registersWithIPC {
             DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) {
                 Task { @MainActor in
                     await self.mcpServer.ensureAppPeerRegistered()
@@ -144,39 +147,66 @@ final class IPCWindowController {
 
         guard autoStart, createdTabs.count == roleNames.count else { return }
 
-        // Build a role-name → (tab, prompt) map so we can inject prompts when
-        // the matching peer calls register_peer rather than after a hardcoded delay.
-        for (tab, roleName) in zip(createdTabs, roleNames) {
-            let prompt = AgentWorkflow.rolePrompt(roleName: roleName, allRoles: roleNames, port: port)
-            pendingRolePrompts[roleName.lowercased()] = (tab: tab, prompt: prompt)
-        }
+        if runtime.registersWithIPC {
+            // Build a role-name → (tab, prompt) map so we can inject prompts when
+            // the matching peer calls register_peer rather than after a hardcoded delay.
+            for (tab, roleName) in zip(createdTabs, roleNames) {
+                let prompt = AgentWorkflow.rolePrompt(
+                    roleName: roleName,
+                    allRoles: roleNames,
+                    runtime: runtime,
+                    port: port
+                )
+                pendingRolePrompts[roleName.lowercased()] = (tab: tab, prompt: prompt)
+            }
 
-        // Subscribe to peerRegistered once (idempotent — remove any previous observer first).
-        if let existing = peerRegisteredObserver {
-            NotificationCenter.default.removeObserver(existing)
-        }
-        peerRegisteredObserver = NotificationCenter.default.addObserver(
-            forName: .peerRegistered,
-            object: nil,
-            queue: .main
-        ) { [weak self] note in
-            // Extract Sendable values from the Notification before crossing into the Task.
-            let peerName = note.userInfo?["name"] as? String
-            Task { @MainActor [weak self] in
-                self?.handlePeerRegisteredNamed(peerName)
+            // Subscribe to peerRegistered once (idempotent — remove any previous observer first).
+            if let existing = peerRegisteredObserver {
+                NotificationCenter.default.removeObserver(existing)
+            }
+            peerRegisteredObserver = NotificationCenter.default.addObserver(
+                forName: .peerRegistered,
+                object: nil,
+                queue: .main
+            ) { [weak self] note in
+                // Extract Sendable values from the Notification before crossing into the Task.
+                let peerName = note.userInfo?["name"] as? String
+                Task { @MainActor [weak self] in
+                    self?.handlePeerRegisteredNamed(peerName)
+                }
             }
         }
 
-        // Launch Claude in each tab after a short shell-ready delay (keeps the staggered
-        // launch, removes the per-agent hardcoded 3.5 s prompt delay).
+        // Launch the selected runtime in each tab after a short shell-ready delay.
         for (index, tab) in createdTabs.enumerated() {
             let baseDelay = Double(index) * 0.15
             DispatchQueue.main.asyncAfter(deadline: .now() + baseDelay + 0.8) { [weak self] in
                 guard let self,
                       let leafID = tab.splitTree.focusedLeafID,
                       let controller = tab.registry.controller(for: leafID) else { return }
-                controller.sendText("claude")
+                guard !runtime.launchCommand.isEmpty else { return }
+                controller.sendText(runtime.launchCommand)
                 self.onSendEnterKey?(controller)
+
+                guard !runtime.registersWithIPC else { return }
+
+                let prompt = AgentWorkflow.rolePrompt(
+                    roleName: tab.title,
+                    allRoles: roleNames,
+                    runtime: runtime,
+                    port: port,
+                    initialTask: initialTask
+                )
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self else { return }
+                    AgentTextRouter.submit(
+                        prompt,
+                        to: controller,
+                        inputStyle: runtime.inputStyle,
+                        sendEnterKey: { self.onSendEnterKey?($0) }
+                    )
+                }
             }
         }
     }
@@ -218,14 +248,12 @@ final class IPCWindowController {
         }
 
         logger.info("IPCWindowController: injecting role prompt for peer '\(peerName)'")
-        controller.sendText(prompt)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self else { return }
-            self.onSendEnterKey?(controller)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self.onSendEnterKey?(controller)
-            }
-        }
+        AgentTextRouter.submit(
+            prompt,
+            to: controller,
+            inputStyle: tab.preferredAgentInputStyle,
+            sendEnterKey: { [weak self] controller in self?.onSendEnterKey?(controller) }
+        )
 
         // If all pending prompts have been consumed, remove the observer.
         if pendingRolePrompts.isEmpty {
@@ -241,17 +269,12 @@ final class IPCWindowController {
     func sendToAgent(_ payload: String) -> ReviewSendResult {
         guard let session = windowSession else { return .failed }
 
-        let agentTabs = session.groups.flatMap(\.tabs).filter {
-            guard case .terminal = $0.content else { return false }
-            let title = $0.title
-            return title.localizedCaseInsensitiveContains("claude") ||
-                   title.localizedCaseInsensitiveContains("codex")
-        }
+        let agentTabs = session.groups.flatMap(\.tabs).filter(\.isAIAgentTab)
 
         guard !agentTabs.isEmpty else {
             showAlert(
                 title: "No AI Agent",
-                message: "No terminal tabs running Claude Code or Codex found. Start an AI agent first."
+                message: "No terminal tabs marked as AI agents were found. Start an AI agent first."
             )
             return .failed
         }
@@ -261,8 +284,8 @@ final class IPCWindowController {
             targetTab = agentTabs[0]
         } else {
             let alert = NSAlert()
-            alert.messageText = "Select Claude Code Tab"
-            alert.informativeText = "Choose which Claude Code instance to send the review to:"
+            alert.messageText = "Select AI Agent Tab"
+            alert.informativeText = "Choose which AI agent instance to send the review to:"
             alert.addButton(withTitle: "Send")
             alert.addButton(withTitle: "Cancel")
 
@@ -288,13 +311,12 @@ final class IPCWindowController {
             return .failed
         }
 
-        controller.sendText(payload)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.onSendEnterKey?(controller)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                self?.onSendEnterKey?(controller)
-            }
-        }
+        AgentTextRouter.submit(
+            payload,
+            to: controller,
+            inputStyle: targetTab.preferredAgentInputStyle,
+            sendEnterKey: { [weak self] controller in self?.onSendEnterKey?(controller) }
+        )
 
         onSwitchToTab?(targetTab.id)
         return .sent

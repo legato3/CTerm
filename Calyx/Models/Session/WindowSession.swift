@@ -21,7 +21,7 @@ class WindowSession: Identifiable {
     var showComposeOverlay: Bool = false
     var showTerminalSearch: Bool = false
     var composeOverlayHeight: CGFloat = 120
-    var sidebarMode: SidebarMode = .tabs
+    var sidebarMode: SidebarMode? = .tabs
     let git = GitState()
     var sidebarWidth: CGFloat = SidebarLayout.defaultWidth
 

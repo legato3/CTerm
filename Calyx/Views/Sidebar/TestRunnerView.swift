@@ -223,15 +223,15 @@ struct TestRunnerView: View {
         VStack(spacing: 0) {
             Divider().opacity(0.4)
             HStack(spacing: 8) {
-                Button(action: routeFailuresToClaude) {
-                    Label("Route failures to Claude", systemImage: "arrow.up.forward.circle")
+                Button(action: routeFailuresToAgent) {
+                    Label("Route failures to Agent", systemImage: "arrow.up.forward.circle")
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(store.failCount > 0 ? Color.orange : Color.secondary)
                 .disabled(store.failCount == 0)
                 .help(store.failCount > 0
-                      ? "Inject failure details into the nearest Claude pane"
+                      ? "Inject failure details into the nearest AI agent pane"
                       : "No failures to route")
                 Spacer()
                 Button(action: { store.results = []; expandedFailures = [] }) {
@@ -270,7 +270,7 @@ struct TestRunnerView: View {
 
     // MARK: - Routing
 
-    private func routeFailuresToClaude() {
+    private func routeFailuresToAgent() {
         let failures = store.failures
         guard !failures.isEmpty else { return }
 
@@ -282,7 +282,7 @@ struct TestRunnerView: View {
 
         Please fix the failing tests.
         """
-        TerminalControlBridge.shared.routeToNearestClaudePaneOrActive(text: message)
+        TerminalControlBridge.shared.routeToNearestAgentPaneOrActive(text: message)
     }
 }
 

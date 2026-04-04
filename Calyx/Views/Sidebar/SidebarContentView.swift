@@ -1,7 +1,7 @@
 // SidebarContentView.swift
 // Calyx
 //
-// SwiftUI sidebar showing tab groups and their tabs.
+// SwiftUI sidebar with a vertical icon rail and collapsible content panel.
 
 import SwiftUI
 
@@ -9,27 +9,21 @@ struct SidebarContentView: View {
     let groups: [TabGroup]
     let activeGroupID: UUID?
     let activeTabID: UUID?
-    @Binding var sidebarMode: SidebarMode
+    @Binding var sidebarMode: SidebarMode?
     var gitChangesState: GitChangesState = .notLoaded
     var gitEntries: [GitFileEntry] = []
     var gitCommits: [GitCommit] = []
     var expandedCommitIDs: Set<String> = []
     var commitFiles: [String: [CommitFileEntry]] = [:]
-    var onGroupSelected: ((UUID) -> Void)?
     var onTabSelected: ((UUID) -> Void)?
-    var onNewGroup: (() -> Void)?
     var onCloseTab: ((UUID) -> Void)?
-    var onGroupRenamed: (() -> Void)?
     var onTabRenamed: (() -> Void)?
-    var onCollapseToggled: (() -> Void)?
-    var onCloseAllTabsInGroup: ((UUID) -> Void)?
     var onWorkingFileSelected: ((GitFileEntry) -> Void)?
     var onCommitFileSelected: ((CommitFileEntry) -> Void)?
     var onRefreshGitStatus: (() -> Void)?
     var onLoadMoreCommits: (() -> Void)?
     var onExpandCommit: ((String) -> Void)?
     var onRollbackToCheckpoint: ((GitCommit) -> Void)?
-    var onMoveTab: ((UUID, Int, Int) -> Void)?
     var onOpenDiff: ((DiffSource) -> Void)?
     var onOpenAggregateDiff: ((String) -> Void)?
 
@@ -43,174 +37,159 @@ struct SidebarContentView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("Mode", selection: $sidebarMode) {
-                Image(systemName: "square.on.square")
-                    .help("Tabs").tag(SidebarMode.tabs)
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .help("Changes").tag(SidebarMode.changes)
-                Image(systemName: "person.2.fill")
-                    .help("Agents").tag(SidebarMode.agents)
-                Image(systemName: "network")
-                    .help("Mesh").tag(SidebarMode.mesh)
-                Image(systemName: "checklist")
-                    .help("Task Queue").tag(SidebarMode.taskQueue)
-                Image(systemName: "chart.bar.fill")
-                    .help("Usage").tag(SidebarMode.usage)
-                Image(systemName: "doc.text.fill")
-                    .help("Context").tag(SidebarMode.context)
-                Image(systemName: "clock.arrow.circlepath")
-                    .help("File Changes").tag(SidebarMode.fileChanges)
-                Image(systemName: "brain.head.profile")
-                    .help("Agent Memory").tag(SidebarMode.agentMemory)
-                Image(systemName: "testtube.2")
-                    .help("Test Runner").tag(SidebarMode.testRunner)
-                Image(systemName: "bolt.fill")
-                    .help("Triggers").tag(SidebarMode.triggers)
-                Image(systemName: "clock.arrow.circlepath")
-                    .help("Session Log").tag(SidebarMode.auditLog)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 8)
-            .padding(.top, 8)
-            .accessibilityIdentifier(AccessibilityID.Git.modeToggle)
+        HStack(spacing: 0) {
+            iconRail
 
-            // Unread agent message badge — tapping switches to Agents tab
-            if agentState.unreadCount > 0 && sidebarMode != .agents {
-                Button(action: { sidebarMode = .agents }) {
-                    Label(
-                        "\(agentState.unreadCount) new agent message\(agentState.unreadCount == 1 ? "" : "s")",
-                        systemImage: "bubble.left.fill"
-                    )
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(Color.accentColor.opacity(0.12)))
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 4)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+            Rectangle()
+                .fill(Color.white.opacity(reduceTransparency ? 0.14 : 0.08))
+                .frame(width: 1)
 
-            if sidebarMode == .tabs {
-                ScrollView {
-                    GlassEffectContainer(spacing: 8) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(groups) { group in
-                                GroupSectionView(
-                                    group: group,
-                                    isActiveGroup: group.id == activeGroupID,
-                                    activeTabID: activeTabID,
-                                    reduceTransparency: reduceTransparency,
-                                    onGroupSelected: onGroupSelected,
-                                    onTabSelected: onTabSelected,
-                                    onCloseTab: onCloseTab,
-                                    onGroupRenamed: onGroupRenamed,
-                                    onTabRenamed: onTabRenamed,
-                                    onCollapseToggled: onCollapseToggled,
-                                    onCloseAllTabsInGroup: onCloseAllTabsInGroup,
-                                    onMoveTab: onMoveTab
-                                )
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                }
-                .padding(.top, 10)
-
-                Rectangle()
-                    .fill(Color.white.opacity(reduceTransparency ? 0.14 : 0.10))
-                    .frame(height: 1)
-                    .padding(.horizontal, 8)
-
-                Button(action: { onNewGroup?() }) {
-                    Label("New Group", systemImage: "folder.badge.plus")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .contentShape(Rectangle())
-                }
-                .modifier(GlassButtonModifier(reduceTransparency: reduceTransparency))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .accessibilityIdentifier(AccessibilityID.Sidebar.newGroupButton)
-            } else if sidebarMode == .changes {
-                GitChangesView(
-                    gitChangesState: gitChangesState,
-                    gitEntries: gitEntries,
-                    gitCommits: gitCommits,
-                    expandedCommitIDs: expandedCommitIDs,
-                    commitFiles: commitFiles,
-                    onWorkingFileSelected: onWorkingFileSelected,
-                    onCommitFileSelected: onCommitFileSelected,
-                    onRefresh: onRefreshGitStatus,
-                    onLoadMore: onLoadMoreCommits,
-                    onExpandCommit: onExpandCommit,
-                    onRollbackToCheckpoint: onRollbackToCheckpoint
-                )
-                .padding(.top, 10)
-            } else if sidebarMode == .agents {
-                IPCAgentsView()
-                    .padding(.top, 4)
-            } else if sidebarMode == .mesh {
-                IPCMeshView()
-                    .padding(.top, 4)
-            } else if sidebarMode == .taskQueue {
-                TaskQueueView()
-                    .padding(.top, 4)
-            } else if sidebarMode == .agentMemory {
-                AgentMemoryView()
-                    .padding(.top, 4)
-            } else if sidebarMode == .testRunner {
-                TestRunnerView()
-                    .padding(.top, 4)
-            } else if sidebarMode == .triggers {
-                TriggerEngineView()
-                    .padding(.top, 4)
-            } else if sidebarMode == .auditLog {
-                SessionAuditView()
-                    .padding(.top, 4)
-            } else if sidebarMode == .usage {
-                ClaudeUsageView()
-                    .padding(.top, 4)
-            } else if sidebarMode == .fileChanges {
-                FileChangesView(
-                    onOpenDiff: onOpenDiff,
-                    onOpenAggregateDiff: onOpenAggregateDiff
-                )
-                .padding(.top, 4)
-            } else {
-                ContextView(pwd: activeTab?.pwd)
-                    .padding(.top, 4)
+            if let mode = sidebarMode {
+                contentPanel(for: mode)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
-        .frame(minWidth: SidebarLayout.minWidth, maxHeight: .infinity, alignment: .top)
+        .frame(maxHeight: .infinity, alignment: .top)
         .modifier(SidebarBackgroundModifier(reduceTransparency: reduceTransparency))
         .accessibilityIdentifier(AccessibilityID.Sidebar.container)
     }
-}
 
-private struct GlassButtonModifier: ViewModifier {
-    let reduceTransparency: Bool
-    @Environment(\.controlActiveState) private var controlActiveState
+    // MARK: - Icon Rail
 
-    func body(content: Content) -> some View {
-        if reduceTransparency {
-            content.buttonStyle(.plain)
-        } else {
-            content
-                .buttonStyle(.plain)
+    private var iconRail: some View {
+        ScrollView {
+            VStack(spacing: 2) {
+                railButton(mode: .tabs, icon: "square.on.square", help: "Tabs")
+                railButton(mode: .changes, icon: "arrow.triangle.2.circlepath", help: "Changes")
+                railButton(mode: .agents, icon: "person.2.fill", help: "Agents")
+                    .overlay(alignment: .topTrailing) {
+                        if agentState.unreadCount > 0 && sidebarMode != .agents {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 7, height: 7)
+                                .offset(x: -2, y: 4)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                railButton(mode: .mesh, icon: "network", help: "Mesh")
+                railButton(mode: .taskQueue, icon: "checklist", help: "Task Queue")
+                railButton(mode: .usage, icon: "chart.bar.fill", help: "Usage")
+                railButton(mode: .context, icon: "doc.text.fill", help: "Context")
+                railButton(mode: .fileChanges, icon: "clock.arrow.circlepath", help: "File Changes")
+                railButton(mode: .agentMemory, icon: "brain.head.profile", help: "Agent Memory")
+                railButton(mode: .testRunner, icon: "testtube.2", help: "Test Runner")
+                railButton(mode: .triggers, icon: "bolt.fill", help: "Triggers")
+                railButton(mode: .auditLog, icon: "scroll", help: "Session Log")
+            }
+            .padding(.vertical, 10)
+        }
+        .frame(width: 40)
+        .scrollIndicators(.never)
+    }
+
+    private func railButton(mode: SidebarMode, icon: String, help: String) -> some View {
+        let isSelected = sidebarMode == mode
+        return Button(action: {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                sidebarMode = isSelected ? nil : mode
+            }
+        }) {
+            Image(systemName: icon)
+                .font(.system(size: 13.5))
+                .frame(width: 30, height: 30)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.black.opacity(0.2))
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isSelected ? Color.accentColor.opacity(0.20) : Color.clear)
                 )
-                .opacity(controlActiveState == .key ? 1.0 : 0.5)
+                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    // MARK: - Content Panel
+
+    @ViewBuilder
+    private func contentPanel(for mode: SidebarMode) -> some View {
+        switch mode {
+        case .tabs:
+            flatTabsContent
+        case .changes:
+            GitChangesView(
+                gitChangesState: gitChangesState,
+                gitEntries: gitEntries,
+                gitCommits: gitCommits,
+                expandedCommitIDs: expandedCommitIDs,
+                commitFiles: commitFiles,
+                onWorkingFileSelected: onWorkingFileSelected,
+                onCommitFileSelected: onCommitFileSelected,
+                onRefresh: onRefreshGitStatus,
+                onLoadMore: onLoadMoreCommits,
+                onExpandCommit: onExpandCommit,
+                onRollbackToCheckpoint: onRollbackToCheckpoint
+            )
+            .padding(.top, 10)
+        case .agents:
+            IPCAgentsView()
+                .padding(.top, 4)
+        case .mesh:
+            IPCMeshView()
+                .padding(.top, 4)
+        case .taskQueue:
+            TaskQueueView()
+                .padding(.top, 4)
+        case .agentMemory:
+            AgentMemoryView()
+                .padding(.top, 4)
+        case .testRunner:
+            TestRunnerView()
+                .padding(.top, 4)
+        case .triggers:
+            TriggerEngineView()
+                .padding(.top, 4)
+        case .auditLog:
+            SessionAuditView()
+                .padding(.top, 4)
+        case .usage:
+            ClaudeUsageView()
+                .padding(.top, 4)
+        case .fileChanges:
+            FileChangesView(
+                onOpenDiff: onOpenDiff,
+                onOpenAggregateDiff: onOpenAggregateDiff
+            )
+            .padding(.top, 4)
+        case .context:
+            ContextView(pwd: activeTab?.pwd)
+                .padding(.top, 4)
         }
     }
+
+    // MARK: - Flat Tabs
+
+    private var flatTabsContent: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(groups) { group in
+                    ForEach(group.tabs) { tab in
+                        TabRowItemView(
+                            tab: tab,
+                            isActive: tab.id == activeTabID && group.id == activeGroupID,
+                            onSelected: { onTabSelected?(tab.id) },
+                            onClose: { onCloseTab?(tab.id) },
+                            onTabRenamed: onTabRenamed
+                        )
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+        }
+        .padding(.top, 8)
+    }
 }
+
+// MARK: - Background Modifier
 
 private struct SidebarBackgroundModifier: ViewModifier {
     let reduceTransparency: Bool
@@ -260,392 +239,7 @@ private struct SidebarBackgroundModifier: ViewModifier {
     }
 }
 
-private struct GroupNameTextField: NSViewRepresentable {
-    let initialText: String
-    let accessibilityID: String
-    var onCommit: (String) -> Void
-    var onCancel: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onCommit: onCommit, onCancel: onCancel)
-    }
-
-    func makeNSView(context: Context) -> NSTextField {
-        let textField = NSTextField()
-        textField.isBordered = false
-        textField.drawsBackground = false
-        textField.focusRingType = .none
-        textField.cell?.isScrollable = true
-        textField.cell?.lineBreakMode = .byTruncatingTail
-        textField.stringValue = initialText
-        textField.delegate = context.coordinator
-        textField.setAccessibilityIdentifier(accessibilityID)
-
-        let systemFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        if let rounded = systemFont.fontDescriptor.withDesign(.rounded) {
-            textField.font = NSFont(descriptor: rounded, size: 12)
-        } else {
-            textField.font = systemFont
-        }
-
-        context.coordinator.textField = textField
-
-        DispatchQueue.main.async {
-            textField.selectText(nil)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            context.coordinator.installClickMonitor()
-        }
-
-        return textField
-    }
-
-    func updateNSView(_ nsView: NSTextField, context: Context) {
-        context.coordinator.onCommit = onCommit
-        context.coordinator.onCancel = onCancel
-    }
-
-    @MainActor class Coordinator: NSObject, NSTextFieldDelegate {
-        weak var textField: NSTextField?
-        var onCommit: (String) -> Void
-        var onCancel: () -> Void
-        private var clickMonitor: Any?
-        private var didEnd = false
-
-        init(onCommit: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
-            self.onCommit = onCommit
-            self.onCancel = onCancel
-        }
-
-        func installClickMonitor() {
-            clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
-                guard let self, !self.didEnd else { return event }
-                if let textField = self.textField,
-                   let eventWindow = event.window,
-                   eventWindow == textField.window {
-                    let point = textField.convert(event.locationInWindow, from: nil)
-                    if textField.bounds.contains(point) {
-                        return event
-                    }
-                    if let editor = textField.currentEditor().map({ $0 as NSView }) {
-                        let editorPoint = editor.convert(event.locationInWindow, from: nil)
-                        if editor.bounds.contains(editorPoint) {
-                            return event
-                        }
-                    }
-                }
-                self.finish(commit: true)
-                return event
-            }
-        }
-
-        private func finish(commit: Bool) {
-            guard !didEnd else { return }
-            didEnd = true
-            removeClickMonitor()
-            if commit {
-                onCommit(textField?.stringValue ?? "")
-            } else {
-                onCancel()
-            }
-        }
-
-        private func removeClickMonitor() {
-            if let monitor = clickMonitor {
-                NSEvent.removeMonitor(monitor)
-                clickMonitor = nil
-            }
-        }
-
-        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-                finish(commit: true)
-                return true
-            }
-            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-                finish(commit: false)
-                return true
-            }
-            return false
-        }
-
-        func controlTextDidEndEditing(_ obj: Notification) {
-            finish(commit: true)
-        }
-
-        deinit {
-            MainActor.assumeIsolated {
-                removeClickMonitor()
-            }
-        }
-    }
-}
-
-private struct GroupSectionView: View {
-    let group: TabGroup
-    let isActiveGroup: Bool
-    let activeTabID: UUID?
-    let reduceTransparency: Bool
-    var onGroupSelected: ((UUID) -> Void)?
-    var onTabSelected: ((UUID) -> Void)?
-    var onCloseTab: ((UUID) -> Void)?
-    var onGroupRenamed: (() -> Void)?
-    var onTabRenamed: (() -> Void)?
-    var onCollapseToggled: (() -> Void)?
-    var onCloseAllTabsInGroup: ((UUID) -> Void)?
-    var onMoveTab: ((UUID, Int, Int) -> Void)?
-
-    @State private var isEditing = false
-    @State private var isHoveringHeader = false
-    @State private var reorderState = TabReorderState()
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Group header
-            if isEditing {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(Color(nsColor: group.color.nsColor))
-                        .frame(width: 8, height: 8)
-                    InlineTextField(
-                        initialText: group.name,
-                        accessibilityID: AccessibilityID.Sidebar.groupNameTextField(group.id),
-                        fontSize: 12,
-                        fontWeight: .semibold,
-                        onCommit: { text in
-                            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if !trimmed.isEmpty {
-                                group.name = trimmed
-                            }
-                            isEditing = false
-                            onGroupRenamed?()
-                        },
-                        onCancel: {
-                            isEditing = false
-                        }
-                    )
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .contentShape(Rectangle())
-                .modifier(GroupHeaderBackgroundModifier(
-                    isActiveGroup: isActiveGroup,
-                    reduceTransparency: reduceTransparency,
-                    groupColor: group.color
-                ))
-            } else {
-                HStack(spacing: 0) {
-                    // Left: group selection area
-                    Button(action: { onGroupSelected?(group.id) }) {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(Color(nsColor: group.color.nsColor))
-                                .frame(width: 8, height: 8)
-                            Text(group.name)
-                                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                                .tracking(0.4)
-                                .lineLimit(1)
-                            Spacer()
-                            Text("\(group.tabs.count)")
-                                .font(.system(size: 10, weight: .bold, design: .rounded))
-                                .foregroundStyle(.secondary)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-
-                    // Close all tabs button (shown on hover)
-                    Button(action: { onCloseAllTabsInGroup?(group.id) }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .opacity(isHoveringHeader ? 1 : 0)
-                            .frame(width: 20, height: 20)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .allowsHitTesting(isHoveringHeader)
-                    .closeButtonHoverHighlight(size: 20, isVisible: isHoveringHeader, hoverOpacity: 0.08)
-                    .accessibilityIdentifier(AccessibilityID.Sidebar.groupCloseAllButton(group.id))
-
-                    // Right: collapse toggle button
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            group.isCollapsed.toggle()
-                        }
-                        onCollapseToggled?()
-                    }) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .rotationEffect(group.isCollapsed ? .zero : .degrees(90))
-                            .frame(width: 20, height: 20)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier(AccessibilityID.Sidebar.groupCollapseButton(group.id))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .modifier(GroupHeaderBackgroundModifier(
-                    isActiveGroup: isActiveGroup,
-                    reduceTransparency: reduceTransparency,
-                    groupColor: group.color
-                ))
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier(AccessibilityID.Sidebar.group(group.id))
-                .highPriorityGesture(TapGesture(count: 2).onEnded { isEditing = true })
-                .onAssumeInsideHover($isHoveringHeader)
-            }
-
-            // Tabs in this group (only show if not collapsed)
-            if !group.isCollapsed {
-                VStack(spacing: 0) {
-                    ForEach(Array(group.tabs.enumerated()), id: \.element.id) { index, tab in
-                        TabRowItemView(
-                            tab: tab,
-                            isActive: tab.id == activeTabID && isActiveGroup,
-                            onSelected: { onTabSelected?(tab.id) },
-                            onClose: { onCloseTab?(tab.id) },
-                            onTabRenamed: onTabRenamed
-                        )
-                        .background(
-                            GeometryReader { geo in
-                                Color.clear.preference(
-                                    key: TabFramePreferenceKey.self,
-                                    value: [tab.id: geo.frame(in: .named("sidebarGroup-\(group.id.uuidString)"))]
-                                )
-                            }
-                        )
-                        .offset(y: reorderState.draggedTabID == tab.id ? reorderState.dragOffset : 0)
-                        .zIndex(reorderState.draggedTabID == tab.id ? 1 : 0)
-                        .scaleEffect(reorderState.draggedTabID == tab.id ? 1.03 : 1.0)
-                        .shadow(color: .black.opacity(reorderState.draggedTabID == tab.id ? 0.15 : 0), radius: 8)
-                        .gesture(tabDragGesture(index: index, tab: tab))
-                        .accessibilityValue(AccessibilityID.Sidebar.tabAtIndex(group.id, index))
-                    }
-                }
-                .coordinateSpace(name: "sidebarGroup-\(group.id.uuidString)")
-                .onPreferenceChange(TabFramePreferenceKey.self) { frames in
-                    reorderState.tabFrames = frames
-                }
-                .overlay {
-                    if let slot = reorderState.insertionSlot,
-                       reorderState.draggedTabID != nil {
-                        insertionIndicator(slot: slot)
-                    }
-                }
-            }
-        }
-        .padding(.bottom, 4)
-        .onChange(of: group.tabs.map(\.id)) { _, _ in
-            reorderState.reset()
-        }
-    }
-
-    // MARK: - Drag Gesture
-
-    private func tabDragGesture(index: Int, tab: Tab) -> some Gesture {
-        DragGesture(minimumDistance: 5)
-            .onChanged { value in
-                guard group.tabs.count > 1, onMoveTab != nil else { return }
-                if reorderState.draggedTabID == nil {
-                    reorderState.draggedTabID = tab.id
-                    reorderState.draggedTabIndex = index
-                }
-                reorderState.dragOffset = value.translation.height
-                if let frame = reorderState.tabFrames[tab.id] {
-                    let midpoint = frame.midY + value.translation.height
-                    reorderState.updateInsertionSlot(dragMidpoint: midpoint, axis: .vertical)
-                }
-            }
-            .onEnded { _ in
-                let moveFrom = reorderState.draggedTabIndex
-                let moveTo = moveFrom.flatMap { reorderState.destinationIndex(fromIndex: $0, tabCount: group.tabs.count) }
-                withAnimation(.easeOut(duration: 0.15)) {
-                    reorderState.reset()
-                }
-                if let from = moveFrom, let to = moveTo {
-                    onMoveTab?(group.id, from, to)
-                }
-            }
-    }
-
-    // MARK: - Insertion Indicator
-
-    private func insertionIndicator(slot: Int) -> some View {
-        GeometryReader { geo in
-            let sortedFrames = reorderState.tabFrames.values.sorted { $0.minY < $1.minY }
-            let yPos: CGFloat = {
-                if slot == 0 {
-                    return sortedFrames.first?.minY ?? 0
-                } else if slot >= sortedFrames.count {
-                    return sortedFrames.last?.maxY ?? geo.size.height
-                } else {
-                    let prev = sortedFrames[slot - 1]
-                    let next = sortedFrames[slot]
-                    return (prev.maxY + next.minY) / 2
-                }
-            }()
-            RoundedRectangle(cornerRadius: 1)
-                .fill(Color.accentColor.opacity(0.8))
-                .frame(width: geo.size.width - 28, height: 2)
-                .position(x: geo.size.width / 2, y: yPos)
-        }
-        .allowsHitTesting(false)
-    }
-}
-
-private struct GroupHeaderBackgroundModifier: ViewModifier {
-    let isActiveGroup: Bool
-    let reduceTransparency: Bool
-    let groupColor: TabGroupColor
-
-    func body(content: Content) -> some View {
-        if reduceTransparency {
-            content
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(
-                            groupColor.color.opacity(isActiveGroup ? 0.18 : 0.08)
-                        )
-                )
-        } else if isActiveGroup {
-            content
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    groupColor.color.opacity(0.16),
-                                    Color.gray.opacity(0.10),
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                )
-                .glassEffect(
-                    .clear.tint(groupColor.color.opacity(0.12)).interactive(),
-                    in: .rect(cornerRadius: 12)
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.white.opacity(0.22), lineWidth: 1)
-                        .allowsHitTesting(false)
-                }
-        } else {
-            content
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(groupColor.color.opacity(0.08))
-                )
-        }
-    }
-}
+// MARK: - Tab Row Item
 
 private struct TabRowItemView: View {
     let tab: Tab
@@ -738,7 +332,7 @@ private struct TabRowItemView: View {
             .accessibilityIdentifier(AccessibilityID.Sidebar.tabCloseButton(tab.id))
         }
         .contentShape(Rectangle())
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .modifier(TabChromeModifier(
             isActive: isActive,

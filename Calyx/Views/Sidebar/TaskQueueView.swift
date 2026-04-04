@@ -77,7 +77,7 @@ struct TaskQueueView: View {
             Text("No tasks queued")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-            Text("Add tasks below — they'll be sent\nto your Codex pane in order.")
+            Text("Add tasks below — they'll be sent\nto your selected AI agent pane in order.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)

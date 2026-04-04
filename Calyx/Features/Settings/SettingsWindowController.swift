@@ -7,7 +7,7 @@ private let logger = Logger(
 )
 
 @MainActor
-class SettingsWindowController: NSWindowController, NSWindowDelegate {
+class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
 
     static let shared = SettingsWindowController()
 
@@ -31,6 +31,9 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let mouseHideCheckbox = NSButton(checkboxWithTitle: "Enabled", target: nil, action: nil)
     private let focusFollowsMouseCheckbox = NSButton(checkboxWithTitle: "Enabled", target: nil, action: nil)
     private let cursorStylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let ollamaEndpointField = NSTextField()
+    private let ollamaModelField = NSTextField()
+    private let ollamaTestButton = NSButton(title: "Test Connection", target: nil, action: nil)
 
     // MARK: - Terminal overrides persistence
     private var terminalOverrides: [String: String] {
@@ -285,6 +288,39 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let resetButton = NSButton(title: "Reset to Ghostty Defaults", target: self, action: #selector(resetTerminalSettings(_:)))
         resetButton.bezelStyle = .rounded
         root.addArrangedSubview(resetButton)
+
+        let ollamaDivider = NSBox()
+        ollamaDivider.boxType = .separator
+        ollamaDivider.translatesAutoresizingMaskIntoConstraints = false
+        ollamaDivider.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        root.addArrangedSubview(ollamaDivider)
+
+        let ollamaTitle = NSTextField(labelWithString: "Ollama Assistant")
+        ollamaTitle.font = .systemFont(ofSize: 20, weight: .semibold)
+        root.addArrangedSubview(ollamaTitle)
+
+        let ollamaSubtitle = NSTextField(wrappingLabelWithString: "Used by the compose overlay in Ollama mode and as the default Ollama agent launch command. The endpoint can be local or remote.")
+        ollamaSubtitle.textColor = .secondaryLabelColor
+        ollamaSubtitle.font = .systemFont(ofSize: 13)
+        root.addArrangedSubview(ollamaSubtitle)
+
+        ollamaEndpointField.placeholderString = OllamaCommandService.defaultEndpoint
+        ollamaEndpointField.delegate = self
+        ollamaEndpointField.target = self
+        ollamaEndpointField.action = #selector(ollamaEndpointDidCommit(_:))
+        root.addArrangedSubview(row(label: "Endpoint", control: ollamaEndpointField))
+
+        ollamaModelField.placeholderString = OllamaCommandService.defaultModel
+        ollamaModelField.delegate = self
+        ollamaModelField.target = self
+        ollamaModelField.action = #selector(ollamaModelDidCommit(_:))
+        root.addArrangedSubview(row(label: "Model", control: ollamaModelField))
+
+        ollamaTestButton.bezelStyle = .rounded
+        ollamaTestButton.target = self
+        ollamaTestButton.action = #selector(testOllamaConnection(_:))
+        root.addArrangedSubview(row(label: "", control: ollamaTestButton))
+
         // --- Scrolling Section ---
         let scrollingDivider = NSBox()
         scrollingDivider.boxType = .separator
@@ -332,6 +368,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         loadPresetIntoUI()
         loadTerminalSettingsIntoUI()
+        loadOllamaSettingsIntoUI()
     }
 
     /// Checks for unsaved changes before app termination.
@@ -370,6 +407,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
     func showSettings() {
         loadPresetIntoUI()
         loadTerminalSettingsIntoUI()
+        loadOllamaSettingsIntoUI()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
     }
@@ -497,6 +535,70 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         terminalOverrides = [:]
         GhosttyAppController.shared.reloadConfig()
         loadTerminalSettingsIntoUI()
+    }
+
+    private func loadOllamaSettingsIntoUI() {
+        ollamaEndpointField.stringValue = UserDefaults.standard.string(forKey: AppStorageKeys.ollamaEndpoint)
+            ?? OllamaCommandService.defaultEndpoint
+        ollamaModelField.stringValue = UserDefaults.standard.string(forKey: AppStorageKeys.ollamaModel)
+            ?? OllamaCommandService.defaultModel
+    }
+
+    @objc private func ollamaEndpointDidCommit(_ sender: Any?) {
+        let trimmed = ollamaEndpointField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        UserDefaults.standard.set(trimmed.isEmpty ? OllamaCommandService.defaultEndpoint : trimmed, forKey: AppStorageKeys.ollamaEndpoint)
+        loadOllamaSettingsIntoUI()
+    }
+
+    @objc private func ollamaModelDidCommit(_ sender: Any?) {
+        let trimmed = ollamaModelField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        UserDefaults.standard.set(trimmed.isEmpty ? OllamaCommandService.defaultModel : trimmed, forKey: AppStorageKeys.ollamaModel)
+        loadOllamaSettingsIntoUI()
+    }
+
+    @objc private func testOllamaConnection(_ sender: Any?) {
+        let endpoint = ollamaEndpointField.stringValue
+        let model = ollamaModelField.stringValue
+
+        ollamaTestButton.isEnabled = false
+        ollamaTestButton.title = "Testing..."
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.ollamaTestButton.isEnabled = true
+                self.ollamaTestButton.title = "Test Connection"
+            }
+
+            let alert = NSAlert()
+            do {
+                let message = try await OllamaCommandService.testConnection(endpoint: endpoint, model: model)
+                alert.alertStyle = .informational
+                alert.messageText = "Ollama connection succeeded"
+                alert.informativeText = message
+            } catch {
+                alert.alertStyle = .warning
+                alert.messageText = "Ollama connection failed"
+                alert.informativeText = error.localizedDescription
+                logger.error("Ollama connection test failed: \(error.localizedDescription)")
+            }
+            alert.addButton(withTitle: "OK")
+            if let window = self.window {
+                await alert.beginSheetModal(for: window)
+            } else {
+                alert.runModal()
+            }
+        }
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField else { return }
+
+        if field === ollamaEndpointField {
+            ollamaEndpointDidCommit(field)
+        } else if field === ollamaModelField {
+            ollamaModelDidCommit(field)
+        }
     }
 
     @objc private func openConfigFile(_ sender: Any?) {

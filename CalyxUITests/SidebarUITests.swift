@@ -27,10 +27,7 @@ final class SidebarUITests: CalyxUITestCase {
         XCTAssertTrue(waitFor(sidebar), "Sidebar should be visible again after toggle")
     }
 
-    func test_sidebarShowsGroupAndTab() {
-        let groupCount = countElements(matching: "calyx.sidebar.group.", excludingSuffix: "Button")
-        XCTAssertEqual(groupCount, 1, "Should have one group initially")
-
+    func test_sidebarShowsTab() {
         let tabCount = countElements(matching: "calyx.sidebar.tab.", excludingSuffix: ".closeButton")
         XCTAssertEqual(tabCount, 1, "Should have one tab in sidebar initially")
     }

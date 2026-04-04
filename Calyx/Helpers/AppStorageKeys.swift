@@ -11,4 +11,7 @@ enum AppStorageKeys {
     static let dailyCostBudgetEnabled = "dailyCostBudgetEnabled"
     static let dailyCostBudget = "dailyCostBudget"
     static let ghosttyTerminalOverrides = "ghosttyTerminalOverrides"
+    static let ollamaEndpoint = "ollamaEndpoint"
+    static let ollamaModel = "ollamaModel"
+    static let composeAssistantMode = "composeAssistantMode"
 }

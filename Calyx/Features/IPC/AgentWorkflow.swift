@@ -10,6 +10,7 @@ struct WorkflowLaunchParams: Sendable {
     let autoStart: Bool
     let sessionName: String
     let initialTask: String
+    let runtime: AgentRuntimeConfiguration
 }
 
 struct AgentRole: Identifiable, Sendable {
@@ -43,7 +44,13 @@ struct AgentWorkflow: Identifiable, Sendable {
 
     /// Generates the startup context message for a given role in a session.
     /// Shared by CalyxWindowController (terminal injection) and IPCAgentsView (MCP send_message).
-    static func rolePrompt(roleName: String, allRoles: [String], port: Int) -> String {
+    static func rolePrompt(
+        roleName: String,
+        allRoles: [String],
+        runtime: AgentRuntimeConfiguration,
+        port: Int,
+        initialTask: String = ""
+    ) -> String {
         let teammates = allRoles.filter { $0.lowercased() != roleName.lowercased() }
         let teammatesStr = teammates.isEmpty
             ? "no other agents in this session"
@@ -61,12 +68,35 @@ struct AgentWorkflow: Identifiable, Sendable {
             roleContext = "You are the \(roleName.uppercased()) agent."
         }
 
+        let taskSuffix = initialTask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? ""
+            : "\n\nInitial task:\n\(initialTask)"
+
+        if runtime.registersWithIPC {
+            return """
+            \(roleContext) Your teammates are: \(teammatesStr). \
+            You are running inside Calyx using \(runtime.displayName). \
+            The Calyx IPC MCP server is running on port \(port) — use the calyx-ipc MCP tools to communicate with your team. \
+            Start by calling register_peer with name "\(roleName)" and role "\(roleName)", \
+            then list_peers to see who is connected, and coordinate from there.\(taskSuffix)
+            """
+        }
+
         return """
         \(roleContext) Your teammates are: \(teammatesStr). \
-        The Calyx IPC MCP server is running on port \(port) — use the calyx-ipc MCP tools to communicate with your team. \
-        Start by calling register_peer with name "\(roleName)" and role "\(roleName)", \
-        then list_peers to see who is connected, and coordinate from there.
+        You are running as an Ollama-backed/local AI agent inside Calyx via \(runtime.displayName). \
+        This runtime does not have Calyx MCP tools, so stay focused on the task in this tab and respond directly in the terminal. \
+        When you suggest commands, format them as executable shell commands.\(taskSuffix)
         """
+    }
+
+    static func rolePrompt(roleName: String, allRoles: [String], port: Int) -> String {
+        rolePrompt(
+            roleName: roleName,
+            allRoles: allRoles,
+            runtime: .default,
+            port: port
+        )
     }
 
     static let templates: [AgentWorkflow] = [

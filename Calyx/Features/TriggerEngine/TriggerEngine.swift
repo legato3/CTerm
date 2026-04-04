@@ -200,7 +200,7 @@ final class TriggerEngine {
         switch action {
         case .routeToClaude:
             let message = interpolate(rule.actionMessage.isEmpty ? defaultMessage(for: rule.triggerType, context: context) : rule.actionMessage, context: context)
-            TerminalControlBridge.shared.routeToNearestClaudePaneOrActive(text: message)
+            TerminalControlBridge.shared.routeToNearestAgentPaneOrActive(text: message)
 
         case .notify:
             let title = interpolate(rule.notifyTitle.isEmpty ? rule.name : rule.notifyTitle, context: context)

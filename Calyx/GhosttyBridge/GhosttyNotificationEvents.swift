@@ -228,6 +228,7 @@ struct CalyxIPCLaunchWorkflowEvent {
     let autoStart: Bool
     let sessionName: String
     let initialTask: String
+    let runtime: AgentRuntimeConfiguration
 
     static func from(_ notification: Notification) -> Self? {
         guard let roleNames = notification.userInfo?["roleNames"] as? [String],
@@ -237,7 +238,8 @@ struct CalyxIPCLaunchWorkflowEvent {
             roleNames: roleNames,
             autoStart: (notification.userInfo?["autoStart"] as? Bool) ?? false,
             sessionName: (notification.userInfo?["sessionName"] as? String) ?? "",
-            initialTask: (notification.userInfo?["initialTask"] as? String) ?? ""
+            initialTask: (notification.userInfo?["initialTask"] as? String) ?? "",
+            runtime: AgentRuntimeConfiguration.from(userInfo: notification.userInfo)
         )
     }
 }

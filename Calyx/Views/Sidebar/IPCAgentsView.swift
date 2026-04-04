@@ -81,15 +81,17 @@ struct IPCAgentsView: View {
                 selectedWorkflow: $selectedWorkflow,
                 onLaunch: { params in
                     showWorkflowSheet = false
+                    var userInfo: [String: Any] = [
+                        "roleNames": params.workflow.roles.map(\.name),
+                        "autoStart": params.autoStart,
+                        "sessionName": params.sessionName,
+                        "initialTask": params.initialTask,
+                    ]
+                    params.runtime.notificationUserInfo.forEach { userInfo[$0.key] = $0.value }
                     NotificationCenter.default.post(
                         name: .calyxIPCLaunchWorkflow,
                         object: nil,
-                        userInfo: [
-                            "roleNames": params.workflow.roles.map(\.name),
-                            "autoStart": params.autoStart,
-                            "sessionName": params.sessionName,
-                            "initialTask": params.initialTask,
-                        ]
+                        userInfo: userInfo
                     )
                 },
                 onCancel: { showWorkflowSheet = false }
@@ -167,7 +169,7 @@ struct IPCAgentsView: View {
             }
 
             if visiblePeers.isEmpty {
-                Text("No agents connected yet.\nStart Claude Code in a terminal to connect.")
+                Text("No agents connected yet.\nStart an MCP-capable agent in a terminal to connect.")
                     .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.leading)
@@ -617,6 +619,8 @@ struct LaunchWorkflowSheet: View {
     @State private var autoStart = false
     @State private var sessionName = ""
     @State private var initialTask = ""
+    @State private var runtimePreset: AgentRuntimePreset = .claudeCode
+    @State private var launchCommand = AgentRuntimeConfiguration.default.launchCommand
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -681,11 +685,49 @@ struct LaunchWorkflowSheet: View {
 
                 Divider()
 
+                HStack {
+                    Text("Runtime")
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 100, alignment: .leading)
+                    Picker("", selection: $runtimePreset) {
+                        ForEach(AgentRuntimePreset.allCases) { preset in
+                            Text(preset.displayName).tag(preset)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .font(.system(size: 12, design: .rounded))
+                }
+
+                HStack {
+                    Text("Launch command")
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 100, alignment: .leading)
+                    TextField(
+                        runtimePreset == .ollama
+                            ? OllamaCommandService.currentLaunchCommand()
+                            : "Enter the command to launch this agent",
+                        text: $launchCommand
+                    )
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                }
+
+                if !runtimePreset.defaultRegistersWithIPC {
+                    Text("Ollama or custom runtimes can point at local or remote backends through the launch command. They launch directly in the tab and do not auto-register as Calyx IPC peers.")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+
+                Divider()
+
                 Toggle(isOn: $autoStart) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Auto-start Claude with role instructions")
+                        Text("Auto-start agent with role instructions")
                             .font(.system(size: 12, weight: .medium, design: .rounded))
-                        Text("Runs \u{2018}claude\u{2019} in each tab and sends each agent its role, teammates, and IPC server details.")
+                        Text("Runs the selected launch command in each tab and then sends startup context once the shell is ready.")
                             .font(.system(size: 11, design: .rounded))
                             .foregroundStyle(.secondary)
                     }
@@ -704,7 +746,16 @@ struct LaunchWorkflowSheet: View {
                         workflow: selectedWorkflow,
                         autoStart: autoStart,
                         sessionName: sessionName.trimmingCharacters(in: .whitespacesAndNewlines),
-                        initialTask: initialTask.trimmingCharacters(in: .whitespacesAndNewlines)
+                        initialTask: initialTask.trimmingCharacters(in: .whitespacesAndNewlines),
+                        runtime: AgentRuntimeConfiguration(
+                            preset: runtimePreset,
+                            displayName: runtimePreset.displayName,
+                            launchCommand: launchCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? runtimePreset.defaultLaunchCommand
+                                : launchCommand.trimmingCharacters(in: .whitespacesAndNewlines),
+                            registersWithIPC: runtimePreset.defaultRegistersWithIPC,
+                            inputStyle: runtimePreset.defaultInputStyle
+                        )
                     ))
                 }
                 .buttonStyle(.borderedProminent)
@@ -713,6 +764,9 @@ struct LaunchWorkflowSheet: View {
         }
         .padding(24)
         .frame(width: 420)
+        .onChange(of: runtimePreset) { _, newPreset in
+            launchCommand = AgentRuntimeConfiguration(preset: newPreset).launchCommand
+        }
     }
 }
 
@@ -742,10 +796,10 @@ private struct ManualConnectSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Connect an Agent Manually")
+            Text("Connect an MCP Agent Manually")
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
 
-            Text("Run this in any terminal session where Claude Code is running:")
+            Text("Run this in a terminal session where Claude Code is running:")
                 .font(.system(size: 12, design: .rounded))
                 .foregroundStyle(.secondary)
 

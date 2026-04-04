@@ -689,11 +689,21 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
         windowActions.onDiscardAllReviews = { [weak self] in self?.reviewController.discardAllDiffReviews() }
         windowActions.onComposeOverlaySend = { [weak self] text in self?.sendComposeText(text) ?? false }
         windowActions.onDismissComposeOverlay = { [weak self] in self?.dismissComposeOverlay() }
+        windowActions.onApplyComposeAssistantEntry = { [weak self] id, run in
+            self?.applyComposeAssistantEntry(id: id, run: run) ?? false
+        }
+        windowActions.onExplainComposeAssistantEntry = { [weak self] id in
+            self?.explainComposeAssistantEntry(id: id)
+        }
+        windowActions.onFixComposeAssistantEntry = { [weak self] id in
+            self?.fixComposeAssistantEntry(id: id)
+        }
         windowActions.onToggleComposeBroadcast = { [weak self] in
             guard let self else { return }
             composeController.broadcastEnabled.toggle()
             windowActions.composeBroadcastEnabled = composeController.broadcastEnabled
         }
+        windowActions.composeAssistantState = composeController.assistantState
         windowActions.onTabRenamed = { [weak self] in self?.requestSave() }
         windowActions.onRouteShellError = { [weak self] tabID in self?.routeShellError(fromTabID: tabID) }
         windowActions.onDismissShellError = { [weak self] tabID in self?.dismissShellError(fromTabID: tabID) }
@@ -727,7 +737,7 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             splitContainerView: splitContainerView ?? SplitContainerView(registry: SurfaceRegistry()),
             viewState: windowViewState,
             sidebarMode: Binding(
-                get: { [weak self] in self?.windowSession.sidebarMode ?? .tabs },
+                get: { [weak self] in self?.windowSession.sidebarMode },
                 set: { [weak self] in
                     self?.windowSession.sidebarMode = $0
                     if $0 == .changes {
@@ -978,6 +988,32 @@ class CalyxWindowController: NSWindowController, NSWindowDelegate {
             activeTab: activeTab,
             focusedController: focusedController,
             sendEnterKey: { [weak self] controller in self?.sendEnterKey(to: controller) }
+        )
+    }
+
+    private func applyComposeAssistantEntry(id: UUID, run: Bool) -> Bool {
+        composeController.applyAssistantEntry(
+            id: id,
+            run: run,
+            activeTab: activeTab,
+            focusedController: focusedController,
+            sendEnterKey: { [weak self] controller in self?.sendEnterKey(to: controller) }
+        )
+    }
+
+    private func explainComposeAssistantEntry(id: UUID) {
+        composeController.explainEntry(
+            id: id,
+            activeTab: activeTab,
+            focusedController: focusedController
+        )
+    }
+
+    private func fixComposeAssistantEntry(id: UUID) {
+        composeController.fixEntry(
+            id: id,
+            activeTab: activeTab,
+            focusedController: focusedController
         )
     }
 
