@@ -12,6 +12,9 @@ struct ComposeOverlayContainerView: NSViewRepresentable {
     var onDismiss: (() -> Void)?
     var onCmdReturn: (() -> Void)?
     var placeholderText: String = "Type here..."
+    /// When provided, registers a focus callback on WindowActions so the
+    /// FocusManager can redirect keyboard focus here (Warp-mode single input).
+    var actions: WindowActions?
 
     func makeNSView(context: Context) -> ComposeOverlayView {
         let view = ComposeOverlayView()
@@ -23,6 +26,10 @@ struct ComposeOverlayContainerView: NSViewRepresentable {
         view.onDismiss = onDismiss
         view.onCmdReturn = onCmdReturn
         view.placeholderText = placeholderText
+        // Register focus callback so FocusManager can redirect here.
+        actions?.onFocusComposeTextField = { [weak view] in
+            view?.focusTextView()
+        }
         return view
     }
 
@@ -36,6 +43,10 @@ struct ComposeOverlayContainerView: NSViewRepresentable {
         nsView.onDismiss = onDismiss
         nsView.onCmdReturn = onCmdReturn
         nsView.placeholderText = placeholderText
+        // Keep focus callback up to date.
+        actions?.onFocusComposeTextField = { [weak nsView] in
+            nsView?.focusTextView()
+        }
     }
 
     func makeCoordinator() -> Coordinator {

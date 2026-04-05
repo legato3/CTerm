@@ -18,10 +18,20 @@ final class FocusManager {
     /// Owner should use this to clear any focus-lost indicator.
     var onFocusRestored: (() -> Void)?
 
+    /// When set, called instead of focusing the terminal surface.
+    /// Used in Warp-mode to keep focus in the compose bar.
+    var focusComposeOverlay: (() -> Void)?
+
     // MARK: - Public API
 
     /// Schedules an async focus-restore cycle. Call after every tab switch or split.
     func restoreFocus(window: NSWindow?, tab: Tab?, splitContainerView: SplitContainerView?) {
+        // In Warp mode, keep focus in the compose bar.
+        if let focusComposeOverlay {
+            focusComposeOverlay()
+            return
+        }
+
         focusRequestID &+= 1
         let requestID = focusRequestID
 
@@ -38,6 +48,12 @@ final class FocusManager {
     /// Synchronously focuses the active split view. Returns true if focus was set.
     @discardableResult
     func focusImmediately(window: NSWindow?, tab: Tab?) -> Bool {
+        // In Warp mode, keep focus in the compose bar.
+        if let focusComposeOverlay {
+            focusComposeOverlay()
+            return true
+        }
+
         guard let tab,
               let focusedID = tab.splitTree.focusedLeafID,
               let focusView = tab.registry.view(for: focusedID) else {

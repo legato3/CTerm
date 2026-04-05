@@ -378,6 +378,8 @@ private struct ComposeCommandBarView: View {
     var nextCommandSuggestion: String? = nil
     var attachedBlockIDs: Set<UUID> = []
     var onAcceptSuggestion: ((ActiveAISuggestion) -> Void)? = nil
+
+    @Environment(WindowActions.self) private var windowActions
     var onDismissSuggestions: (() -> Void)? = nil
     var onAcceptNextCommand: (() -> String?)? = nil
     var onAttachBlock: ((UUID) -> Void)? = nil
@@ -443,7 +445,8 @@ private struct ComposeCommandBarView: View {
                                 _ = onSend?(text)
                             }
                         },
-                        placeholderText: assistant.placeholderText
+                        placeholderText: assistant.placeholderText,
+                        actions: windowActions
                     )
                     .frame(minHeight: 36, maxHeight: 96)
 

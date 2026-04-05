@@ -112,9 +112,15 @@ class SurfaceView: NSView {
     /// Selected text captured at right-click time, used by context bridge menu actions.
     private var contextBridgeText: String?
 
+    // MARK: - Warp Input Mode
+
+    /// When true, the terminal surface refuses first-responder so all keyboard
+    /// input flows through the bottom compose bar (Warp-style single input).
+    var warpInputMode: Bool = false
+
     // MARK: - NSView Overrides
 
-    override var acceptsFirstResponder: Bool { true }
+    override var acceptsFirstResponder: Bool { !warpInputMode }
     override var wantsUpdateLayer: Bool { true }
     override var isOpaque: Bool { false }
 

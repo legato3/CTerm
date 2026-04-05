@@ -51,6 +51,7 @@ final class SurfaceRegistry {
         }
 
         surfaceView.surfaceController = controller
+        surfaceView.warpInputMode = true
         let id = controller.id
 
         entries[id] = RegistryEntry(

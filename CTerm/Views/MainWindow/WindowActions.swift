@@ -74,4 +74,6 @@ final class WindowActions {
     var activeAISuggestions: [ActiveAISuggestion] = []
     var nextCommandSuggestion: String? = nil
     var attachedBlockIDs: Set<UUID> = []
+    /// Called to programmatically focus the compose text field (Warp-mode).
+    var onFocusComposeTextField: (() -> Void)?
 }

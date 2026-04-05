@@ -198,6 +198,10 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
         focusManager.onFocusRestored = { [weak self] in
             self?.splitContainerView?.focusLostIndicator = false
         }
+        // Warp-mode: always redirect keyboard focus to the compose bar.
+        focusManager.focusComposeOverlay = { [weak self] in
+            self?.windowActions.onFocusComposeTextField?()
+        }
         browserManager.onSaveRequested = { [weak self] in
             self?.requestSave()
         }
