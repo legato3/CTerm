@@ -35,6 +35,16 @@ struct ActionDescriptor: Sendable, Codable {
     let rollback: String?         // e.g. "git reflog to find previous commit"
 }
 
+/// When present, the approval sheet renders a secure text field (password
+/// entry) in place of the standard descriptor rows. The entered value is
+/// passed directly to the approval resume callback and is never logged,
+/// persisted, or stashed on the session.
+struct ApprovalSecureInputRequest: Sendable {
+    let fieldLabel: String        // e.g. "Password"
+    let placeholder: String       // e.g. "Enter password for sudo"
+    let matchedLine: String       // e.g. "[sudo] password for chris:"
+}
+
 struct ApprovalContext: Sendable {
     let stepID: UUID?             // nil = whole-plan approval
     let riskScore: Int            // 0-100, from RiskScorer
@@ -42,6 +52,10 @@ struct ApprovalContext: Sendable {
     let action: ActionDescriptor
     let grantKey: GrantKey?
     let suggestedScope: ApprovalScope
+    /// Optional secure-input override. When non-nil the sheet renders a
+    /// SecureField and the entered text flows back through the resume
+    /// callback. Defaults to nil so existing approval paths are unchanged.
+    let secureInputRequest: ApprovalSecureInputRequest?
     var decision: ApprovalAnswer?
     var grantedScope: ApprovalScope?
 
@@ -51,7 +65,8 @@ struct ApprovalContext: Sendable {
         riskTier: RiskTier,
         action: ActionDescriptor,
         grantKey: GrantKey? = nil,
-        suggestedScope: ApprovalScope = .once
+        suggestedScope: ApprovalScope = .once,
+        secureInputRequest: ApprovalSecureInputRequest? = nil
     ) {
         self.stepID = stepID
         self.riskScore = riskScore
@@ -59,6 +74,7 @@ struct ApprovalContext: Sendable {
         self.action = action
         self.grantKey = grantKey
         self.suggestedScope = suggestedScope
+        self.secureInputRequest = secureInputRequest
         self.decision = nil
         self.grantedScope = nil
     }

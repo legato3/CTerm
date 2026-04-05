@@ -21,8 +21,12 @@ struct ApprovalSheetHost: ViewModifier {
                     ApprovalSheet(
                         context: context,
                         hardStop: presenter.pendingHardStop,
-                        onResolve: { answer, scope in
-                            presenter.resolve(answer: answer, scope: scope)
+                        onResolve: { answer, scope, enteredSecureText in
+                            presenter.resolve(
+                                answer: answer,
+                                scope: scope,
+                                enteredSecureText: enteredSecureText
+                            )
                         },
                         onDismiss: {
                             presenter.dismiss()

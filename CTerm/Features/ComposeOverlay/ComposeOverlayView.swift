@@ -44,6 +44,9 @@ class ComposeOverlayView: NSView {
     var onCmdReturn: (() -> Void)?
     /// Called when Tab is pressed to accept the latest suggestion when available.
     var onTabComplete: (() -> Bool)?
+    /// When set, arrow-up/down, Enter, and Esc are intercepted while the
+    /// `@block` mention popover is visible and routed through the coordinator.
+    var mentionCoordinator: BlockMentionPopoverCoordinator?
     var placeholderText: String = "Type here..." {
         didSet { placeholderLabel.stringValue = placeholderText }
     }
@@ -156,8 +159,13 @@ class ComposeOverlayView: NSView {
     // MARK: - Key Handling (overrides on the view itself for when textView doesn't handle)
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        // Escape dismiss
+        // Escape dismiss — but defer to the mention popover when it's up so
+        // Esc dismisses the popover, not the whole compose overlay.
         if event.keyCode == 53 {
+            if let coord = mentionCoordinator, coord.isShowing {
+                coord.onDismiss?()
+                return true
+            }
             onDismiss?()
             return true
         }
@@ -220,6 +228,27 @@ extension ComposeOverlayView: NSTextViewDelegate {
     }
 
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        // Intercept navigation keys for the @block mention popover first.
+        if let coord = mentionCoordinator, coord.isShowing {
+            switch commandSelector {
+            case #selector(NSResponder.moveDown(_:)):
+                coord.moveDown()
+                return true
+            case #selector(NSResponder.moveUp(_:)):
+                coord.moveUp()
+                return true
+            case #selector(NSResponder.insertNewline(_:)),
+                 #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+                coord.onSelect?(coord.selectedIndex)
+                return true
+            case #selector(NSResponder.cancelOperation(_:)):
+                coord.onDismiss?()
+                return true
+            default:
+                break
+            }
+        }
+
         switch commandSelector {
         case #selector(NSResponder.insertNewline(_:)):
             if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {

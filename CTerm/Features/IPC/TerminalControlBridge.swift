@@ -95,6 +95,13 @@ protocol TerminalControl: AnyObject {
     /// Build and return the current workspace state.
     func getWorkspaceState() -> WorkspaceStateResult
 
+    /// Read the full visible viewport text of a pane.
+    /// - Parameters:
+    ///   - tabID: UUID of the target tab. Nil uses the active tab.
+    ///   - paneID: UUID of the target pane. Nil uses the focused pane.
+    /// - Returns: Viewport string, or nil if the pane/surface cannot be read.
+    func readViewportText(tabID: UUID?, paneID: UUID?) -> String?
+
     /// Return the currently selected text in a pane.
     /// - Parameters:
     ///   - tabID: UUID of the target tab. Nil uses the active tab.

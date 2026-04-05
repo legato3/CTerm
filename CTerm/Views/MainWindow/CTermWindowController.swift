@@ -1296,28 +1296,31 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
                 tab.beginCommandBlock(
                     command: ShellTitleParser.extractCommand(event.title),
                     source: .shell,
-                    surfaceID: surfaceID
+                    surfaceID: surfaceID,
+                    cwd: tab.pwd
                 )
             } else if let running = tab.commandBlocks.first(where: {
                 $0.status == .running && $0.surfaceID == surfaceID
             }), running.command == nil || running.command?.isEmpty == true {
                 // Block exists but has no command text yet — fill it in.
-                if let idx = tab.commandBlocks.firstIndex(where: { $0.id == running.id }) {
-                    var updated = tab.commandBlocks[idx]
-                    updated = TerminalCommandBlock(
-                        id: updated.id,
-                        source: updated.source,
-                        surfaceID: updated.surfaceID,
-                        command: ShellTitleParser.extractCommand(event.title),
-                        startedAt: updated.startedAt,
-                        finishedAt: updated.finishedAt,
-                        status: updated.status,
-                        outputSnippet: updated.outputSnippet,
-                        errorSnippet: updated.errorSnippet,
-                        exitCode: updated.exitCode,
-                        durationNanoseconds: updated.durationNanoseconds
+                let newCommand = ShellTitleParser.extractCommand(event.title)
+                tab.blockStore.update(id: running.id) { block in
+                    // command is `let`; replace the whole block preserving id/timing.
+                    let replacement = TerminalCommandBlock(
+                        id: block.id,
+                        source: block.source,
+                        surfaceID: block.surfaceID,
+                        command: newCommand,
+                        startedAt: block.startedAt,
+                        finishedAt: block.finishedAt,
+                        status: block.status,
+                        outputSnippet: block.outputSnippet,
+                        errorSnippet: block.errorSnippet,
+                        exitCode: block.exitCode,
+                        durationNanoseconds: block.durationNanoseconds,
+                        cwd: block.cwd
                     )
-                    tab.commandBlocks[idx] = updated
+                    block = replacement
                 }
             }
         }
@@ -2216,6 +2219,27 @@ extension CTermWindowController: TerminalControl {
     }
 
     // MARK: get_pane_output
+
+    func readViewportText(tabID: UUID?, paneID: UUID?) -> String? {
+        let targetTab: Tab?
+        if let tabID {
+            targetTab = windowSession.groups.flatMap(\.tabs).first { $0.id == tabID }
+        } else {
+            targetTab = activeTab
+        }
+        guard let tab = targetTab else { return nil }
+
+        let leafID: UUID?
+        if let paneID {
+            leafID = tab.splitTree.allLeafIDs().contains(paneID) ? paneID : nil
+        } else {
+            leafID = tab.splitTree.focusedLeafID
+        }
+        guard let resolvedID = leafID,
+              let controller = tab.registry.controller(for: resolvedID),
+              let surface = controller.surface else { return nil }
+        return GhosttyFFI.surfaceReadViewportText(surface)
+    }
 
     func getPaneOutput(tabID: UUID?, paneID: UUID?) -> String? {
         let targetTab: Tab?

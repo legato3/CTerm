@@ -28,7 +28,7 @@ struct AgentSessionRegressionTests {
         )
 
         var resolvedAnswer: ApprovalAnswer?
-        session.onApprovalResolved = { answer in
+        session.onApprovalResolved = { answer, _ in
             resolvedAnswer = answer
         }
 

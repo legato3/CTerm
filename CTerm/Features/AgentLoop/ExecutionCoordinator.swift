@@ -35,6 +35,13 @@ final class ExecutionCoordinator {
     private var replanAttempts: Int = 0
     private static let maxReplanAttempts = 3
 
+    /// Active interactive-prompt watcher for the running local-shell step.
+    /// Released on step completion.
+    private var promptWatcher: InteractivePromptWatcher?
+    /// Set while an interactive-prompt approval sheet is on screen so we
+    /// don't re-fire while the user is deciding.
+    private var interactivePromptInFlight: Bool = false
+
     /// Callback when all steps are done (triggers summarization).
     var onAllStepsCompleted: (() -> Void)?
 
@@ -75,12 +82,14 @@ final class ExecutionCoordinator {
     func stop() {
         executionTask?.cancel()
         executionTask = nil
+        stopPromptWatcher()
         planStore.stopPlan()
         session.transition(to: .completed)
     }
 
     /// Called when a command block finishes in the terminal.
     func handleCommandFinished(exitCode: Int, output: String?) {
+        stopPromptWatcher()
         guard let stepIndex = currentRunningStepIndex() else { return }
 
         session.transition(to: .running)
@@ -332,6 +341,9 @@ final class ExecutionCoordinator {
             // Watchdog: if handleCommandFinished is never called (e.g. shell integration
             // is absent in an SSH session), unstick the loop after a timeout.
             scheduleStepWatchdog(index: index)
+            // Interactive-prompt watcher: detect y/N, passwords, press RETURN
+            // so the agent doesn't deadlock when a tool asks for stdin.
+            startPromptWatcher(for: step)
         }
     }
 
@@ -356,7 +368,7 @@ final class ExecutionCoordinator {
         // Wire resume. Executor picks up after the user answers.
         // Read session.plan inside the closure so we always operate on the
         // current plan — not a stale capture from before a potential replan.
-        session.onApprovalResolved = { [weak self] answer in
+        session.onApprovalResolved = { [weak self] answer, _ in
             guard let self else { return }
             self.session.onApprovalResolved = nil
             guard let currentPlan = self.session.plan, index < currentPlan.steps.count else {
@@ -700,6 +712,156 @@ final class ExecutionCoordinator {
 
     private func currentRunningStepIndex() -> Int? {
         session.plan?.steps.firstIndex(where: { $0.status == .running })
+    }
+
+    // MARK: - Interactive Prompt Watcher
+
+    private func startPromptWatcher(for step: AgentPlanStep) {
+        stopPromptWatcher()
+        let tabID = session.tabID
+        let stepID = step.id
+        let watcher = InteractivePromptWatcher(
+            stepID: stepID,
+            viewportProvider: { @MainActor in
+                TerminalControlBridge.shared.delegate?.readViewportText(tabID: tabID, paneID: nil)
+            },
+            onMatch: { [weak self] pattern, line in
+                await self?.handlePromptMatch(pattern: pattern, line: line, stepID: stepID)
+            }
+        )
+        promptWatcher = watcher
+        watcher.start()
+    }
+
+    private func stopPromptWatcher() {
+        promptWatcher?.stop()
+        promptWatcher = nil
+        interactivePromptInFlight = false
+    }
+
+    private func handlePromptMatch(
+        pattern: InteractivePromptWatcher.Pattern,
+        line: String,
+        stepID: UUID
+    ) async {
+        // Ignore if the step has moved on.
+        guard let plan = session.plan,
+              plan.steps.contains(where: { $0.id == stepID && $0.status == .running })
+        else { return }
+
+        // Don't stack approval sheets.
+        if interactivePromptInFlight { return }
+        interactivePromptInFlight = true
+
+        let pwd = TerminalControlBridge.shared.delegate?.activeTabPwd
+        let gitBranch = TerminalControlBridge.shared.delegate?.activeTabGitBranch
+
+        // Synthesize an assessment for grant-store matching.
+        let assessment = RiskAssessment(
+            score: pattern.isSensitive ? 55 : 15,
+            factors: [
+                RiskFactor(
+                    kind: .unknownCommand,
+                    weight: pattern.isSensitive ? 55 : 15,
+                    reason: "Interactive prompt: \(pattern.displayLabel)"
+                )
+            ],
+            command: line,
+            category: .interactivePrompt
+        )
+        let tier: RiskTier = pattern.isSensitive ? .high : .low
+        let grantKey = GrantKey(
+            category: .interactivePrompt,
+            riskTier: tier,
+            commandPrefix: pattern.id
+        )
+
+        let descriptor = ActionDescriptor(
+            what: "Respond to '\(pattern.displayLabel)'",
+            why: "Command is waiting for input: `\(line)`",
+            impact: "Will send text to the running terminal",
+            rollback: "You can Ctrl+C to cancel the command"
+        )
+
+        // Sensitive prompts (passwords, passphrases) get the inline secure
+        // input sheet so the user never has to type into the terminal.
+        let secureRequest: ApprovalSecureInputRequest? = pattern.isSensitive
+            ? ApprovalSecureInputRequest(
+                fieldLabel: pattern.displayLabel,
+                placeholder: "Password will be sent to the terminal",
+                matchedLine: line
+            )
+            : nil
+
+        let context = ApprovalContext(
+            stepID: session.currentStepID,
+            riskScore: assessment.score,
+            riskTier: tier,
+            action: descriptor,
+            grantKey: grantKey,
+            suggestedScope: .once,
+            secureInputRequest: secureRequest
+        )
+
+        // Passwords always present the sheet (never pre-approve). Other
+        // prompts can be pre-approved only if a default response exists.
+        let useGrantCache = !pattern.isSensitive && pattern.defaultResponse != nil
+        if useGrantCache {
+            let ctx = GrantContext(sessionID: session.id, pwd: pwd)
+            if AgentGrantStore.shared.hasGrant(key: grantKey, in: ctx) {
+                sendPromptResponse(pattern.defaultResponse)
+                interactivePromptInFlight = false
+                _ = gitBranch
+                return
+            }
+        }
+
+        // Park via ApprovalPresenter. The existing presenter observes
+        // sessions and routes requestApproval(_:) through ApprovalSheet.
+        ApprovalPresenter.shared.setRepoPath(pwd)
+        session.onApprovalResolved = { [weak self] answer, enteredSecureText in
+            guard let self else { return }
+            self.session.onApprovalResolved = nil
+            self.interactivePromptInFlight = false
+            switch answer {
+            case .approved:
+                if pattern.isSensitive {
+                    // Secure input path. Send entered text + newline directly
+                    // to the PTY, then discard. Never logged, never stored.
+                    if let text = enteredSecureText, !text.isEmpty {
+                        self.sendPromptResponse(text + "\n")
+                        // Handled inline — no need to keep the 30s block.
+                        self.promptWatcher?.clearSuppression()
+                    } else {
+                        // Empty approved input treated as cancel.
+                        self.sendPromptResponse("\u{0003}")
+                    }
+                } else if let def = pattern.defaultResponse {
+                    self.sendPromptResponse(def)
+                }
+                // Non-sensitive with no default response: user types in the
+                // terminal themselves; watcher suppression prevents spam.
+            case .denied:
+                // Cancel the running command with Ctrl+C. Keep suppression
+                // window so we don't immediately re-prompt.
+                self.sendPromptResponse("\u{0003}")
+            case .deferred:
+                break
+            }
+        }
+        session.requestApproval(context)
+        logger.info("ExecutionCoordinator: interactive prompt detected (\(pattern.id))")
+    }
+
+    private func sendPromptResponse(_ text: String?) {
+        guard let text, !text.isEmpty else { return }
+        guard let tabID = session.tabID,
+              let delegate = TerminalControlBridge.shared.delegate else {
+            return
+        }
+        // Send the raw characters; pressEnter=false because the response
+        // itself already contains the newline (or the Ctrl+C byte).
+        _ = delegate.runInPane(tabID: tabID, paneID: nil, text: text, pressEnter: false)
     }
 
     // MARK: - Step Watchdog

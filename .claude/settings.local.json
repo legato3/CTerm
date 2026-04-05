@@ -30,7 +30,10 @@
       "mcp__xcodebuild__discover_projs",
       "Bash(git commit:*)",
       "Bash(peer_id\" for valid UUIDs. Changed all affected handlers to [String: AnyCodable]? and:*)",
-      "Skill(yume--swarm)"
+      "Skill(yume--swarm)",
+      "WebSearch",
+      "WebFetch(domain:docs.warp.dev)",
+      "WebFetch(domain:www.warp.dev)"
     ]
   }
 }

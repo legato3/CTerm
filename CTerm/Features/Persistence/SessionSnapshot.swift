@@ -159,15 +159,68 @@ struct TabSnapshot: Codable, Equatable {
     let pwd: String?
     let splitTree: SplitTree
     let browserURL: URL?
+    /// Block IDs pinned as attachments at save time. Nil for legacy snapshots.
+    let attachedBlockIDs: [UUID]?
+    /// Bounded set of command blocks persisted for attachment continuity across restart.
+    /// Nil for legacy snapshots (decoded as nil via decodeIfPresent).
+    let persistedBlocks: [PersistedCommandBlock]?
 
-    init(id: UUID = UUID(), title: String = "Terminal", titleOverride: String? = nil, pwd: String? = nil, splitTree: SplitTree = SplitTree(), browserURL: URL? = nil) {
+    private enum CodingKeys: String, CodingKey {
+        case id, title, titleOverride, pwd, splitTree, browserURL
+        case attachedBlockIDs, persistedBlocks
+    }
+
+    init(id: UUID = UUID(),
+         title: String = "Terminal",
+         titleOverride: String? = nil,
+         pwd: String? = nil,
+         splitTree: SplitTree = SplitTree(),
+         browserURL: URL? = nil,
+         attachedBlockIDs: [UUID]? = nil,
+         persistedBlocks: [PersistedCommandBlock]? = nil) {
         self.id = id
         self.title = title
         self.titleOverride = titleOverride
         self.pwd = pwd
         self.splitTree = splitTree
         self.browserURL = browserURL
+        self.attachedBlockIDs = attachedBlockIDs
+        self.persistedBlocks = persistedBlocks
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        titleOverride = try container.decodeIfPresent(String.self, forKey: .titleOverride)
+        pwd = try container.decodeIfPresent(String.self, forKey: .pwd)
+        splitTree = try container.decode(SplitTree.self, forKey: .splitTree)
+        browserURL = try container.decodeIfPresent(URL.self, forKey: .browserURL)
+        attachedBlockIDs = try container.decodeIfPresent([UUID].self, forKey: .attachedBlockIDs)
+        persistedBlocks = try container.decodeIfPresent([PersistedCommandBlock].self, forKey: .persistedBlocks)
+    }
+}
+
+/// Codable, off-main-thread-safe projection of `TerminalCommandBlock` for persistence.
+/// Mirrors the runtime fields but omits `surfaceID` binding concerns — surface IDs are
+/// regenerated on restore, so this field is stored as optional and tolerated nil on decode.
+struct PersistedCommandBlock: Codable, Equatable {
+    let id: UUID
+    let source: String           // raw value of TerminalCommandSource
+    let surfaceID: UUID?
+    let command: String?
+    let startedAt: Date
+    let finishedAt: Date?
+    let status: String           // raw value of TerminalCommandStatus
+    let outputSnippet: String?
+    let errorSnippet: String?
+    let exitCode: Int?
+    let durationNanoseconds: UInt64?
+    let cwd: String?
+
+    /// Maximum number of lines retained in output/error snippets on persist. Matches
+    /// the F1 viewport capture cap to keep snapshot payloads bounded.
+    static let snippetLineCap = 32
 }
 
 // MARK: - Conversion to/from Runtime Models
@@ -215,9 +268,9 @@ extension Tab {
         case .diff:
             return nil  // Diff tabs are not persisted
         case .terminal:
-            return TabSnapshot(id: id, title: title, titleOverride: titleOverride, pwd: pwd, splitTree: splitTree, browserURL: nil)
+            return TabSnapshotBuilder.build(from: self, browserURL: nil)
         case .browser(let url):
-            return TabSnapshot(id: id, title: title, titleOverride: titleOverride, pwd: pwd, splitTree: splitTree, browserURL: url)
+            return TabSnapshotBuilder.build(from: self, browserURL: url)
         }
     }
 
@@ -235,6 +288,107 @@ extension Tab {
             splitTree: snapshot.splitTree,
             content: content
         )
+        TabSnapshotBuilder.apply(snapshot: snapshot, to: self)
+    }
+}
+
+// MARK: - TabSnapshotBuilder
+
+/// Pure helpers for converting `Tab` ↔ `TabSnapshot` with attachment/block persistence.
+/// Extracted so round-trip logic is testable in isolation.
+@MainActor
+enum TabSnapshotBuilder {
+    /// Maximum number of recent blocks persisted per tab.
+    static let recentBlockCap = 20
+
+    static func build(from tab: Tab, browserURL: URL?) -> TabSnapshot {
+        let attachedIDs = Array(tab.attachedBlockIDs)
+        let persisted = collectPersistedBlocks(from: tab)
+        return TabSnapshot(
+            id: tab.id,
+            title: tab.title,
+            titleOverride: tab.titleOverride,
+            pwd: tab.pwd,
+            splitTree: tab.splitTree,
+            browserURL: browserURL,
+            attachedBlockIDs: attachedIDs.isEmpty ? nil : attachedIDs,
+            persistedBlocks: persisted.isEmpty ? nil : persisted
+        )
+    }
+
+    static func apply(snapshot: TabSnapshot, to tab: Tab) {
+        if let persisted = snapshot.persistedBlocks, !persisted.isEmpty {
+            let restored = persisted.map { $0.toRuntimeBlock() }
+            tab.blockStore.replaceAll(with: restored)
+        }
+        if let attached = snapshot.attachedBlockIDs, !attached.isEmpty {
+            let availableIDs = Set(tab.blockStore.all.map { $0.id })
+            for id in attached where availableIDs.contains(id) {
+                tab.attachBlock(id)
+            }
+        }
+    }
+
+    /// Collects the union of the 20 most-recent blocks and any blocks referenced by
+    /// `attachedBlockIDs`, deduplicated by id and preserving newest-first order with
+    /// referenced-but-older attached blocks appended after.
+    private static func collectPersistedBlocks(from tab: Tab) -> [PersistedCommandBlock] {
+        let all = tab.commandBlocks
+        guard !all.isEmpty else { return [] }
+        let recent = Array(all.prefix(recentBlockCap))
+        var seen = Set(recent.map { $0.id })
+        var result = recent
+        if !tab.attachedBlockIDs.isEmpty {
+            for block in all where tab.attachedBlockIDs.contains(block.id) && !seen.contains(block.id) {
+                result.append(block)
+                seen.insert(block.id)
+            }
+        }
+        return result.map { PersistedCommandBlock(from: $0) }
+    }
+}
+
+// MARK: - PersistedCommandBlock ↔ TerminalCommandBlock
+
+extension PersistedCommandBlock {
+    init(from block: TerminalCommandBlock) {
+        self.id = block.id
+        self.source = block.source.rawValue
+        self.surfaceID = block.surfaceID
+        self.command = block.command
+        self.startedAt = block.startedAt
+        self.finishedAt = block.finishedAt
+        self.status = block.status.rawValue
+        self.outputSnippet = PersistedCommandBlock.truncateSnippet(block.outputSnippet)
+        self.errorSnippet = PersistedCommandBlock.truncateSnippet(block.errorSnippet)
+        self.exitCode = block.exitCode
+        self.durationNanoseconds = block.durationNanoseconds
+        self.cwd = block.cwd
+    }
+
+    func toRuntimeBlock() -> TerminalCommandBlock {
+        TerminalCommandBlock(
+            id: id,
+            source: TerminalCommandSource(rawValue: source) ?? .shell,
+            surfaceID: nil, // surface UUIDs are regenerated at restore; don't bind to stale ones
+            command: command,
+            startedAt: startedAt,
+            finishedAt: finishedAt,
+            status: TerminalCommandStatus(rawValue: status) ?? .succeeded,
+            outputSnippet: outputSnippet,
+            errorSnippet: errorSnippet,
+            exitCode: exitCode,
+            durationNanoseconds: durationNanoseconds,
+            cwd: cwd
+        )
+    }
+
+    /// Truncates a snippet to the last `snippetLineCap` non-empty lines to bound payload size.
+    static func truncateSnippet(_ text: String?) -> String? {
+        guard let text, !text.isEmpty else { return text }
+        let lines = text.components(separatedBy: CharacterSet.newlines)
+        guard lines.count > snippetLineCap else { return text }
+        return lines.suffix(snippetLineCap).joined(separator: "\n")
     }
 }
 

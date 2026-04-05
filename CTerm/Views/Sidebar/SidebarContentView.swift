@@ -9,6 +9,7 @@ struct SidebarContentView: View {
     let groups: [TabGroup]
     let activeGroupID: UUID?
     let activeTabID: UUID?
+    var windowSession: WindowSession?
     @Binding var sidebarMode: SidebarMode?
     var gitChangesState: GitChangesState = .notLoaded
     var gitEntries: [GitFileEntry] = []
@@ -65,6 +66,7 @@ struct SidebarContentView: View {
 
                 // Navigation
                 railButton(mode: .tabs, icon: "square.on.square", help: "Tabs")
+                railButton(mode: .blocks, icon: "rectangle.stack", help: "Blocks")
                 railButton(mode: .changes, icon: "arrow.triangle.2.circlepath", help: "Changes")
 
                 railDivider
@@ -242,6 +244,17 @@ struct SidebarContentView: View {
         case .context:
             ContextView(pwd: activeTab?.pwd)
                 .padding(.top, 4)
+        case .blocks:
+            if let windowSession {
+                BlockNavigatorView(windowSession: windowSession, currentTab: activeTab)
+            } else {
+                ContentUnavailableView(
+                    "Blocks Unavailable",
+                    systemImage: "rectangle.stack",
+                    description: Text("No window session is attached.")
+                )
+                .padding(.top, 24)
+            }
         }
     }
 

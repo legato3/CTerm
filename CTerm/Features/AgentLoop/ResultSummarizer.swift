@@ -23,7 +23,7 @@ enum ResultSummarizer {
 
         let summary = buildSummary(session)
         let nextActions = await generateNextActions(session, pwd: pwd)
-        let filesChanged = captureFilesChanged(session)
+        let filesChanged = await captureFilesChanged(session, pwd: pwd)
         let durationMs = Int(session.elapsedSeconds * 1000)
         let handoffKey = persistHandoff(session, pwd: pwd)
         let exitStatus = computeExitStatus(session)
@@ -124,12 +124,30 @@ enum ResultSummarizer {
 
     // MARK: - File Changes
 
-    private static func captureFilesChanged(_ session: AgentSession) -> [String] {
-        // Pull from FileChangeStore which tracks all writes across the session.
-        let recent = FileChangeStore.shared.recentPaths(limit: 20)
-        if !recent.isEmpty { return recent }
-        // Fallback: artifacts the executor tagged as .fileChanged
-        return session.artifacts.filter { $0.kind == .fileChanged }.map(\.value)
+    private static func captureFilesChanged(_ session: AgentSession, pwd: String?) async -> [ChangedFile] {
+        // Preferred: ask git directly for a structured numstat + porcelain
+        // view of the working tree. This gives real add/del counts and the
+        // correct status classification (added / modified / deleted / renamed
+        // / untracked) that the inline diff review panel needs.
+        if let pwd {
+            let gitView = await ChangedFileExtractor.extract(workDir: pwd)
+            if !gitView.isEmpty { return gitView }
+        }
+
+        // Fallback 1: paths the in-process FileChangeStore tracked during
+        // the session. No git stats available — map to .modified with zero
+        // counts so the UI still lists the files.
+        let recentPaths = FileChangeStore.shared.recentPaths(limit: 20)
+        if !recentPaths.isEmpty {
+            return recentPaths.map {
+                ChangedFile(path: $0, status: .modified, additions: 0, deletions: 0, oldPath: nil)
+            }
+        }
+
+        // Fallback 2: artifacts the executor explicitly tagged as .fileChanged.
+        return session.artifacts
+            .filter { $0.kind == .fileChanged }
+            .map { ChangedFile(path: $0.value, status: .modified, additions: 0, deletions: 0, oldPath: nil) }
     }
 
     // MARK: - Next Action Generation

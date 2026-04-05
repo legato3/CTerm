@@ -87,6 +87,9 @@ final class AgentSessionRouter {
             backend: request.backend,
             triggeredBy: request.triggeredBy
         )
+        // Snapshot the active permission profile so ApprovalGate can
+        // consult it throughout this session's lifetime.
+        session.profileID = AgentProfileStore.shared.activeProfileID
         // Snapshot the memory keys we just injected (or would have) so the
         // run panel can show a "memories used" chip. Only meaningful when
         // the prompt was actually enriched.

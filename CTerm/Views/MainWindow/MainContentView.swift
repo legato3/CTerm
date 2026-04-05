@@ -49,6 +49,7 @@ struct MainContentView: View {
                         groups: windowSession.groups,
                         activeGroupID: windowSession.activeGroupID,
                         activeTabID: activeTabID,
+                        windowSession: windowSession,
                         sidebarMode: $sidebarMode,
                         gitChangesState: windowSession.git.changesState,
                         gitEntries: windowSession.git.entries,
@@ -429,6 +430,9 @@ private struct ComposeCommandBarView: View {
     var onDetachBlock: ((UUID) -> Void)? = nil
 
     @State private var gitBranch: String? = nil
+    @State private var showMentionPopover: Bool = false
+    @State private var mentionFilter: String = ""
+    @State private var mentionCoordinator = BlockMentionPopoverCoordinator()
 
     private var currentOllamaSuggestionBehavior: OllamaSuggestionBehavior {
         OllamaSuggestionBehavior(rawValue: ollamaSuggestionBehavior) ?? .defaultValue
@@ -494,9 +498,9 @@ private struct ComposeCommandBarView: View {
                 )
             }
 
-            // Attached blocks indicator
+            // Attached blocks indicator — chips row above the input
             if !attachedBlockIDs.isEmpty {
-                AttachedBlocksBar(
+                AttachedBlockChipsView(
                     blocks: commandBlocks.filter { attachedBlockIDs.contains($0.id) },
                     onDetach: { onDetachBlock?($0) }
                 )
@@ -512,7 +516,24 @@ private struct ComposeCommandBarView: View {
             contextHintBar
             HStack(alignment: .bottom, spacing: 8) {
                 modeSelectorButton
+                AgentProfilePickerView()
+                    .padding(.bottom, 3)
                 ZStack(alignment: .bottomLeading) {
+                    Color.clear
+                        .frame(width: 1, height: 1)
+                        .popover(isPresented: $showMentionPopover, arrowEdge: .top) {
+                            BlockMentionPopoverView(
+                                blocks: filteredMentionBlocks,
+                                coordinator: mentionCoordinator,
+                                onSelect: { block in
+                                    insertBlockMention(block)
+                                },
+                                onDismiss: {
+                                    showMentionPopover = false
+                                    mentionCoordinator.isShowing = false
+                                }
+                            )
+                        }
                     ComposeOverlayContainerView(
                         text: Binding(get: { assistant.draftText }, set: { assistant.setDraftText($0) }),
                         onSend: onSend,
@@ -520,7 +541,8 @@ private struct ComposeCommandBarView: View {
                         onCmdReturn: forceAgentSend,
                         onTabComplete: loadLatestSuggestionFromKeyboard,
                         placeholderText: composePlaceholderText,
-                        actions: windowActions
+                        actions: windowActions,
+                        mentionCoordinator: mentionCoordinator
                     )
                     .frame(minHeight: 36, maxHeight: 96)
 
@@ -608,6 +630,84 @@ private struct ComposeCommandBarView: View {
                 .padding(.horizontal, 12).padding(.bottom, 4)
             }
         }
+        .onChange(of: assistant.draftText) { _, newValue in
+            updateMentionPopover(for: newValue)
+        }
+    }
+
+    // MARK: - @block Mention Picker
+
+    private var filteredMentionBlocks: [TerminalCommandBlock] {
+        let recent = Array(commandBlocks.prefix(10))
+        guard !mentionFilter.isEmpty else { return recent }
+        let needle = mentionFilter.lowercased()
+        return recent.filter { block in
+            (block.command?.lowercased().contains(needle) ?? false)
+        }
+    }
+
+    private func updateMentionPopover(for text: String) {
+        // Find the last "@" — only trigger if preceded by whitespace / start
+        // and there's no space after it (we're still typing the mention).
+        guard let atRange = text.range(of: "@", options: .backwards) else {
+            dismissMentionPopover()
+            return
+        }
+        if atRange.lowerBound != text.startIndex {
+            let prevIdx = text.index(before: atRange.lowerBound)
+            let prevChar = text[prevIdx]
+            if !(prevChar.isWhitespace || prevChar.isNewline) {
+                dismissMentionPopover()
+                return
+            }
+        }
+        let after = text[atRange.upperBound...]
+        // Abort if user typed whitespace after `@` (mention finished).
+        if after.contains(where: { $0.isWhitespace || $0.isNewline }) {
+            dismissMentionPopover()
+            return
+        }
+        // Don't re-trigger if already an existing `@block:` token being typed.
+        if after.hasPrefix("block:") {
+            dismissMentionPopover()
+            return
+        }
+        mentionFilter = String(after)
+        if !commandBlocks.isEmpty {
+            showMentionPopover = true
+            let blocks = filteredMentionBlocks
+            mentionCoordinator.resetSelection(itemCount: blocks.count)
+            mentionCoordinator.isShowing = true
+            mentionCoordinator.onSelect = { index in
+                let blocks = filteredMentionBlocks
+                guard index >= 0, index < blocks.count else { return }
+                insertBlockMention(blocks[index])
+            }
+            mentionCoordinator.onDismiss = {
+                dismissMentionPopover()
+            }
+        }
+    }
+
+    private func dismissMentionPopover() {
+        showMentionPopover = false
+        mentionFilter = ""
+        mentionCoordinator.isShowing = false
+        mentionCoordinator.itemCount = 0
+        mentionCoordinator.selectedIndex = 0
+    }
+
+    private func insertBlockMention(_ block: TerminalCommandBlock) {
+        let token = BlockMentionToken.token(for: block.id)
+        var text = assistant.draftText
+        if let atRange = text.range(of: "@", options: .backwards) {
+            text.replaceSubrange(atRange.lowerBound..., with: token + " ")
+        } else {
+            text += token + " "
+        }
+        assistant.setDraftText(text)
+        onAttachBlock?(block.id)
+        dismissMentionPopover()
     }
 
     // MARK: - Context Hint Bar (Warp-style message bar)
@@ -1255,57 +1355,6 @@ private struct ActiveAISuggestionBar: View {
         .background(Color.purple.opacity(0.05))
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.purple.opacity(0.1)).frame(height: 1)
-        }
-    }
-}
-
-// MARK: - Attached Blocks Bar
-
-private struct AttachedBlocksBar: View {
-    let blocks: [TerminalCommandBlock]
-    let onDetach: (UUID) -> Void
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "paperclip")
-                .font(.system(size: 10))
-                .foregroundStyle(Color.accentColor)
-                .padding(.leading, 12)
-
-            Text("Attached:")
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    ForEach(blocks) { block in
-                        HStack(spacing: 4) {
-                            Text(block.titleText)
-                                .font(.system(size: 10, design: .monospaced))
-                                .lineLimit(1)
-                                .foregroundStyle(.primary)
-                            Button {
-                                onDetach(block.id)
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Color.accentColor.opacity(0.1), in: Capsule())
-                    }
-                }
-            }
-
-            Spacer()
-        }
-        .padding(.vertical, 5)
-        .background(Color.accentColor.opacity(0.05))
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.accentColor.opacity(0.1)).frame(height: 1)
         }
     }
 }

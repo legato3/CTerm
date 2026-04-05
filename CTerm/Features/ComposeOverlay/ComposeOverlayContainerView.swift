@@ -16,6 +16,10 @@ struct ComposeOverlayContainerView: NSViewRepresentable {
     /// When provided, registers a focus callback on WindowActions so the
     /// FocusManager can redirect keyboard focus here (Warp-mode single input).
     var actions: WindowActions?
+    /// Optional coordinator for the @block mention popover. When supplied and
+    /// its `isShowing` flag is true, arrow keys, Enter, and Esc are routed to
+    /// it instead of the text view / overlay default handlers.
+    var mentionCoordinator: BlockMentionPopoverCoordinator?
 
     func makeNSView(context: Context) -> ComposeOverlayView {
         let view = ComposeOverlayView()
@@ -28,6 +32,7 @@ struct ComposeOverlayContainerView: NSViewRepresentable {
         view.onCmdReturn = onCmdReturn
         view.onTabComplete = onTabComplete
         view.placeholderText = placeholderText
+        view.mentionCoordinator = mentionCoordinator
         // Register focus callback so FocusManager can redirect here.
         actions?.onFocusComposeTextField = { [weak view] in
             view?.focusTextView()
@@ -46,6 +51,7 @@ struct ComposeOverlayContainerView: NSViewRepresentable {
         nsView.onCmdReturn = onCmdReturn
         nsView.onTabComplete = onTabComplete
         nsView.placeholderText = placeholderText
+        nsView.mentionCoordinator = mentionCoordinator
         // Keep focus callback up to date.
         actions?.onFocusComposeTextField = { [weak nsView] in
             nsView?.focusTextView()

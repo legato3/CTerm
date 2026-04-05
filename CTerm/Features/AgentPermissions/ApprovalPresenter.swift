@@ -32,6 +32,11 @@ final class ApprovalPresenter: AgentSessionObserver {
     }
     private var approvalQueue: [QueuedApproval] = []
 
+    /// Callback for a standalone approval (no owning session) — invoked on resolve
+    /// with the user's answer. Used by the inline-diff revert flow, which runs
+    /// after the originating session has already completed.
+    private var standaloneCallback: ((ApprovalAnswer) -> Void)?
+
     private var watchedSessionIDs: Set<UUID> = []
     private var pollTimer: Timer?
 
@@ -103,6 +108,78 @@ final class ApprovalPresenter: AgentSessionObserver {
 
     // MARK: - Public API
 
+    /// Present an approval sheet that is not tied to any live AgentSession.
+    /// Used for post-session actions like reverting agent-authored changes.
+    /// The callback is invoked with the user's answer on resolve. The gate
+    /// is evaluated internally: auto-approved / blocked outcomes short-circuit
+    /// without ever showing the sheet.
+    func requestStandaloneApproval(
+        command: String,
+        descriptor: ActionDescriptor,
+        repoPath: String?,
+        gitBranch: String?,
+        onResolve: @escaping (ApprovalAnswer) -> Void
+    ) {
+        let decision = ApprovalGate.evaluate(
+            action: .shellCommand(command),
+            session: nil,
+            pwd: repoPath,
+            gitBranch: gitBranch
+        )
+
+        switch decision {
+        case .autoApprove:
+            onResolve(.approved)
+            return
+        case .blocked:
+            onResolve(.denied)
+            return
+        case .hardStop(let reason, let gateContext, _):
+            // Swap the gate's generic descriptor for the caller's richer one,
+            // then present through the normal sheet flow.
+            let ctx = ApprovalContext(
+                stepID: nil,
+                riskScore: gateContext.riskScore,
+                riskTier: gateContext.riskTier,
+                action: descriptor,
+                grantKey: gateContext.grantKey,
+                suggestedScope: .once
+            )
+            presentStandalone(context: ctx, hardStop: reason, repoPath: repoPath, onResolve: onResolve)
+        case .requireApproval(let gateContext, _):
+            let ctx = ApprovalContext(
+                stepID: nil,
+                riskScore: gateContext.riskScore,
+                riskTier: gateContext.riskTier,
+                action: descriptor,
+                grantKey: gateContext.grantKey,
+                suggestedScope: .once
+            )
+            presentStandalone(context: ctx, hardStop: nil, repoPath: repoPath, onResolve: onResolve)
+        }
+    }
+
+    private func presentStandalone(
+        context: ApprovalContext,
+        hardStop: HardStopReason?,
+        repoPath: String?,
+        onResolve: @escaping (ApprovalAnswer) -> Void
+    ) {
+        // If the sheet is busy, drop this request rather than silently queueing
+        // without a session handle. Caller gets .deferred — they can retry.
+        if pendingContext != nil {
+            logger.info("Standalone approval dropped: presenter busy")
+            onResolve(.deferred)
+            return
+        }
+        pendingSession = nil
+        pendingContext = context
+        pendingHardStop = hardStop
+        pendingRepoPath = repoPath
+        standaloneCallback = onResolve
+        logger.info("Standalone approval requested: score=\(context.riskScore)")
+    }
+
     /// Called by the gate when a hard-stop needs confirmation. Stores the reason
     /// so the sheet can render the stronger red-warning layout.
     func presentHardStop(reason: HardStopReason) {
@@ -111,14 +188,42 @@ final class ApprovalPresenter: AgentSessionObserver {
 
     /// Resolve the currently-shown approval. Records any grant, flips the
     /// session's approval state, kicks the driver to resume, clears state.
-    func resolve(answer: ApprovalAnswer, scope: ApprovalScope) {
-        guard let session = pendingSession, let context = pendingContext else { return }
+    /// `enteredSecureText` is forwarded to the resume callback when the
+    /// approval used a secure-input request. Never logged or persisted.
+    func resolve(answer: ApprovalAnswer, scope: ApprovalScope, enteredSecureText: String? = nil) {
+        guard let context = pendingContext else { return }
+
+        // Standalone approval path (no owning session). No grants recorded —
+        // standalone is always .once.
+        if pendingSession == nil {
+            let callback = standaloneCallback
+            standaloneCallback = nil
+            pendingContext = nil
+            pendingHardStop = nil
+            pendingRepoPath = nil
+            callback?(answer)
+
+            // Drain any queued session-bound approvals that arrived during the
+            // standalone sheet.
+            if let next = approvalQueue.first {
+                approvalQueue.removeFirst()
+                if !next.session.phase.isTerminal {
+                    showApproval(session: next.session, context: next.context, repoPath: next.repoPath)
+                }
+            }
+            return
+        }
+
+        guard let session = pendingSession else { return }
 
         // Hard-stop approvals are always treated as once-only — never grant
         // broader scope on a destructive action regardless of what the UI passes.
-        let effectiveScope = pendingHardStop != nil ? ApprovalScope.once : scope
+        // Secure-input approvals are also forced to .once (passwords are
+        // never pre-approved).
+        let forcedOnce = pendingHardStop != nil || context.secureInputRequest != nil
+        let effectiveScope = forcedOnce ? ApprovalScope.once : scope
 
-        if answer == .approved, pendingHardStop == nil, effectiveScope != .once {
+        if answer == .approved, !forcedOnce, effectiveScope != .once {
             let key = keyFrom(context: context)
             let grantContext = GrantContext(sessionID: session.id, pwd: pendingRepoPath)
             AgentGrantStore.shared.record(
@@ -139,7 +244,7 @@ final class ApprovalPresenter: AgentSessionObserver {
         pendingHardStop = nil
         pendingRepoPath = nil
 
-        resume?(answer)
+        resume?(answer, enteredSecureText)
 
         // Show the next queued approval, if any.
         if let next = approvalQueue.first {

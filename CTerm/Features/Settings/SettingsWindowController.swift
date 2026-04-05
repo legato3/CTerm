@@ -1,5 +1,6 @@
 import AppKit
 import OSLog
+import SwiftUI
 
 private let logger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "com.legato3.cterm",
@@ -386,6 +387,28 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
         claudeActions.spacing = 8
         claudeActions.alignment = .centerY
         root.addArrangedSubview(row(label: "", control: claudeActions))
+
+        // --- Agent Profiles Section ---
+        let profilesDivider = NSBox()
+        profilesDivider.boxType = .separator
+        profilesDivider.translatesAutoresizingMaskIntoConstraints = false
+        profilesDivider.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        root.addArrangedSubview(profilesDivider)
+
+        let profilesTitle = NSTextField(labelWithString: "Agent Profiles")
+        profilesTitle.font = .systemFont(ofSize: 20, weight: .semibold)
+        root.addArrangedSubview(profilesTitle)
+
+        let profilesSubtitle = NSTextField(wrappingLabelWithString: "Named permission bundles controlling what agents can auto-approve. Built-in profiles are read-only — use Duplicate to customize.")
+        profilesSubtitle.textColor = .secondaryLabelColor
+        profilesSubtitle.font = .systemFont(ofSize: 13)
+        root.addArrangedSubview(profilesSubtitle)
+
+        let profilesHost = NSHostingView(rootView: AgentProfilesSettingsView())
+        profilesHost.translatesAutoresizingMaskIntoConstraints = false
+        profilesHost.heightAnchor.constraint(equalToConstant: 480).isActive = true
+        profilesHost.widthAnchor.constraint(greaterThanOrEqualToConstant: 560).isActive = true
+        root.addArrangedSubview(profilesHost)
 
         // --- Scrolling Section ---
         let scrollingDivider = NSBox()

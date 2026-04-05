@@ -43,7 +43,8 @@ struct AgentRunPanelRegion: View {
                         onSaveAllFindings: { saveAllFindings(in: session) },
                         onNextAction: { prefillCompose(with: $0.prompt) },
                         onContinue: { continueFromHandoff(session: session) },
-                        handoffGoalPreview: handoffGoalPreview(for: session)
+                        handoffGoalPreview: handoffGoalPreview(for: session),
+                        workingDir: activeTab?.pwd
                     )
                 }
             } else {

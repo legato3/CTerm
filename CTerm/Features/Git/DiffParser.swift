@@ -31,11 +31,34 @@ enum DiffParser {
 
         let rawLines = input.components(separatedBy: "\n")
         var lines: [DiffLine] = []
+        var hunks: [DiffHunk] = []
         var isBinary = false
 
         var inHunk = false
         var oldLine = 0
         var newLine = 0
+
+        // In-progress hunk state for building the structured `hunks` array.
+        var currentHeader: String? = nil
+        var currentOldStart = 0
+        var currentOldCount = 0
+        var currentNewStart = 0
+        var currentNewCount = 0
+        var currentBody: [String] = []
+
+        func flushHunk() {
+            guard let header = currentHeader else { return }
+            hunks.append(DiffHunk(
+                header: header,
+                oldStart: currentOldStart,
+                oldCount: currentOldCount,
+                newStart: currentNewStart,
+                newCount: currentNewCount,
+                bodyLines: currentBody
+            ))
+            currentHeader = nil
+            currentBody = []
+        }
 
         for rawLine in rawLines {
             if lines.count >= maxLines {
@@ -44,6 +67,7 @@ enum DiffParser {
             }
 
             if rawLine.hasPrefix("diff --git ") {
+                flushHunk()
                 inHunk = false
                 lines.append(DiffLine(type: .meta, text: rawLine, oldLineNumber: nil, newLineNumber: nil))
                 continue
@@ -65,6 +89,13 @@ enum DiffParser {
                     oldLine = parsed.oldStart
                     newLine = parsed.newStart
                     inHunk = true
+                    flushHunk()
+                    currentHeader = rawLine
+                    currentOldStart = parsed.oldStart
+                    currentOldCount = parsed.oldCount
+                    currentNewStart = parsed.newStart
+                    currentNewCount = parsed.newCount
+                    currentBody = []
                     lines.append(DiffLine(type: .hunkHeader, text: rawLine, oldLineNumber: nil, newLineNumber: nil))
                     continue
                 }
@@ -85,6 +116,13 @@ enum DiffParser {
                 let parsed = parseHunkHeader(rawLine)
                 oldLine = parsed.oldStart
                 newLine = parsed.newStart
+                flushHunk()
+                currentHeader = rawLine
+                currentOldStart = parsed.oldStart
+                currentOldCount = parsed.oldCount
+                currentNewStart = parsed.newStart
+                currentNewCount = parsed.newCount
+                currentBody = []
                 lines.append(DiffLine(type: .hunkHeader, text: rawLine, oldLineNumber: nil, newLineNumber: nil))
                 continue
             }
@@ -92,12 +130,14 @@ enum DiffParser {
             if rawLine.hasPrefix("+") {
                 lines.append(DiffLine(type: .addition, text: rawLine, oldLineNumber: nil, newLineNumber: newLine))
                 newLine += 1
+                currentBody.append(rawLine)
                 continue
             }
 
             if rawLine.hasPrefix("-") {
                 lines.append(DiffLine(type: .deletion, text: rawLine, oldLineNumber: oldLine, newLineNumber: nil))
                 oldLine += 1
+                currentBody.append(rawLine)
                 continue
             }
 
@@ -105,33 +145,41 @@ enum DiffParser {
                 lines.append(DiffLine(type: .context, text: rawLine, oldLineNumber: oldLine, newLineNumber: newLine))
                 oldLine += 1
                 newLine += 1
+                currentBody.append(rawLine.isEmpty ? " " : rawLine)
                 continue
             }
 
             if rawLine.hasPrefix("\\") {
                 lines.append(DiffLine(type: .meta, text: rawLine, oldLineNumber: nil, newLineNumber: nil))
+                currentBody.append(rawLine)
                 continue
             }
 
             lines.append(DiffLine(type: .meta, text: rawLine, oldLineNumber: nil, newLineNumber: nil))
         }
 
-        return FileDiff(path: path, lines: lines, isBinary: isBinary, isTruncated: isTruncated)
+        flushHunk()
+        return FileDiff(path: path, lines: lines, isBinary: isBinary, isTruncated: isTruncated, hunks: hunks)
     }
 
-    private static func parseHunkHeader(_ line: String) -> (oldStart: Int, newStart: Int) {
+    private static func parseHunkHeader(_ line: String) -> (oldStart: Int, oldCount: Int, newStart: Int, newCount: Int) {
         let scanner = Scanner(string: line)
         _ = scanner.scanString("@@")
         _ = scanner.scanString("-")
 
         let oldStart = scanner.scanInt() ?? 1
+        var oldCount = 1
         if scanner.scanString(",") != nil {
-            _ = scanner.scanInt()
+            oldCount = scanner.scanInt() ?? 1
         }
 
         _ = scanner.scanString("+")
         let newStart = scanner.scanInt() ?? 1
+        var newCount = 1
+        if scanner.scanString(",") != nil {
+            newCount = scanner.scanInt() ?? 1
+        }
 
-        return (oldStart, newStart)
+        return (oldStart, oldCount, newStart, newCount)
     }
 }

@@ -21,6 +21,7 @@ enum SidebarMode: Sendable {
     case triggers
     case auditLog
     case agentPermissions
+    case blocks
 }
 
 enum GitChangesState: Sendable {
@@ -90,11 +91,33 @@ struct DiffLine: Equatable, Sendable {
     let newLineNumber: Int?
 }
 
+/// Structured representation of a single hunk. Used for per-hunk revert where we
+/// need to reconstruct a valid patch for `git apply -R`. `bodyLines` contains the
+/// raw lines between this hunk header and the next one (or the end of the diff) —
+/// each line keeps its leading space / `+` / `-` / `\` marker.
+struct DiffHunk: Equatable, Sendable {
+    let header: String        // e.g. "@@ -10,4 +20,5 @@ fn context"
+    let oldStart: Int
+    let oldCount: Int
+    let newStart: Int
+    let newCount: Int
+    let bodyLines: [String]   // body as-is, each with original prefix char
+}
+
 struct FileDiff: Equatable, Sendable {
     let path: String
     let lines: [DiffLine]
     let isBinary: Bool
     let isTruncated: Bool
+    let hunks: [DiffHunk]
+
+    init(path: String, lines: [DiffLine], isBinary: Bool, isTruncated: Bool, hunks: [DiffHunk] = []) {
+        self.path = path
+        self.lines = lines
+        self.isBinary = isBinary
+        self.isTruncated = isTruncated
+        self.hunks = hunks
+    }
 }
 
 enum DiffLoadState: Sendable {

@@ -51,6 +51,8 @@ struct TerminalCommandBlock: Identifiable, Sendable {
     var errorSnippet: String?
     var exitCode: Int?
     var durationNanoseconds: UInt64?
+    /// Working directory captured when the block began (if known).
+    var cwd: String? = nil
 
     var titleText: String {
         let trimmed = command?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -88,8 +90,6 @@ struct TerminalCommandBlock: Identifiable, Sendable {
 
 @MainActor @Observable
 class Tab: Identifiable {
-    private static let maxCommandBlocks = 20
-
     let id: UUID
     var title: String
     var titleOverride: String?
@@ -108,8 +108,15 @@ class Tab: Identifiable {
     var agentInputStyle: AgentInputStyle? = nil
     /// Most recent shell error detected in this tab. Cleared after routing or dismissal.
     var lastShellError: ShellErrorEvent? = nil
-    /// Recent command blocks used by the Warp-style command bar.
-    var commandBlocks: [TerminalCommandBlock] = []
+    /// Per-tab store of recent command blocks used by the Warp-style command bar.
+    /// Source of truth for terminal block history (transient, in-memory only).
+    let blockStore: TerminalBlockStore = TerminalBlockStore()
+    /// Read/write facade over `blockStore.all` preserved for existing call sites.
+    /// Writes go through the store so observation + cap enforcement remain consistent.
+    var commandBlocks: [TerminalCommandBlock] {
+        get { blockStore.all }
+        set { blockStore.replaceAll(with: newValue) }
+    }
     /// Active inline AgentSession driven from the compose bar. Mirrors an entry
     /// in AgentSessionRegistry so the UI can bind to a stable per-tab slot.
     var ollamaAgentSession: AgentSession? = nil
@@ -156,10 +163,11 @@ class Tab: Identifiable {
     func beginCommandBlock(
         command: String?,
         source: TerminalCommandSource,
-        surfaceID: UUID?
+        surfaceID: UUID?,
+        cwd: String? = nil
     ) -> UUID {
         let id = UUID()
-        commandBlocks.insert(
+        blockStore.append(
             TerminalCommandBlock(
                 id: id,
                 source: source,
@@ -171,18 +179,15 @@ class Tab: Identifiable {
                 outputSnippet: nil,
                 errorSnippet: nil,
                 exitCode: nil,
-                durationNanoseconds: nil
-            ),
-            at: 0
+                durationNanoseconds: nil,
+                cwd: cwd
+            )
         )
-        if commandBlocks.count > Self.maxCommandBlocks {
-            commandBlocks = Array(commandBlocks.prefix(Self.maxCommandBlocks))
-        }
         return id
     }
 
     func commandBlock(id: UUID) -> TerminalCommandBlock? {
-        commandBlocks.first(where: { $0.id == id })
+        blockStore.find(id: id)
     }
 
     var latestCommandBlock: TerminalCommandBlock? {
@@ -250,18 +255,15 @@ class Tab: Identifiable {
         outputSnippet: String?,
         errorSnippet: String?
     ) -> UUID? {
-        guard let index = commandBlocks.firstIndex(where: { $0.id == id }) else { return nil }
-        var updatedBlocks = commandBlocks
-        var block = updatedBlocks[index]
-        block.exitCode = exitCode
-        block.durationNanoseconds = durationNanoseconds ?? block.durationNanoseconds
-        block.outputSnippet = trimmedSnippet(outputSnippet) ?? block.outputSnippet
-        block.errorSnippet = trimmedSnippet(errorSnippet)
-        block.finishedAt = Date()
-        block.status = (exitCode ?? 0) == 0 ? .succeeded : .failed
-        updatedBlocks[index] = block
-        commandBlocks = updatedBlocks
-        return id
+        let didUpdate = blockStore.update(id: id) { block in
+            block.exitCode = exitCode
+            block.durationNanoseconds = durationNanoseconds ?? block.durationNanoseconds
+            block.outputSnippet = trimmedSnippet(outputSnippet) ?? block.outputSnippet
+            block.errorSnippet = trimmedSnippet(errorSnippet)
+            block.finishedAt = Date()
+            block.status = (exitCode ?? 0) == 0 ? .succeeded : .failed
+        }
+        return didUpdate ? id : nil
     }
 
     private func trimmedSnippet(_ text: String?) -> String? {

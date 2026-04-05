@@ -151,6 +151,8 @@ enum RiskScorer {
                 weight: isInteractive ? 25 : 10,
                 reason: isInteractive ? "Interactive browser automation" : "Read-only browser automation"
             )]
+        case .interactivePrompt:
+            return [RiskFactor(kind: .unknownCommand, weight: 15, reason: "Responds to interactive prompt")]
         }
     }
 

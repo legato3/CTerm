@@ -47,6 +47,7 @@ enum AgentActionCategory: String, Codable, CaseIterable, Sendable {
     case gitOperations  = "gitOperations"
     case deleteFiles    = "deleteFiles"
     case browserAutomation = "browserAutomation"
+    case interactivePrompt = "interactivePrompt"
 
     var displayName: String {
         switch self {
@@ -57,6 +58,7 @@ enum AgentActionCategory: String, Codable, CaseIterable, Sendable {
         case .gitOperations:       return "Git operations"
         case .deleteFiles:         return "Delete files"
         case .browserAutomation:   return "Browser automation"
+        case .interactivePrompt:   return "Respond to interactive prompt"
         }
     }
 
@@ -69,6 +71,7 @@ enum AgentActionCategory: String, Codable, CaseIterable, Sendable {
         case .gitOperations:       return "arrow.triangle.branch"
         case .deleteFiles:         return "trash"
         case .browserAutomation:   return "globe"
+        case .interactivePrompt:   return "keyboard"
         }
     }
 }

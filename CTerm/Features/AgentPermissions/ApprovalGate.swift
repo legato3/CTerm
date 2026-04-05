@@ -63,13 +63,25 @@ enum ApprovalGate {
             return .hardStop(reason: reason, context: ctx, assessment: assessment)
         }
 
-        // 2. Existing grant covers this?
+        // 2. Profile policy (layered above grants & trust mode).
+        if let decision = evaluateProfile(
+            session: session,
+            category: assessment.category,
+            tier: assessment.tier,
+            assessment: assessment,
+            command: command,
+            grantKey: key
+        ) {
+            return decision
+        }
+
+        // 3. Existing grant covers this?
         let context = GrantContext(sessionID: session?.id, pwd: pwd)
         if AgentGrantStore.shared.hasGrant(key: key, in: context) {
             return .autoApprove
         }
 
-        // 3. Trust-mode risk decision.
+        // 4. Trust-mode risk decision.
         switch AgentPermissionsStore.shared.decide(for: assessment) {
         case .autoApprove:
             return .autoApprove
@@ -112,6 +124,16 @@ enum ApprovalGate {
         )
 
         let key = GrantKey.browser(tier: tier, tool: command.split(separator: " ").first.map(String.init) ?? command)
+        if let decision = evaluateProfile(
+            session: session,
+            category: .browserAutomation,
+            tier: tier,
+            assessment: assessment,
+            command: command,
+            grantKey: key
+        ) {
+            return decision
+        }
         let context = GrantContext(sessionID: session?.id, pwd: pwd)
         if AgentGrantStore.shared.hasGrant(key: key, in: context) {
             return .autoApprove
@@ -134,6 +156,77 @@ enum ApprovalGate {
             )
             return .requireApproval(context: ctx, assessment: assessment)
         }
+    }
+
+    // MARK: - Profile policy
+
+    /// Returns a non-nil decision when the session's profile forces the
+    /// outcome (blocked / auto-approve / requireApproval-due-to-cap).
+    /// Nil means: fall through to existing grant + trust-mode logic.
+    private static func evaluateProfile(
+        session: AgentSession?,
+        category: AgentActionCategory,
+        tier: RiskTier,
+        assessment: RiskAssessment,
+        command: String,
+        grantKey: GrantKey
+    ) -> GateDecision? {
+        guard let profileID = session?.profileID,
+              let profile = AgentProfileStore.shared.profile(id: profileID)
+        else { return nil }
+
+        // 1. Blocks win. Render through the approval sheet with scope locked
+        //    to .once so the user sees *why* it was refused. The sheet's
+        //    "Approve" path still exists as an escape hatch, mirroring how
+        //    hard-stops surface.
+        if profile.blockedCategories.contains(category) {
+            let base = ActionDescriber.describeShell(
+                command: command,
+                assessment: assessment,
+                goal: session?.intent
+            )
+            let descriptor = ActionDescriptor(
+                what: base.what,
+                why: "Blocked by profile '\(profile.name)'",
+                impact: base.impact,
+                rollback: base.rollback
+            )
+            let ctx = ApprovalContext(
+                stepID: session?.currentStepID,
+                riskScore: assessment.score,
+                riskTier: assessment.tier,
+                action: descriptor,
+                grantKey: grantKey,
+                suggestedScope: .once
+            )
+            return .requireApproval(context: ctx, assessment: assessment)
+        }
+
+        // 2. Risk-tier cap: anything above the cap must show the sheet.
+        if tier > profile.maxRiskTier {
+            let descriptor = ActionDescriber.describeShell(
+                command: command,
+                assessment: assessment,
+                goal: session?.intent
+            )
+            let ctx = ApprovalContext(
+                stepID: session?.currentStepID,
+                riskScore: assessment.score,
+                riskTier: assessment.tier,
+                action: descriptor,
+                grantKey: grantKey,
+                suggestedScope: .once
+            )
+            return .requireApproval(context: ctx, assessment: assessment)
+        }
+
+        // 3. Auto-approve when category is whitelisted AND within cap.
+        if profile.autoApproveCategories.contains(category) && tier <= profile.maxRiskTier {
+            return .autoApprove
+        }
+
+        // Otherwise fall through to existing grant/trust-mode logic.
+        return nil
     }
 
     // MARK: - Defaults

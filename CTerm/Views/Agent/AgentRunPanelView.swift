@@ -22,6 +22,15 @@ struct AgentRunPanelView: View {
     var onNextAction: ((NextAction) -> Void)? = nil
     var onContinue: (() -> Void)? = nil
     var handoffGoalPreview: String? = nil
+    /// Working directory for the tab, used by `InlineDiffView` to load diffs
+    /// and route revert commands. If nil, the inline diff block is hidden.
+    var workingDir: String? = nil
+
+    /// Controls how many changed-file rows render before the "+M more"
+    /// disclosure. Kept small so the run panel stays compact.
+    private static let collapsedFileRowLimit = 5
+
+    @State private var showAllChangedFiles = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -48,13 +57,21 @@ struct AgentRunPanelView: View {
         let chips = toolChipItems
         let hasFindings = session.browserResearchSession?.findings.isEmpty == false
         let hasActions = session.phase.isTerminal && !nextActions.isEmpty
+        let changedFileCount = session.result?.filesChanged.count ?? 0
+        let hasChangedFiles = workingDir != nil && changedFileCount > 0 && session.phase.isTerminal
         let estimatedHeight: CGFloat = {
             var h: CGFloat = 60 // user bubble + padding
             h += CGFloat(min(chips.count, 6)) * 28
             if session.summary != nil || session.phase.isActive || session.errorMessage != nil { h += 36 }
             if hasFindings { h += 80 }
             if hasActions { h += 32 }
-            return min(h + 24, 300)
+            if hasChangedFiles {
+                let visibleRows = showAllChangedFiles
+                    ? changedFileCount
+                    : min(changedFileCount, Self.collapsedFileRowLimit)
+                h += CGFloat(visibleRows) * 32 + (changedFileCount > Self.collapsedFileRowLimit ? 24 : 0)
+            }
+            return min(h + 24, 520)
         }()
 
         return ScrollView(.vertical, showsIndicators: false) {
@@ -79,6 +96,10 @@ struct AgentRunPanelView: View {
                     thinkingIndicator
                 } else if let err = session.errorMessage {
                     agentResponse("⚠ \(err)")
+                }
+
+                if hasChangedFiles, let dir = workingDir, let changed = session.result?.filesChanged {
+                    changedFilesBlock(changed, workingDir: dir)
                 }
 
                 if hasFindings, let research = session.browserResearchSession {
@@ -161,6 +182,38 @@ struct AgentRunPanelView: View {
             Text(session.progressLabel.isEmpty ? session.phase.userLabel : session.progressLabel)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Changed files (inline diff review)
+
+    private func changedFilesBlock(_ files: [ChangedFile], workingDir: String) -> some View {
+        let limit = Self.collapsedFileRowLimit
+        let overflow = max(0, files.count - limit)
+        let visible = showAllChangedFiles ? files : Array(files.prefix(limit))
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("Files changed (\(files.count))")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+            ForEach(visible) { file in
+                InlineDiffView(
+                    file: file,
+                    workingDir: workingDir,
+                    onReverted: { session.removeChangedFile(path: file.path) }
+                )
+            }
+            if overflow > 0 && !showAllChangedFiles {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        showAllChangedFiles = true
+                    }
+                } label: {
+                    Text("+ \(overflow) more")
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
         }
     }
 

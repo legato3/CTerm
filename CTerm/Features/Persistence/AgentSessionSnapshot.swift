@@ -25,6 +25,7 @@ struct AgentSessionSnapshot: Codable, Equatable, Sendable {
     let inlineIteration: Int
     let inlineSteps: [InlineAgentStep]
     let triggeredBy: String?
+    let profileID: UUID?
 }
 
 extension AgentBackend {
@@ -67,7 +68,8 @@ extension AgentSession {
             inlineIteration: inlineIteration,
             // Cap to prevent runaway growth — 50 steps is plenty of context
             inlineSteps: Array(inlineSteps.prefix(50)),
-            triggeredBy: triggeredBy
+            triggeredBy: triggeredBy,
+            profileID: profileID
         )
     }
 
@@ -88,6 +90,7 @@ extension AgentSession {
         self.pendingMessage = snapshot.pendingMessage
         self.inlineIteration = snapshot.inlineIteration
         self.inlineSteps = snapshot.inlineSteps
+        self.profileID = snapshot.profileID
         self.transition(to: snapshot.phase)
     }
 }

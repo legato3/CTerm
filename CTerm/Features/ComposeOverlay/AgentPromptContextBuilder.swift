@@ -11,10 +11,27 @@ enum AgentPromptContextBuilder {
     private static let maxCommandSnippetLength = 1_200
 
     static func buildPrompt(goal: String, activeTab: Tab?) -> String {
-        let trimmedGoal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Resolve any `@block:<shortID>` tokens the user typed directly and
+        // strip them from the visible prompt. Attached blocks are the union
+        // of explicitly-attached IDs and token-matched IDs.
+        let tokenShortIDs = BlockMentionToken.extractShortIDs(from: goal)
+        let strippedGoal = tokenShortIDs.isEmpty
+            ? goal.trimmingCharacters(in: .whitespacesAndNewlines)
+            : BlockMentionToken.stripTokens(from: goal)
+        let trimmedGoal = strippedGoal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedGoal.isEmpty else { return "" }
 
-        let sections = contextSections(for: activeTab)
+        let tokenBlockIDs: Set<UUID> = {
+            guard let activeTab, !tokenShortIDs.isEmpty else { return [] }
+            let matches = tokenShortIDs.compactMap { short -> UUID? in
+                activeTab.commandBlocks.first(where: {
+                    $0.id.uuidString.lowercased().hasPrefix(short)
+                })?.id
+            }
+            return Set(matches)
+        }()
+
+        let sections = contextSections(for: activeTab, extraBlockIDs: tokenBlockIDs)
         guard !sections.isEmpty else { return trimmedGoal }
 
         return """
@@ -26,7 +43,10 @@ enum AgentPromptContextBuilder {
         """
     }
 
-    private static func contextSections(for activeTab: Tab?) -> [String] {
+    private static func contextSections(
+        for activeTab: Tab?,
+        extraBlockIDs: Set<UUID> = []
+    ) -> [String] {
         guard let activeTab else { return [] }
 
         var sections: [String] = []
@@ -50,7 +70,8 @@ enum AgentPromptContextBuilder {
             sections.append(shellError)
         }
 
-        if let attachedBlocks = attachedBlocksSection(for: activeTab) {
+        let unionIDs = activeTab.attachedBlockIDs.union(extraBlockIDs)
+        if let attachedBlocks = attachedBlocksSection(for: activeTab, blockIDs: unionIDs) {
             sections.append(attachedBlocks)
         } else if let recentCommands = recentCommandSection(for: activeTab) {
             sections.append(recentCommands)
@@ -120,8 +141,8 @@ enum AgentPromptContextBuilder {
         return lines.joined(separator: "\n")
     }
 
-    private static func attachedBlocksSection(for tab: Tab) -> String? {
-        let blocks = tab.attachedBlocks
+    private static func attachedBlocksSection(for tab: Tab, blockIDs: Set<UUID>) -> String? {
+        let blocks = tab.commandBlocks.filter { blockIDs.contains($0.id) }
         guard !blocks.isEmpty else { return nil }
 
         let body = blocks

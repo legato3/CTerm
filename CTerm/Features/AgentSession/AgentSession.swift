@@ -31,6 +31,12 @@ final class AgentSession: Identifiable {
     /// "what caused this to start?".
     let triggeredBy: String?
 
+    /// Snapshot of `AgentProfileStore.shared.activeProfileID` captured at spawn
+    /// time. ApprovalGate consults the profile for auto-approve / block
+    /// decisions. Nil means no profile was active (falls through to legacy
+    /// grant + trust-mode behavior).
+    var profileID: UUID?
+
     // MARK: - State (mutable, observable)
 
     private(set) var phase: AgentPhase {
@@ -94,7 +100,10 @@ final class AgentSession: Identifiable {
     /// Optional resume callback set by a session driver (executor, inline loop,
     /// etc.) before calling `requestApproval`. Invoked by the presenter once the
     /// user answers, so the driver can continue where it left off.
-    var onApprovalResolved: ((ApprovalAnswer) -> Void)?
+    /// Second parameter carries entered secure text when the approval used a
+    /// `secureInputRequest`. It is intentionally passed inline (not stored)
+    /// so the string can deinit as soon as the driver forwards it to the PTY.
+    var onApprovalResolved: ((ApprovalAnswer, String?) -> Void)?
 
     /// UI state: has the user collapsed the inline run panel for this session?
     /// Session-lifetime only, not persisted.
@@ -210,6 +219,15 @@ final class AgentSession: Identifiable {
         self.result = result
         phase = .completed
         notifyCompleted(result)
+    }
+
+    /// Remove a single entry from `result.filesChanged`. Used by the inline
+    /// diff review row after a successful revert so the UI can drop the row.
+    func removeChangedFile(path: String) {
+        guard var current = result else { return }
+        current.filesChanged.removeAll { $0.path == path }
+        self.result = current
+        updatedAt = Date()
     }
 
     // MARK: - Observer dispatch

@@ -58,6 +58,79 @@ enum GitService {
         }
     }
 
+    /// Raw output of `git diff --numstat HEAD`. Used by ChangedFileExtractor.
+    static func numstatSinceHead(workDir: String) async throws -> String {
+        try await run(args: ["diff", "--numstat", "HEAD"], workDir: workDir)
+    }
+
+    /// Raw output of `git status --porcelain`. Used by ChangedFileExtractor.
+    static func porcelainStatus(workDir: String) async throws -> String {
+        try await run(args: ["status", "--porcelain"], workDir: workDir)
+    }
+
+    /// Revert a single file's changes. For tracked files that were modified
+    /// or deleted we use `git checkout -- <path>`; for added (new but tracked)
+    /// files we `git rm -f` them; for untracked files we `git clean -f`.
+    /// The caller is expected to gate this through ApprovalGate first — this
+    /// method performs no permission checks of its own.
+    static func revertFile(path: String, status: ChangedFile.Status, workDir: String) async throws {
+        switch status {
+        case .modified, .deleted, .renamed:
+            _ = try await run(args: ["checkout", "--", path], workDir: workDir)
+        case .added:
+            // New file that has been `git add`-ed — remove from index + disk.
+            _ = try await run(args: ["rm", "-f", "--", path], workDir: workDir)
+        case .untracked:
+            _ = try await run(args: ["clean", "-f", "--", path], workDir: workDir)
+        }
+    }
+
+    /// Build a single-hunk unified-diff patch for `git apply`. Pure function —
+    /// exposed `internal` so the test suite can verify the exact bytes produced.
+    /// The returned string always ends with exactly one newline.
+    static func buildHunkPatch(filePath: String, hunk: DiffHunk) -> String {
+        var patch = "diff --git a/\(filePath) b/\(filePath)\n"
+        patch += "--- a/\(filePath)\n"
+        patch += "+++ b/\(filePath)\n"
+        // Canonicalise the hunk header so we emit exactly the counts we tracked.
+        // Preserve any trailing function-context tail (anything after the closing `@@`).
+        let canonHeader = "@@ -\(hunk.oldStart),\(hunk.oldCount) +\(hunk.newStart),\(hunk.newCount) @@"
+        let tail: String = {
+            guard let closeRange = hunk.header.range(of: "@@", options: .backwards) else { return "" }
+            let suffix = hunk.header[closeRange.upperBound...]
+            return String(suffix)
+        }()
+        patch += canonHeader + tail + "\n"
+        for body in hunk.bodyLines {
+            patch += body + "\n"
+        }
+        // Guarantee a single trailing newline.
+        while patch.hasSuffix("\n\n") {
+            patch.removeLast()
+        }
+        if !patch.hasSuffix("\n") {
+            patch += "\n"
+        }
+        return patch
+    }
+
+    /// Revert a single hunk in `filePath` by reverse-applying a reconstructed
+    /// patch (`git apply -R`). Throws with stderr detail on failure — the
+    /// caller should surface the message to the user rather than retry.
+    static func revertHunk(filePath: String, hunk: DiffHunk, workDir: String) async throws {
+        let patch = buildHunkPatch(filePath: filePath, hunk: hunk)
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cterm-hunk-\(UUID().uuidString).patch")
+
+        try patch.data(using: .utf8)?.write(to: tempURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        _ = try await run(
+            args: ["apply", "-R", "--whitespace=nowarn", tempURL.path],
+            workDir: workDir
+        )
+    }
+
     static func gitStatus(workDir: String) async throws -> [GitFileEntry] {
         let output = try await run(args: ["status", "--porcelain=v2", "-z"], workDir: workDir)
         return parseStatus(output)

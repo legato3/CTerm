@@ -4,31 +4,62 @@
 // Modal sheet that surfaces an ApprovalContext to the user. Shows the full
 // action descriptor (what / why / impact / rollback), a risk badge, and a
 // scope picker. Hard-stop actions render red and force `.once` scope.
+//
+// When the context carries a `secureInputRequest`, the sheet switches into
+// secure-input mode: the descriptor rows are replaced by a matched-line
+// preview + SecureField. The entered text is passed inline through the
+// resolve callback; the sheet never stores or logs it beyond the @State
+// binding on its SecureField (released when the sheet closes).
 
 import SwiftUI
 
 struct ApprovalSheet: View {
     let context: ApprovalContext
     let hardStop: HardStopReason?
-    var onResolve: (ApprovalAnswer, ApprovalScope) -> Void
+    var onResolve: (ApprovalAnswer, ApprovalScope, String?) -> Void
     var onDismiss: () -> Void
 
     @State private var scope: ApprovalScope
+    @State private var secureText: String = ""
 
     init(
         context: ApprovalContext,
         hardStop: HardStopReason? = nil,
-        onResolve: @escaping (ApprovalAnswer, ApprovalScope) -> Void,
+        onResolve: @escaping (ApprovalAnswer, ApprovalScope, String?) -> Void,
         onDismiss: @escaping () -> Void
     ) {
         self.context = context
         self.hardStop = hardStop
         self.onResolve = onResolve
         self.onDismiss = onDismiss
-        self._scope = State(initialValue: hardStop != nil ? .once : context.suggestedScope)
+        let forcedOnce = hardStop != nil || context.secureInputRequest != nil
+        self._scope = State(initialValue: forcedOnce ? .once : context.suggestedScope)
+    }
+
+    // True when the Approve button should be enabled in secure-input mode.
+    // Exposed via static helper for unit testing (see ApprovalSheet.canSubmit).
+    private var canSubmit: Bool {
+        Self.canSubmit(secureInputRequest: context.secureInputRequest, enteredText: secureText)
+    }
+
+    /// Pure helper: Approve is enabled iff there is no secure input required
+    /// OR the user has typed at least one non-empty character.
+    static func canSubmit(secureInputRequest: ApprovalSecureInputRequest?, enteredText: String) -> Bool {
+        guard secureInputRequest != nil else { return true }
+        return !enteredText.isEmpty
     }
 
     var body: some View {
+        if context.secureInputRequest != nil {
+            secureBody
+        } else {
+            standardBody
+        }
+    }
+
+    // MARK: - Standard layout (unchanged)
+
+    private var standardBody: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
             Divider()
@@ -42,6 +73,75 @@ struct ApprovalSheet: View {
         }
         .padding(18)
         .frame(width: 440)
+    }
+
+    // MARK: - Secure-input layout
+
+    private var secureBody: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            secureHeader
+            Divider()
+            if let req = context.secureInputRequest {
+                secureInputSection(req)
+            }
+            Divider()
+            // Scope is locked to .once for secure input; render read-only.
+            ApprovalScopePicker(selection: $scope, isHardStop: true)
+            Divider()
+            secureButtons
+        }
+        .padding(18)
+        .frame(width: 440)
+        .tint(.orange)
+    }
+
+    private var secureHeader: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "key.fill")
+                .font(.title3)
+                .foregroundStyle(Color.orange)
+            Text("Secure Input Requested")
+                .font(.headline)
+            Spacer()
+        }
+    }
+
+    private func secureInputSection(_ req: ApprovalSecureInputRequest) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(req.matchedLine)
+                .font(.system(.callout, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+
+            SecureField(req.placeholder, text: $secureText)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    if canSubmit {
+                        onResolve(.approved, .once, secureText)
+                    }
+                }
+
+            Text("CTerm does not store or log this value.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var secureButtons: some View {
+        HStack(spacing: 10) {
+            Button("Deny") { onResolve(.denied, .once, nil) }
+                .keyboardShortcut(.cancelAction)
+            Spacer()
+            Button("Dismiss") { onDismiss() }
+            Button("Send") {
+                onResolve(.approved, .once, secureText)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.orange)
+            .keyboardShortcut(.defaultAction)
+            .disabled(!canSubmit)
+        }
     }
 
     // MARK: - Sections
@@ -83,12 +183,12 @@ struct ApprovalSheet: View {
 
     private var buttons: some View {
         HStack(spacing: 10) {
-            Button("Deny") { onResolve(.denied, .once) }
+            Button("Deny") { onResolve(.denied, .once, nil) }
                 .keyboardShortcut(.cancelAction)
             Spacer()
             Button("Dismiss") { onDismiss() }
             Button(hardStop != nil ? "Approve once" : "Approve") {
-                onResolve(.approved, scope)
+                onResolve(.approved, scope, nil)
             }
             .buttonStyle(.borderedProminent)
             .tint(hardStop != nil ? .red : accentForTier(context.riskTier))
