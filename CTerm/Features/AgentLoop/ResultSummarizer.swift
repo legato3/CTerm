@@ -1,9 +1,10 @@
 // ResultSummarizer.swift
 // CTerm
 //
-// Produces a short completion summary after an agent session finishes.
-// Includes: what changed, what succeeded/failed, and suggested next actions.
-// Feeds suggestions back into ActiveAISuggestionEngine as clickable chips.
+// Produces a structured AgentResult after an agent session finishes.
+// Builds the summary, captures file changes, scores next-action suggestions
+// with confidence, and calls session.complete(with:) which fires the
+// observer didComplete callback + posts the agentSessionCompleted notification.
 
 import Foundation
 import OSLog
@@ -15,23 +16,37 @@ enum ResultSummarizer {
 
     // MARK: - Public API
 
-    /// Summarize a completed session. Mutates the session with summary and next actions.
+    /// Summarize a completed session: constructs an AgentResult, writes the
+    /// handoff to AgentMemoryStore, and fires session.complete(with:).
     static func summarize(_ session: AgentSession, pwd: String?) async {
         session.transition(to: .summarizing)
 
         let summary = buildSummary(session)
-        session.summary = summary
-
-        // Generate next-step suggestions
         let nextActions = await generateNextActions(session, pwd: pwd)
-        session.nextActions = nextActions
+        let filesChanged = captureFilesChanged(session)
+        let durationMs = Int(session.elapsedSeconds * 1000)
+        let handoffKey = persistHandoff(session, pwd: pwd)
+        let exitStatus = computeExitStatus(session)
 
-        // Persist handoff to memory for cross-session continuity
-        persistHandoff(session, pwd: pwd)
+        let result = AgentResult(
+            summary: summary,
+            filesChanged: filesChanged,
+            nextActions: nextActions,
+            durationMs: durationMs,
+            handoffMemoryKey: handoffKey,
+            exitStatus: exitStatus
+        )
 
-        session.transition(to: .completed)
+        // Compat mirrors — existing consumers (sidebar, notifications) still
+        // read these string-backed fields.
+        session.summary = summary
+        session.nextActions = nextActions.map(\.prompt)
 
-        // Post notification for ActiveAI to pick up
+        // Fires observer.didComplete(result:) → ActiveAISuggestionEngine
+        // gets real confidence values for chip ranking.
+        session.complete(with: result)
+
+        // Back-compat notification for consumers not yet on the observer path.
         NotificationCenter.default.post(
             name: .agentSessionCompleted,
             object: nil,
@@ -39,12 +54,25 @@ enum ResultSummarizer {
                 "sessionID": session.id.uuidString,
                 "intent": session.displayIntent,
                 "summary": summary,
-                "nextActions": nextActions,
+                "nextActions": nextActions.map(\.prompt),
                 "artifactCount": session.artifacts.count,
             ]
         )
 
-        logger.info("ResultSummarizer: session completed — \(summary.prefix(100))")
+        logger.info("ResultSummarizer: session completed (\(exitStatus.rawValue)) — \(summary.prefix(100))")
+    }
+
+    // MARK: - Exit Status
+
+    private static func computeExitStatus(_ session: AgentSession) -> AgentResult.ExitStatus {
+        if session.phase == .cancelled { return .cancelled }
+        let steps = session.plan?.steps ?? []
+        let failed = steps.filter { $0.status == .failed }.count
+        let succeeded = steps.filter { $0.status == .succeeded }.count
+        if failed > 0 && succeeded > 0 { return .partial }
+        if failed > 0 { return .failed }
+        if session.phase == .failed { return .failed }
+        return .succeeded
     }
 
     // MARK: - Summary Construction
@@ -65,7 +93,7 @@ enum ResultSummarizer {
             let browserOutputs = session.artifacts
                 .filter { $0.kind == .commandOutput && $0.value.hasPrefix("Browser") }
             let findingCount = session.artifacts
-                .filter { $0.value.hasPrefix("Browser finding:") || $0.value.hasPrefix("Research summary:") }
+                .filter { $0.kind == .browserFinding || $0.value.hasPrefix("Research summary:") }
                 .count
             if findingCount > 0 {
                 parts.append("\(findingCount) browser finding(s) captured")
@@ -83,12 +111,6 @@ enum ResultSummarizer {
             parts.append(stepSummary)
         }
 
-        // Artifacts
-        let fileChanges = session.artifacts.filter { $0.kind == .fileChanged }
-        if !fileChanges.isEmpty {
-            parts.append("Files changed: \(fileChanges.map(\.value).joined(separator: ", "))")
-        }
-
         // Duration
         let duration = session.elapsedSeconds
         if duration < 60 {
@@ -100,49 +122,99 @@ enum ResultSummarizer {
         return parts.joined(separator: ". ") + "."
     }
 
+    // MARK: - File Changes
+
+    private static func captureFilesChanged(_ session: AgentSession) -> [String] {
+        // Pull from FileChangeStore which tracks all writes across the session.
+        let recent = FileChangeStore.shared.recentPaths(limit: 20)
+        if !recent.isEmpty { return recent }
+        // Fallback: artifacts the executor tagged as .fileChanged
+        return session.artifacts.filter { $0.kind == .fileChanged }.map(\.value)
+    }
+
     // MARK: - Next Action Generation
 
-    private static func generateNextActions(_ session: AgentSession, pwd: String?) async -> [String] {
-        var actions: [String] = []
+    private static func generateNextActions(_ session: AgentSession, pwd: String?) async -> [NextAction] {
+        var actions: [NextAction] = []
 
-        // Static suggestions based on outcome
-        let hasFailed = (session.plan?.steps ?? []).contains { $0.status == .failed }
+        let failedSteps = (session.plan?.steps ?? []).filter { $0.status == .failed }
+        let hasFailed = !failedSteps.isEmpty
 
-        if hasFailed {
-            let failedStep = (session.plan?.steps ?? []).first { $0.status == .failed }
-            if let step = failedStep {
-                actions.append("Fix: \(step.title.prefix(50))")
+        if hasFailed, let failedStep = failedSteps.first {
+            let snippet = failedStep.output?.prefix(120).replacingOccurrences(of: "\n", with: " ") ?? ""
+            actions.append(NextAction(
+                label: "Fix: \(failedStep.title.prefix(40))",
+                prompt: "Fix the failure in '\(failedStep.title)'. \(snippet)",
+                confidence: 0.9
+            ))
+            if failedSteps.count > 1 {
+                actions.append(NextAction(
+                    label: "Retry failed steps",
+                    prompt: "Retry the \(failedSteps.count) failed steps from the previous run",
+                    confidence: 0.7
+                ))
             }
-            actions.append("Retry failed steps")
         } else {
-            // Success path
+            // Success path — intent-aware suggestions
             switch session.classifiedIntent {
             case .executeCommand:
-                actions.append("Run tests to verify")
+                actions.append(NextAction(
+                    label: "Run tests to verify",
+                    prompt: "Run the test suite to verify the change",
+                    confidence: 0.75
+                ))
             case .fixError:
-                actions.append("Run tests to confirm fix")
-                actions.append("Review the changes")
+                actions.append(NextAction(
+                    label: "Run tests to confirm fix",
+                    prompt: "Run the test suite to confirm the fix",
+                    confidence: 0.8
+                ))
+                actions.append(NextAction(
+                    label: "Review the changes",
+                    prompt: "Review the files that just changed",
+                    confidence: 0.6
+                ))
             case .runWorkflow:
-                actions.append("Review changes and commit")
+                actions.append(NextAction(
+                    label: "Review changes and commit",
+                    prompt: "Review the changes and prepare a commit",
+                    confidence: 0.75
+                ))
             case .inspectRepo:
-                actions.append("Dig deeper into findings")
+                actions.append(NextAction(
+                    label: "Dig deeper into findings",
+                    prompt: "Dig deeper into the findings from the last inspection",
+                    confidence: 0.6
+                ))
             case .browserResearch:
-                actions.append("Apply findings to codebase")
-                let hasFindings = session.artifacts.contains { $0.value.hasPrefix("Research summary:") }
+                actions.append(NextAction(
+                    label: "Apply findings to codebase",
+                    prompt: "Apply the research findings to the codebase",
+                    confidence: 0.7
+                ))
+                let hasFindings = session.artifacts.contains { $0.kind == .browserFinding }
                 if hasFindings {
-                    actions.append("Research a related topic")
+                    actions.append(NextAction(
+                        label: "Research a related topic",
+                        prompt: "Research a related topic",
+                        confidence: 0.5
+                    ))
                 }
             default:
                 break
             }
         }
 
-        // LLM-generated next step (if Ollama is available)
+        // LLM-generated low-confidence next step
         if let llmSuggestion = await generateLLMNextAction(session, pwd: pwd) {
-            actions.append(llmSuggestion)
+            actions.append(NextAction(
+                label: String(llmSuggestion.prefix(40)),
+                prompt: llmSuggestion,
+                confidence: 0.5
+            ))
         }
 
-        return Array(actions.prefix(3)) // Cap at 3 suggestions
+        return Array(actions.prefix(3))
     }
 
     private static func generateLLMNextAction(_ session: AgentSession, pwd: String?) async -> String? {
@@ -170,12 +242,12 @@ enum ResultSummarizer {
 
     // MARK: - Handoff Persistence
 
-    private static func persistHandoff(_ session: AgentSession, pwd: String?) {
-        guard let pwd else { return }
+    @discardableResult
+    private static func persistHandoff(_ session: AgentSession, pwd: String?) -> String? {
+        guard let pwd else { return nil }
         let projectKey = AgentMemoryStore.key(for: pwd)
 
-        // Save handoff summary
-        AgentMemoryStore.shared.saveHandoff(
+        let handoff = AgentMemoryStore.shared.saveHandoff(
             projectKey: projectKey,
             goal: session.displayIntent,
             stepsCompleted: (session.plan?.steps ?? []).filter { $0.status == .succeeded }.count,
@@ -194,6 +266,8 @@ enum ResultSummarizer {
                 ttlDays: 7
             )
         }
+
+        return handoff.key
     }
 }
 

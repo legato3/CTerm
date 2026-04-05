@@ -9,6 +9,7 @@ import SwiftUI
 
 struct AgentRunPanelRegion: View {
     let activeTab: Tab?
+    var composeState: ComposeAssistantState?
     var onApprove: () -> Void
     var onStop: () -> Void
     var onDeny: () -> Void
@@ -39,7 +40,10 @@ struct AgentRunPanelRegion: View {
                         onApproveStep: { approveStep(id: $0, in: session) },
                         onSkipStep: { skipStep(id: $0, in: session) },
                         onSaveFinding: { saveFinding($0, in: session) },
-                        onSaveAllFindings: { saveAllFindings(in: session) }
+                        onSaveAllFindings: { saveAllFindings(in: session) },
+                        onNextAction: { prefillCompose(with: $0.prompt) },
+                        onContinue: { continueFromHandoff(session: session) },
+                        handoffGoalPreview: handoffGoalPreview(for: session)
                     )
                 }
             } else {
@@ -127,6 +131,33 @@ struct AgentRunPanelRegion: View {
             confidence: 0.8,
             source: .browserResearch
         )
+    }
+
+    // MARK: - Next-action / continue handoff
+
+    private func prefillCompose(with text: String) {
+        guard let composeState else { return }
+        composeState.draftText = text
+    }
+
+    private func handoffGoalPreview(for session: AgentSession) -> String? {
+        // Only meaningful after the session completes — before that, the
+        // handoff stored in memory is from an earlier session.
+        guard session.phase.isTerminal else { return nil }
+        guard let pwd = activeTab?.pwd ?? TerminalControlBridge.shared.delegate?.activeTabPwd else { return nil }
+        let projectKey = AgentMemoryStore.key(for: pwd)
+        guard let handoff = AgentMemoryStore.shared.lastHandoff(projectKey: projectKey) else { return nil }
+        // The stored value looks like: "Goal: X\nSteps: N/M\nFiles: …\nOutcome: …"
+        let goalLine = handoff.value.split(separator: "\n")
+            .first(where: { $0.hasPrefix("Goal:") })
+            .map { String($0.dropFirst(5).trimmingCharacters(in: .whitespaces)) }
+        guard let goal = goalLine, !goal.isEmpty, goal != session.displayIntent else { return nil }
+        return goal
+    }
+
+    private func continueFromHandoff(session: AgentSession) {
+        guard let goal = handoffGoalPreview(for: session) else { return }
+        prefillCompose(with: "Continue from: \(goal)")
     }
 
     // MARK: - Timer

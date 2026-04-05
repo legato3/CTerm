@@ -170,6 +170,7 @@ struct MainContentView: View {
                                 // a non-terminal AgentSession.
                                 AgentRunPanelRegion(
                                     activeTab: activeTab,
+                                    composeState: actions.composeAssistantState,
                                     onApprove: { _ = actions.onApproveOllamaAgent?() },
                                     onStop: { actions.onStopOllamaAgent?() },
                                     onDeny: { actions.onStopOllamaAgent?() },

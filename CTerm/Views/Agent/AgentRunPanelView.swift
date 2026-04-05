@@ -19,6 +19,11 @@ struct AgentRunPanelView: View {
     var onSkipStep: ((UUID) -> Void)? = nil
     var onSaveFinding: ((BrowserFinding) -> Void)? = nil
     var onSaveAllFindings: (() -> Void)? = nil
+    var onNextAction: ((NextAction) -> Void)? = nil
+    var onContinue: (() -> Void)? = nil
+    var handoffGoalPreview: String? = nil
+
+    @State private var showMemoriesPopover: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -65,6 +70,26 @@ struct AgentRunPanelView: View {
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .lineLimit(1)
                 .truncationMode(.tail)
+            if !session.memoryKeysUsed.isEmpty {
+                Button {
+                    showMemoriesPopover.toggle()
+                } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "brain.head.profile").font(.system(size: 8))
+                        Text("\(session.memoryKeysUsed.count)")
+                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundStyle(.purple)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Color.purple.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("\(session.memoryKeysUsed.count) memory entries informed this session")
+                .popover(isPresented: $showMemoriesPopover, arrowEdge: .bottom) {
+                    memoriesPopover
+                }
+            }
             if let rule = session.triggeredBy {
                 HStack(spacing: 2) {
                     Image(systemName: "bolt.fill").font(.system(size: 8))
@@ -218,19 +243,217 @@ struct AgentRunPanelView: View {
     // MARK: - Summary block
 
     private var summaryBlock: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let summary = session.summary {
-                Text(summary)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if let err = session.errorMessage {
+        VStack(alignment: .leading, spacing: 6) {
+            exitStatusLine
+            if !filesChanged.isEmpty {
+                filesChangedList
+            }
+            if !failedSteps.isEmpty {
+                failedStepsBlock
+            }
+            if !nextActions.isEmpty || handoffGoalPreview != nil {
+                nextActionsBlock
+            }
+            if let err = session.errorMessage, session.result == nil {
                 Text(err)
                     .font(.system(size: 10))
                     .foregroundStyle(.red)
                     .lineLimit(3)
             }
+        }
+    }
+
+    private var exitStatusLine: some View {
+        HStack(spacing: 6) {
+            Image(systemName: exitIcon)
+                .font(.system(size: 10))
+                .foregroundStyle(exitTint)
+            Text(exitHeadline)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(exitTint)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var filesChangedList: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Files changed (\(filesChanged.count))")
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .foregroundStyle(.tertiary)
+            ForEach(Array(filesChanged.prefix(5).enumerated()), id: \.offset) { _, path in
+                HStack(spacing: 4) {
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                    Text((path as NSString).lastPathComponent)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(path)
+                }
+            }
+            if filesChanged.count > 5 {
+                Text("+\(filesChanged.count - 5) more")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private var failedStepsBlock: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(failedSteps) { step in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(step.title)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.red)
+                        if let cmd = step.command {
+                            Text("$ \(cmd)")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        if let out = step.output {
+                            Text(out.prefix(200))
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(.red.opacity(0.8))
+                                .lineLimit(3)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        } label: {
+            Text("What failed (\(failedSteps.count))")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(.red)
+        }
+    }
+
+    private var nextActionsBlock: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Next")
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .foregroundStyle(.tertiary)
+            if let handoff = handoffGoalPreview {
+                Button {
+                    onContinue?()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.uturn.forward")
+                            .font(.system(size: 9))
+                        Text("Continue: \(handoff.prefix(50))")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .lineLimit(1)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
+                .tint(.accentColor)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(nextActions) { action in
+                    Button {
+                        onNextAction?(action)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(action.label)
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Text(String(format: "%.0f%%", action.confidence * 100))
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .help(action.prompt)
+                }
+            }
+        }
+    }
+
+    private var memoriesPopover: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label("Memories used (\(session.memoryKeysUsed.count))", systemImage: "brain.head.profile")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.purple)
+            Divider()
+            ForEach(Array(session.memoryKeysUsed.prefix(20).enumerated()), id: \.offset) { _, key in
+                HStack(spacing: 4) {
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 4))
+                        .foregroundStyle(.tertiary)
+                    Text(key)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            if session.memoryKeysUsed.count > 20 {
+                Text("+\(session.memoryKeysUsed.count - 20) more")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(10)
+        .frame(minWidth: 240, maxWidth: 340)
+    }
+
+    // MARK: - Summary derivations
+
+    private var filesChanged: [String] {
+        session.result?.filesChanged ?? []
+    }
+
+    private var failedSteps: [AgentPlanStep] {
+        (session.plan?.steps ?? []).filter { $0.status == .failed }
+    }
+
+    private var nextActions: [NextAction] {
+        session.result?.nextActions ?? []
+    }
+
+    private var exitHeadline: String {
+        guard let result = session.result else {
+            return session.phase == .failed ? "Failed" : "Done"
+        }
+        let seconds = result.durationMs / 1000
+        let durationText = seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s"
+        let fileText = result.filesChanged.isEmpty
+            ? ""
+            : " · \(result.filesChanged.count) file\(result.filesChanged.count == 1 ? "" : "s") changed"
+        switch result.exitStatus {
+        case .succeeded: return "Completed · \(durationText)\(fileText)"
+        case .failed:    return "Failed · \(durationText)\(fileText)"
+        case .partial:   return "Partial · \(durationText)\(fileText)"
+        case .cancelled: return "Cancelled · \(durationText)"
+        }
+    }
+
+    private var exitIcon: String {
+        guard let result = session.result else { return "checkmark.circle.fill" }
+        switch result.exitStatus {
+        case .succeeded: return "checkmark.circle.fill"
+        case .failed:    return "exclamationmark.triangle.fill"
+        case .partial:   return "exclamationmark.circle.fill"
+        case .cancelled: return "xmark.circle.fill"
+        }
+    }
+
+    private var exitTint: Color {
+        guard let result = session.result else { return .green }
+        switch result.exitStatus {
+        case .succeeded: return .green
+        case .failed:    return .red
+        case .partial:   return .orange
+        case .cancelled: return .secondary
         }
     }
 

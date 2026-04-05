@@ -107,6 +107,18 @@ enum ProjectContextProvider {
         return ctx
     }
 
+    /// Fast preview of memory keys that `gather(workDir:intent:)` would inject
+    /// into a new session's enriched prompt. Used by the run panel's
+    /// "memories used" chip to surface what the agent knows going in,
+    /// without re-running the full gather pipeline.
+    static func memoryKeysForPreview(workDir: String?, intent: String) -> [String] {
+        guard let workDir, !workDir.isEmpty else { return [] }
+        let projectKey = AgentMemoryStore.key(for: workDir)
+        return AgentMemoryStore.shared
+            .relevantMemories(projectKey: projectKey, intent: intent, limit: Self.maxMemories)
+            .map(\.key)
+    }
+
     // MARK: - Formatted prompt block
 
     /// Returns a human-readable context block suitable for prepending to a prompt.

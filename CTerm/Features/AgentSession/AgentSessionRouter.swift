@@ -87,6 +87,16 @@ final class AgentSessionRouter {
             backend: request.backend,
             triggeredBy: request.triggeredBy
         )
+        // Snapshot the memory keys we just injected (or would have) so the
+        // run panel can show a "memories used" chip. Only meaningful when
+        // the prompt was actually enriched.
+        if request.enrichContext || request.preEnrichedPrompt != nil {
+            let pwd = request.pwd ?? activeTab?.pwd
+            session.memoryKeysUsed = ProjectContextProvider.memoryKeysForPreview(
+                workDir: pwd,
+                intent: request.intent
+            )
+        }
         registry.register(session)
         logger.info("AgentSessionRouter: started \(request.kind.rawValue) session \(session.id.uuidString.prefix(8)) — \(request.intent.prefix(60))")
         return session

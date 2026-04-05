@@ -110,6 +110,12 @@ final class AgentSession: Identifiable {
     /// Transient: populated during the session, discarded at session end.
     var keptFindingIDs: Set<UUID> = []
 
+    /// Keys of memory entries injected into this session's enriched prompt.
+    /// Captured at session start when `enrichContext == true`. Surfaces as the
+    /// 🧠 N chip in the run panel header so the user can see what the agent
+    /// knew going in. Read-only snapshot — never mutated after init.
+    var memoryKeysUsed: [String] = []
+
     // MARK: - Observers
 
     private var observers: [WeakObserver] = []
