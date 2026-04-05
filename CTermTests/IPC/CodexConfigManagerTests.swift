@@ -97,6 +97,24 @@ final class CodexConfigManagerTests: XCTestCase {
         XCTAssertFalse(content.contains("Bearer old-token"))
     }
 
+    func test_enableIPC_removesLegacyCalyxSection() throws {
+        let existing = """
+        [mcp_servers.calyx-ipc]
+        url = "http://localhost:41830/mcp"
+        http_headers = { "Authorization" = "Bearer stale-token" }
+        """
+        writeConfig(existing)
+
+        try CodexConfigManager.enableIPC(port: 41831, token: "fresh-token", configPath: configPath)
+
+        let content = readConfig()
+        XCTAssertFalse(content.contains("[mcp_servers.calyx-ipc]"))
+        XCTAssertFalse(content.contains("Bearer stale-token"))
+        XCTAssertTrue(content.contains("[mcp_servers.cterm-ipc]"))
+        XCTAssertTrue(content.contains("http://localhost:41831/mcp"))
+        XCTAssertTrue(content.contains("Bearer fresh-token"))
+    }
+
     // MARK: - Preservation Tests
 
     func test_enableIPC_preservesComments() throws {
@@ -205,6 +223,25 @@ final class CodexConfigManagerTests: XCTestCase {
         XCTAssertTrue(content.contains("http://localhost:9999/mcp"))
     }
 
+    func test_disableIPC_removesLegacyCalyxSection() throws {
+        let existing = """
+        [mcp_servers.other]
+        url = "http://localhost:9999/mcp"
+
+        [mcp_servers.calyx-ipc]
+        url = "http://localhost:41830/mcp"
+        http_headers = { "Authorization" = "Bearer tok" }
+        """
+        writeConfig(existing)
+
+        try CodexConfigManager.disableIPC(configPath: configPath)
+
+        let content = readConfig()
+        XCTAssertFalse(content.contains("[mcp_servers.calyx-ipc]"))
+        XCTAssertFalse(content.contains("Bearer tok"))
+        XCTAssertTrue(content.contains("[mcp_servers.other]"))
+    }
+
     func test_disableIPC_noFile() {
         // Given: no file exists
         XCTAssertFalse(FileManager.default.fileExists(atPath: configPath))
@@ -264,6 +301,17 @@ final class CodexConfigManagerTests: XCTestCase {
         writeConfig(existing)
 
         // When/Then
+        XCTAssertTrue(CodexConfigManager.isIPCEnabled(configPath: configPath))
+    }
+
+    func test_isIPCEnabled_trueForLegacyCalyxSection() {
+        let existing = """
+        [mcp_servers.calyx-ipc]
+        url = "http://localhost:41830/mcp"
+        http_headers = { "Authorization" = "Bearer tok" }
+        """
+        writeConfig(existing)
+
         XCTAssertTrue(CodexConfigManager.isIPCEnabled(configPath: configPath))
     }
 

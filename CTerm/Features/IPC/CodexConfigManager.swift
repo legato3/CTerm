@@ -28,6 +28,9 @@ enum CodexConfigError: Error, LocalizedError {
 
 struct CodexConfigManager: Sendable {
 
+    private static let managedServerKey = "cterm-ipc"
+    private static let legacyServerKeys = ["calyx-ipc"]
+
     // MARK: - Public API
 
     static func enableIPC(port: Int, token: String, configPath: String? = nil) throws {
@@ -59,7 +62,7 @@ struct CodexConfigManager: Sendable {
 
         // Build the new section
         let section = """
-        [mcp_servers.cterm-ipc]
+        [mcp_servers.\(managedServerKey)]
         url = "http://localhost:\(port)/mcp"
         http_headers = { "Authorization" = "Bearer \(token)" }
         """
@@ -116,7 +119,11 @@ struct CodexConfigManager: Sendable {
         }
 
         let normalized = content.replacingOccurrences(of: "\r\n", with: "\n")
-        return normalized.components(separatedBy: "\n").contains { isSectionHeader($0) }
+        return normalized.components(separatedBy: "\n").contains { line in
+            managedServerKeys.contains { serverKey in
+                isManagedSectionHeader(line, serverKey: serverKey)
+            }
+        }
     }
 
     // MARK: - Private
@@ -125,14 +132,16 @@ struct CodexConfigManager: Sendable {
         NSHomeDirectory() + "/.codex/config.toml"
     }
 
-    /// Regex pattern for `[mcp_servers.cterm-ipc]` section header.
-    private static let sectionHeaderPattern = #"^[ \t]*\[mcp_servers\.cterm-ipc\][ \t]*(#.*)?$"#
-
     /// Regex pattern for any standard table header (but not array-of-tables `[[`).
     private static let anyTableHeaderPattern = #"^[ \t]*\[(?!\[)"#
 
-    private static func isSectionHeader(_ line: String) -> Bool {
-        line.range(of: sectionHeaderPattern, options: .regularExpression) != nil
+    private static func isManagedSectionHeader(_ line: String, serverKey: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let prefix = "[mcp_servers.\(serverKey)]"
+        guard trimmed.hasPrefix(prefix) else { return false }
+
+        let suffix = trimmed.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
+        return suffix.isEmpty || suffix.hasPrefix("#")
     }
 
     private static func isAnyTableHeader(_ line: String) -> Bool {
@@ -164,7 +173,7 @@ struct CodexConfigManager: Sendable {
                 continue
             }
 
-            if isSectionHeader(line) {
+            if managedServerKeys.contains(where: { isManagedSectionHeader(line, serverKey: $0) }) {
                 // Start of a cterm-ipc section — skip this line
                 inSection = true
                 continue
@@ -193,5 +202,9 @@ struct CodexConfigManager: Sendable {
         }
 
         return output
+    }
+
+    private static var managedServerKeys: [String] {
+        [managedServerKey] + legacyServerKeys
     }
 }

@@ -120,6 +120,35 @@ final class ClaudeConfigManagerTests: XCTestCase {
         XCTAssertEqual(headers?["Authorization"], "Bearer new-token")
     }
 
+    func test_enableIPC_removesLegacyCalyxEntry() throws {
+        let existingJSON = """
+        {
+            "mcpServers": {
+                "calyx-ipc": {
+                    "type": "http",
+                    "url": "http://localhost:41830/mcp",
+                    "headers": {
+                        "Authorization": "Bearer stale-token"
+                    }
+                }
+            }
+        }
+        """
+        writeConfig(existingJSON)
+
+        try ClaudeConfigManager.enableIPC(port: 41831, token: "fresh-token", configPath: configPath)
+
+        let dict = try readConfigDict()
+        let mcpServers = dict["mcpServers"] as? [String: Any]
+        XCTAssertNil(mcpServers?["calyx-ipc"], "Legacy calyx-ipc entry should be removed")
+
+        let ctermIPC = mcpServers?["cterm-ipc"] as? [String: Any]
+        XCTAssertEqual(ctermIPC?["url"] as? String, "http://localhost:41831/mcp")
+
+        let headers = ctermIPC?["headers"] as? [String: String]
+        XCTAssertEqual(headers?["Authorization"], "Bearer fresh-token")
+    }
+
     func test_enableIPC_invalidJSON_throws() {
         // Given: file contains invalid JSON
         writeConfig("this is not json {{{")
@@ -292,6 +321,34 @@ final class ClaudeConfigManagerTests: XCTestCase {
                        "No file should be created when disabling with no existing config")
     }
 
+    func test_disableIPC_removesLegacyCalyxEntry() throws {
+        let existingJSON = """
+        {
+            "mcpServers": {
+                "calyx-ipc": {
+                    "type": "http",
+                    "url": "http://localhost:41830/mcp",
+                    "headers": {
+                        "Authorization": "Bearer tok"
+                    }
+                },
+                "other-server": {
+                    "type": "http",
+                    "url": "http://localhost:9999/mcp"
+                }
+            }
+        }
+        """
+        writeConfig(existingJSON)
+
+        try ClaudeConfigManager.disableIPC(configPath: configPath)
+
+        let dict = try readConfigDict()
+        let mcpServers = dict["mcpServers"] as? [String: Any]
+        XCTAssertNil(mcpServers?["calyx-ipc"], "Legacy calyx-ipc entry should be removed")
+        XCTAssertNotNil(mcpServers?["other-server"], "Unrelated MCP entries should be preserved")
+    }
+
     // MARK: - isIPCEnabled
 
     func test_isIPCEnabled_trueWhenPresent() {
@@ -312,6 +369,22 @@ final class ClaudeConfigManagerTests: XCTestCase {
         writeConfig(existingJSON)
 
         // When/Then
+        XCTAssertTrue(ClaudeConfigManager.isIPCEnabled(configPath: configPath))
+    }
+
+    func test_isIPCEnabled_trueWhenLegacyCalyxPresent() {
+        let existingJSON = """
+        {
+            "mcpServers": {
+                "calyx-ipc": {
+                    "type": "http",
+                    "url": "http://localhost:41830/mcp"
+                }
+            }
+        }
+        """
+        writeConfig(existingJSON)
+
         XCTAssertTrue(ClaudeConfigManager.isIPCEnabled(configPath: configPath))
     }
 

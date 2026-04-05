@@ -25,8 +25,9 @@ enum ClaudeConfigError: Error, LocalizedError {
 
 struct ClaudeConfigManager: Sendable {
 
+    private static let managedServerKey = "cterm-ipc"
+    private static let legacyServerKeys = ["calyx-ipc"]
     private static let mcpServersKey = "mcpServers"
-    private static let ctermIPCKey = "cterm-ipc"
 
     // MARK: - Public API
 
@@ -64,6 +65,11 @@ struct ClaudeConfigManager: Sendable {
         // Ensure mcpServers key exists
         var mcpServers = config[mcpServersKey] as? [String: Any] ?? [:]
 
+        // Clean up any stale aliases that point at the same local CTerm server.
+        for legacyKey in legacyServerKeys {
+            mcpServers.removeValue(forKey: legacyKey)
+        }
+
         // Add/update cterm-ipc entry
         let ctermEntry: [String: Any] = [
             "type": "http",
@@ -72,7 +78,7 @@ struct ClaudeConfigManager: Sendable {
                 "Authorization": "Bearer \(token)"
             ]
         ]
-        mcpServers[ctermIPCKey] = ctermEntry
+        mcpServers[managedServerKey] = ctermEntry
         config[mcpServersKey] = mcpServers
 
         // Serialize
@@ -110,7 +116,9 @@ struct ClaudeConfigManager: Sendable {
             return
         }
 
-        mcpServers.removeValue(forKey: ctermIPCKey)
+        for serverKey in managedServerKeys {
+            mcpServers.removeValue(forKey: serverKey)
+        }
 
         // If mcpServers is now empty, remove the key entirely
         if mcpServers.isEmpty {
@@ -142,13 +150,17 @@ struct ClaudeConfigManager: Sendable {
             return false
         }
 
-        return mcpServers[ctermIPCKey] != nil
+        return managedServerKeys.contains { mcpServers[$0] != nil }
     }
 
     // MARK: - Private
 
     private static var defaultConfigPath: String {
         NSHomeDirectory() + "/.claude.json"
+    }
+
+    private static var managedServerKeys: [String] {
+        [managedServerKey] + legacyServerKeys
     }
 
 }
