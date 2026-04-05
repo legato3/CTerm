@@ -7,6 +7,7 @@ import SwiftUI
 
 struct AgentPermissionsView: View {
     @State private var store = AgentPermissionsStore.shared
+    @State private var grants = AgentGrantStore.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -24,9 +25,56 @@ struct AgentPermissionsView: View {
                 .font(.system(size: 10, design: .rounded))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            Divider().padding(.vertical, 2)
+
+            grantsSection
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+    }
+
+    private var grantsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Granted Approvals")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
+
+            HStack(spacing: 10) {
+                grantStat("Session", count: grants.sessionGrantCount)
+                grantStat("Task", count: grants.taskGrantCount)
+                grantStat("Repo", count: grants.repoGrantCount)
+                Spacer()
+            }
+
+            HStack(spacing: 8) {
+                Button("Clear session grants") {
+                    grants.revokeAllSessionGrants()
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10, design: .rounded))
+                .disabled(grants.sessionGrantCount == 0 && grants.taskGrantCount == 0)
+
+                Button("Clear repo grants") {
+                    grants.revokeAllRepoGrants()
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10, design: .rounded))
+                .disabled(grants.repoGrantCount == 0)
+            }
+        }
+    }
+
+    private func grantStat(_ label: String, count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("\(count)")
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+            Text(label)
+                .font(.system(size: 9, design: .rounded))
+                .foregroundStyle(.tertiary)
+        }
     }
 
     private func trustModeRow(_ mode: AgentTrustMode) -> some View {

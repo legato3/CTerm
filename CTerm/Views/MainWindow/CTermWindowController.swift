@@ -635,7 +635,7 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
 
         wireWindowActions()
         let mainContent = buildMainContentView()
-        let hosting = NSHostingView(rootView: AnyView(mainContent.environment(windowActions)))
+        let hosting = NSHostingView(rootView: AnyView(mainContent.environment(windowActions).hostsApprovalSheet()))
         hosting.frame = contentView.bounds
         hosting.autoresizingMask = [.width, .height]
         contentView.addSubview(hosting)

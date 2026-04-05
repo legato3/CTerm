@@ -280,37 +280,36 @@ final class ExecutionCoordinator {
     private func executeLocalShell(step: AgentPlanStep, index: Int) {
         guard let plan = session.plan, let command = step.command else { return }
 
-        let permissions = AgentPermissionsStore.shared
         let pwd = TerminalControlBridge.shared.delegate?.activeTabPwd
         let gitBranch = TerminalControlBridge.shared.delegate?.activeTabGitBranch
 
-        // Risk-score the command in context
-        let assessment = RiskScorer.assess(
-            command: command,
+        // Route through the unified approval gate (hard-stop + grants + trust mode).
+        let gate = ApprovalGate.evaluate(
+            action: .shellCommand(command),
+            session: session,
             pwd: pwd,
             gitBranch: gitBranch
         )
 
-        let decision = permissions.decide(for: assessment)
-
-        switch decision {
+        switch gate {
         case .blocked(let reason):
             plan.steps[index].status = .failed
             plan.steps[index].output = "Blocked: \(reason)"
-            logger.warning("ExecutionCoordinator: blocked (\(assessment.tier.rawValue)): \(command.prefix(60))")
-
+            logger.warning("ExecutionCoordinator: blocked: \(command.prefix(60))")
             executionTask = Task { @MainActor [weak self] in
                 self?.executeNextStep()
             }
             return
 
-        case .requireApproval:
-            // Step should already be in .approved state from the approval flow.
-            if step.status != .approved {
-                plan.steps[index].status = .pending
-                logger.info("ExecutionCoordinator: step requires approval (risk \(assessment.score)): \(command.prefix(60))")
-                return
-            }
+        case .requireApproval(let ctx, _):
+            // Surface approval sheet and park this step. `onApprovalResolved`
+            // on the session fires once the user answers.
+            presentApproval(context: ctx, hardStop: nil, pwd: pwd, step: step, index: index)
+            return
+
+        case .hardStop(let reason, let ctx, _):
+            presentApproval(context: ctx, hardStop: reason, pwd: pwd, step: step, index: index)
+            return
 
         case .autoApprove:
             break
@@ -335,6 +334,43 @@ final class ExecutionCoordinator {
         }
     }
 
+    // MARK: - Approval Parking
+
+    /// Park the current step on an approval request. When the user resolves,
+    /// `onApprovalResolved` fires and we either advance the step (approved)
+    /// or mark it failed (denied/deferred).
+    private func presentApproval(
+        context: ApprovalContext,
+        hardStop: HardStopReason?,
+        pwd: String?,
+        step: AgentPlanStep,
+        index: Int
+    ) {
+        guard let plan = session.plan else { return }
+        plan.steps[index].status = .pending
+
+        ApprovalPresenter.shared.setRepoPath(pwd)
+        if let hardStop { ApprovalPresenter.shared.presentHardStop(reason: hardStop) }
+
+        // Wire resume. Executor picks up after the user answers.
+        session.onApprovalResolved = { [weak self] in
+            guard let self else { return }
+            self.session.onApprovalResolved = nil
+            let answer = self.session.approval?.decision ?? .deferred
+            if answer == .approved {
+                // Re-enter executeLocalShell; grant cache should now cover it.
+                plan.steps[index].status = .approved
+                self.executeNextStep()
+            } else {
+                plan.steps[index].status = .failed
+                plan.steps[index].output = "Denied by user"
+                self.executeNextStep()
+            }
+        }
+        session.requestApproval(context)
+        logger.info("ExecutionCoordinator: awaiting approval for step \(index + 1)")
+    }
+
     // MARK: - Browser Execution
 
     private func executeBrowserAction(step: AgentPlanStep, index: Int) {
@@ -350,16 +386,15 @@ final class ExecutionCoordinator {
         executionTask = Task { @MainActor [weak self] in
             guard let self else { return }
 
-            // Check browser automation permissions
-            let permissions = AgentPermissionsStore.shared
-            let decision = permissions.decide(for: RiskAssessment(
-                score: self.browserRiskScore(for: command),
-                factors: [RiskFactor(kind: .networkExposure, weight: 15, reason: "Browser automation")],
-                command: command,
-                category: .browserAutomation
-            ))
-
-            switch decision {
+            let tier = RiskTier.from(score: self.browserRiskScore(for: command))
+            let pwd = TerminalControlBridge.shared.delegate?.activeTabPwd
+            let gate = ApprovalGate.evaluate(
+                action: .browserAction(command: command, tier: tier),
+                session: self.session,
+                pwd: pwd,
+                gitBranch: nil
+            )
+            switch gate {
             case .blocked(let reason):
                 plan.steps[index].status = .failed
                 plan.steps[index].output = "Blocked: \(reason)"
@@ -369,11 +404,12 @@ final class ExecutionCoordinator {
                 )
                 self.executeNextStep()
                 return
-            case .requireApproval:
-                if step.status != .approved {
-                    plan.steps[index].status = .pending
-                    return
-                }
+            case .requireApproval(let ctx, _):
+                self.presentApproval(context: ctx, hardStop: nil, pwd: pwd, step: step, index: index)
+                return
+            case .hardStop(let reason, let ctx, _):
+                self.presentApproval(context: ctx, hardStop: reason, pwd: pwd, step: step, index: index)
+                return
             case .autoApprove:
                 break
             }

@@ -71,6 +71,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Prune stale memories across all projects on launch
         AgentMemoryStore.shared.pruneAll()
 
+        // Start the approval presenter so every new AgentSession's approval
+        // requests surface in the modal sheet.
+        ApprovalPresenter.shared.startWatching()
+
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
         if isUITesting || !restoreSession() {
             if pendingURLs.isEmpty {

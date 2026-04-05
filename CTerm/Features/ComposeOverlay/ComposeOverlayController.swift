@@ -496,7 +496,7 @@ final class ComposeOverlayController {
                         return
                     }
                     // Auto-run if the command is safe and we still have a controller reference.
-                    if self.isSafeAutoRunCommand(command),
+                    if self.isSafeAutoRunCommand(command, for: activeTab),
                        let controller = self.agentTargetController,
                        let sendEnterKey = self.agentSendEnterKey {
                         activeTab.setOllamaAgentAwaitingApproval(command: command, message: "↪ Auto-running: \(decision.message)")
@@ -798,23 +798,25 @@ final class ComposeOverlayController {
     }
 
     /// Returns `true` if the command is safe to auto-run without user approval.
-    /// Delegates to RiskScorer + AgentPermissionsStore trust mode.
-    private func isSafeAutoRunCommand(_ command: String) -> Bool {
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    /// Routes through ApprovalGate so hard-stops and existing grants are respected.
+    private func isSafeAutoRunCommand(_ command: String, for activeTab: Tab?) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
 
-        let permissions = AgentPermissionsStore.shared
-        let pwd = agentTargetController.flatMap { _ in
-            TerminalControlBridge.shared.delegate?.activeTabPwd
-        }
+        let pwd = activeTab?.pwd ?? TerminalControlBridge.shared.delegate?.activeTabPwd
         let gitBranch = TerminalControlBridge.shared.delegate?.activeTabGitBranch
+        let session = activeTab?.ollamaAgentSession
 
-        return RiskScorer.isAutoApprovable(
-            command: command,
+        let gate = ApprovalGate.evaluate(
+            action: .shellCommand(command),
+            session: session,
             pwd: pwd,
-            gitBranch: gitBranch,
-            threshold: permissions.autoApproveThreshold
+            gitBranch: gitBranch
         )
+        switch gate {
+        case .autoApprove: return true
+        default:           return false
+        }
     }
 
     private func agentRecentCommandContext(for activeTab: Tab) -> String {
