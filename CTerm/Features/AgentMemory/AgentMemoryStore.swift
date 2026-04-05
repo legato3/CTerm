@@ -431,25 +431,36 @@ final class AgentMemoryStore: @unchecked Sendable {
 
     /// Derive a stable project key from a working directory path.
     static func key(for workDir: String) -> String {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["-C", workDir, "rev-parse", "--show-toplevel"]
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        try? process.run()
-        process.waitUntilExit()
-
-        if process.terminationStatus == 0,
-           let root = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-               .trimmingCharacters(in: .whitespacesAndNewlines),
-           !root.isEmpty {
-            return pathComponents(root)
+        if let root = gitRoot(startingAt: workDir) {
+            return pathComponents(root.path)
         }
         return pathComponents(workDir)
     }
 
     // MARK: - Private
+
+    private static func gitRoot(startingAt workDir: String) -> URL? {
+        let fm = FileManager.default
+        var current = URL(fileURLWithPath: workDir).standardizedFileURL
+        var isDirectory: ObjCBool = false
+
+        if !fm.fileExists(atPath: current.path, isDirectory: &isDirectory) {
+            current.deleteLastPathComponent()
+        } else if !isDirectory.boolValue {
+            current.deleteLastPathComponent()
+        }
+
+        while true {
+            let gitMarker = current.appendingPathComponent(".git")
+            if fm.fileExists(atPath: gitMarker.path) {
+                return current
+            }
+
+            let parent = current.deletingLastPathComponent()
+            guard parent.path != current.path else { return nil }
+            current = parent
+        }
+    }
 
     private static func pathComponents(_ path: String) -> String {
         let parts = path.components(separatedBy: "/").filter { !$0.isEmpty }

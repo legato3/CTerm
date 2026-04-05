@@ -26,9 +26,11 @@ final class FocusManager {
 
     /// Schedules an async focus-restore cycle. Call after every tab switch or split.
     func restoreFocus(window: NSWindow?, tab: Tab?, splitContainerView: SplitContainerView?) {
-        // In Warp mode, keep focus in the compose bar.
+        // In Warp mode, keep keyboard focus in the compose bar, but preserve
+        // the active terminal surface's focused appearance while the window is key.
         if let focusComposeOverlay {
             focusComposeOverlay()
+            applyVisualFocus(window: window, tab: tab)
             return
         }
 
@@ -48,10 +50,11 @@ final class FocusManager {
     /// Synchronously focuses the active split view. Returns true if focus was set.
     @discardableResult
     func focusImmediately(window: NSWindow?, tab: Tab?) -> Bool {
-        // In Warp mode, keep focus in the compose bar.
+        // In Warp mode, keep keyboard focus in the compose bar, but preserve
+        // the active terminal surface's focused appearance while the window is key.
         if let focusComposeOverlay {
             focusComposeOverlay()
-            return true
+            return applyVisualFocus(window: window, tab: tab)
         }
 
         guard let tab,
@@ -63,15 +66,32 @@ final class FocusManager {
         let becameFirstResponder = window?.makeFirstResponder(focusView) ?? false
         guard becameFirstResponder else { return false }
 
+        applyFocusedSurfaceState(tab: tab, focusedID: focusedID, focusView: focusView)
+        return true
+    }
+
+    // MARK: - Private
+
+    @discardableResult
+    private func applyVisualFocus(window: NSWindow?, tab: Tab?) -> Bool {
+        guard window?.isKeyWindow == true,
+              let tab,
+              let focusedID = tab.splitTree.focusedLeafID,
+              let focusView = tab.registry.view(for: focusedID) else {
+            return false
+        }
+
+        applyFocusedSurfaceState(tab: tab, focusedID: focusedID, focusView: focusView)
+        return true
+    }
+
+    private func applyFocusedSurfaceState(tab: Tab, focusedID: UUID, focusView: SurfaceView) {
         tab.registry.controller(for: focusedID)?.setFocus(true)
         tab.registry.controller(for: focusedID)?.refresh()
         focusView.needsDisplay = true
         onFocusRestored?()
         tab.clearUnreadNotifications()
-        return true
     }
-
-    // MARK: - Private
 
     private func attemptFocusRestore(
         requestID: UInt64,
@@ -108,11 +128,7 @@ final class FocusManager {
 
         let result = window?.makeFirstResponder(focusView) ?? false
         if result {
-            tab.registry.controller(for: focusedID)?.setFocus(true)
-            tab.registry.controller(for: focusedID)?.refresh()
-            focusView.needsDisplay = true
-            tab.clearUnreadNotifications()
-            onFocusRestored?()
+            applyFocusedSurfaceState(tab: tab, focusedID: focusedID, focusView: focusView)
         } else {
             logger.warning("makeFirstResponder failed for surface \(focusedID) — triggering focus-lost indicator")
             onFocusFailed?()
