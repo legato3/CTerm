@@ -457,14 +457,7 @@ private struct ComposeCommandBarView: View {
                         text: Binding(get: { assistant.draftText }, set: { assistant.setDraftText($0) }),
                         onSend: onSend,
                         onDismiss: onDismiss,
-                        onCmdReturn: {
-                            if assistant.mode == .shell && assistant.detectedIntent == .agent {
-                                assistant.mode = .claudeAgent
-                            } else if assistant.mode == .claudeAgent || assistant.mode.isAgentMode {
-                                let text = assistant.draftText
-                                _ = onSend?(text)
-                            }
-                        },
+                        onCmdReturn: forceAgentSend,
                         placeholderText: assistant.placeholderText,
                         actions: windowActions
                     )
@@ -586,6 +579,24 @@ private struct ComposeCommandBarView: View {
             .padding(.horizontal, 12).padding(.vertical, 5)
             .background(hint.tint.opacity(0.06))
         }
+    }
+
+    private func forceAgentSend() {
+        let text = assistant.draftText
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let previousMode = assistant.mode
+        let previousLock = assistant.isModeLocked
+        let forcedMode = assistant.lastAgentMode.isAgentMode ? assistant.lastAgentMode : .claudeAgent
+
+        assistant.mode = forcedMode
+        assistant.isModeLocked = true
+        defer {
+            assistant.mode = previousMode
+            assistant.isModeLocked = previousLock
+        }
+
+        _ = onSend?(text)
     }
 
     private struct ContextHint {

@@ -2,9 +2,8 @@
 // CTerm
 //
 // Container placed between the terminal area and the compose bar. Reads the
-// active tab's inline AgentSession (via Tab.ollamaAgentSession) and any
-// other non-terminal session tied to the tab (via AgentSessionRegistry).
-// Renders card / strip / nothing based on state.
+// active tab's inline AgentSession (via Tab.ollamaAgentSession) and renders
+// card / strip / nothing based on state.
 
 import SwiftUI
 
@@ -15,9 +14,7 @@ struct AgentRunPanelRegion: View {
     var onDeny: () -> Void
     var onDismiss: () -> Void
 
-    /// Driven by a 1-second timer so the elapsed-time label updates and the
-    /// registry-scanned fallback stays in sync even when a non-inline session
-    /// mutates outside of Tab's observable tree.
+    /// Driven by a 1-second timer so the elapsed-time label updates.
     @State private var tick: Int = 0
     @State private var timer: Timer?
 
@@ -53,15 +50,14 @@ struct AgentRunPanelRegion: View {
 
     // MARK: - Selection
 
-    /// Prefers the tab's inline session; falls back to the most recent
-    /// non-terminal session in the registry for this tab.
+    /// Only inline compose-driven sessions are controllable from this region.
+    /// Other session kinds still have dedicated sidebars, but the window-level
+    /// actions here only know how to drive `Tab.ollamaAgentSession`.
     private var displayedSession: AgentSession? {
         _ = tick  // re-read on timer fire
         guard let tab = activeTab else { return nil }
-        if let inline = tab.ollamaAgentSession, !inline.phase.isTerminal {
-            return inline
-        }
-        return AgentSessionRegistry.shared.activeSession(forTab: tab.id)
+        guard let inline = tab.ollamaAgentSession, !inline.phase.isTerminal else { return nil }
+        return inline
     }
 
     // MARK: - Per-step approval

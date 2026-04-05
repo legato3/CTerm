@@ -126,8 +126,8 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
         }
         composeController.assistantState.onDraftTextChanged = { [weak self] text in
             guard let self else { return }
-            // Only predict in shell mode
-            guard self.composeController.assistantState.mode == .shell else {
+            // Only predict when Return would currently route to shell.
+            guard self.composeController.assistantState.effectiveMode(for: text) == .shell else {
                 self.nextCommandPredictor.dismiss()
                 self.syncActiveAIState()
                 return
@@ -1043,14 +1043,14 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
         // attached blocks intact until the agent flow actually consumes them.
         activeAIEngine.clear()
         nextCommandPredictor.dismiss()
-        let mode = composeController.assistantState.mode
+        let effectiveMode = composeController.assistantState.effectiveMode(for: text)
         let sent = composeController.send(
             text,
             activeTab: activeTab,
             focusedController: focusedController,
             sendEnterKey: { [weak self] controller in self?.sendEnterKey(to: controller) }
         )
-        if sent, mode == .claudeAgent || mode == .ollamaAgent {
+        if sent, effectiveMode.isAgentMode {
             revealDedicatedAgentSidebar()
         }
         syncActiveAIState()

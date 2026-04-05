@@ -247,6 +247,9 @@ final class ComposeAssistantState {
     var mode: ComposeAssistantMode {
         didSet {
             UserDefaults.standard.set(mode.rawValue, forKey: AppStorageKeys.composeAssistantMode)
+            if mode.isAgentMode, lastAgentMode != mode {
+                lastAgentMode = mode
+            }
         }
     }
 
