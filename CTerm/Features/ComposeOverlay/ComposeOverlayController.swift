@@ -15,7 +15,10 @@ private let logger = Logger(
 )
 
 private let shellPromptSuffixes: [String] = [
-    "$ ", "% ", "❯ ", "➜ ", "> ", "λ ", "# "
+    "$ ", "% ", "❯ ", "➜ ", "> ", "λ ", "# ",
+    // Trimmed variants for when viewport text doesn't capture the trailing space
+    // (e.g. cursor is at the prompt position in SSH sessions).
+    "$", "%", "❯", "➜", "#",
 ]
 
 @MainActor
@@ -700,7 +703,7 @@ final class ComposeOverlayController {
                 if self.isPromptReady(snippet) {
                     let exitCode = activeTab.lastShellError == nil ? 0 : 1
                     let errorSnippet = activeTab.lastShellError?.snippet
-                    _ = activeTab.finishCommandBlock(
+                    let finishedID = activeTab.finishCommandBlock(
                         id: blockID,
                         surfaceID: surfaceID,
                         fallbackCommand: block.command,
@@ -708,6 +711,12 @@ final class ComposeOverlayController {
                         durationNanoseconds: nil,
                         outputSnippet: snippet,
                         errorSnippet: errorSnippet
+                    )
+                    // Notify the agent loop so it doesn't stay stuck in .runningCommand
+                    // when ghostty shell integration didn't fire (e.g. remote SSH sessions).
+                    self.handleCommandFinished(
+                        for: activeTab,
+                        commandBlockID: finishedID
                     )
                     // Auto-suggest a fix when a user shell command fails with output.
                     if exitCode != 0,
@@ -722,6 +731,34 @@ final class ComposeOverlayController {
                     return
                 }
             }
+
+            // Polling exhausted without detecting a prompt — unstick the agent loop.
+            // This handles cases where shell integration is absent (SSH, non-standard
+            // shells) and the prompt pattern isn't recognized.
+            guard let activeTab,
+                  let block = activeTab.commandBlock(id: blockID),
+                  block.status == .running
+            else { return }
+
+            let snippet = self.readViewportSnippet(
+                activeTab: activeTab,
+                preferredSurfaceID: surfaceID,
+                focusedController: focusedController
+            )
+            let finishedID = activeTab.finishCommandBlock(
+                id: blockID,
+                surfaceID: surfaceID,
+                fallbackCommand: block.command,
+                exitCode: nil,
+                durationNanoseconds: nil,
+                outputSnippet: snippet,
+                errorSnippet: nil
+            )
+            logger.warning("Command block \(blockID) timed out waiting for prompt — advancing agent loop")
+            self.handleCommandFinished(
+                for: activeTab,
+                commandBlockID: finishedID
+            )
         }
     }
 

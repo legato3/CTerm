@@ -308,6 +308,10 @@ final class ExecutionCoordinator {
             executionTask = Task { @MainActor [weak self] in
                 self?.executeNextStep()
             }
+        } else {
+            // Watchdog: if handleCommandFinished is never called (e.g. shell integration
+            // is absent in an SSH session), unstick the loop after a timeout.
+            scheduleStepWatchdog(index: index)
         }
     }
 
@@ -567,6 +571,28 @@ final class ExecutionCoordinator {
 
     private func currentRunningStepIndex() -> Int? {
         session.planSteps.firstIndex(where: { $0.status == .running })
+    }
+
+    // MARK: - Step Watchdog
+
+    /// Timeout (in seconds) after which a .running step is considered stuck.
+    private static let stepWatchdogTimeout: UInt64 = 30
+
+    /// Schedules a watchdog that will force-advance the step if handleCommandFinished
+    /// is never called. This covers SSH sessions and shells without ghostty integration.
+    private func scheduleStepWatchdog(index: Int) {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: Self.stepWatchdogTimeout * 1_000_000_000)
+            guard let self else { return }
+            guard index < self.session.planSteps.count,
+                  self.session.planSteps[index].status == .running
+            else { return }
+
+            logger.warning("ExecutionCoordinator: step \(index + 1) watchdog fired — no command-finished callback received")
+            self.session.planSteps[index].status = .failed
+            self.session.planSteps[index].output = "Timed out waiting for command completion (shell integration may be unavailable)"
+            self.executeNextStep()
+        }
     }
 }
 
