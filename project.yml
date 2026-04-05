@@ -1,4 +1,4 @@
-name: Calyx
+name: CTerm
 options:
   bundleIdPrefix: com.legato3
   deploymentTarget:
@@ -32,11 +32,11 @@ packages:
     from: "1.5.0"
 
 targets:
-  Calyx:
+  CTerm:
     type: application
     platform: macOS
     sources:
-      - path: Calyx
+      - path: CTerm
         excludes:
           - "**/*.entitlements"
     postBuildScripts:
@@ -49,12 +49,12 @@ targets:
           - $(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/Resources/terminfo
       - script: |
           mkdir -p "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/bin"
-          cp "${BUILT_PRODUCTS_DIR}/calyx" "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/bin/calyx"
-        name: Bundle CalyxCLI
+          cp "${BUILT_PRODUCTS_DIR}/cterm" "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/bin/cterm"
+        name: Bundle CTermCLI
         outputFiles:
-          - $(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/Resources/bin/calyx
+          - $(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/Resources/bin/cterm
     info:
-      path: Calyx/Info.plist
+      path: CTerm/Info.plist
       properties:
         CFBundleIconFile: AppIcon
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -69,9 +69,9 @@ targets:
               - public.folder
         NSServices:
           - NSMenuItem:
-              default: Open in Calyx
-            NSMessage: openInCalyx
-            NSPortName: Calyx
+              default: Open in CTerm
+            NSMessage: openInCTerm
+            NSPortName: CTerm
             NSRequiredContext:
               NSTextContent: FilePath
             NSSendTypes:
@@ -79,12 +79,12 @@ targets:
               - public.plain-text
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.legato3.terminal
-        PRODUCT_NAME: Calyx
+        PRODUCT_BUNDLE_IDENTIFIER: com.legato3.cterm
+        PRODUCT_NAME: CTerm
         MARKETING_VERSION: "0.20.3"
         CURRENT_PROJECT_VERSION: 26
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
-        CODE_SIGN_ENTITLEMENTS: Calyx/Calyx.entitlements
+        CODE_SIGN_ENTITLEMENTS: CTerm/CTerm.entitlements
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: T3F87H6Y8Y
         ENABLE_HARDENED_RUNTIME: YES
@@ -99,41 +99,41 @@ targets:
       - sdk: WebKit.framework
       - sdk: UserNotifications.framework
       - sdk: Charts.framework
-      - target: CalyxCLI
+      - target: CTermCLI
         embed: false
 
-  CalyxTests:
+  CTermTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: CalyxTests
+      - path: CTermTests
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
-      - target: Calyx
+      - target: CTerm
 
-  CalyxUITests:
+  CTermUITests:
     type: bundle.ui-testing
     platform: macOS
     sources:
-      - path: CalyxUITests
+      - path: CTermUITests
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-        TEST_TARGET_NAME: Calyx
+        TEST_TARGET_NAME: CTerm
     dependencies:
-      - target: Calyx
+      - target: CTerm
 
-  CalyxCLI:
+  CTermCLI:
     type: tool
     platform: macOS
     sources:
-      - path: CalyxCLI
+      - path: CTermCLI
     settings:
       base:
-        PRODUCT_NAME: calyx
-        PRODUCT_MODULE_NAME: CalyxCLI
+        PRODUCT_NAME: cterm
+        PRODUCT_MODULE_NAME: CTermCLI
         SWIFT_VERSION: "6.2"
         MACOSX_DEPLOYMENT_TARGET: "26.0"
         CODE_SIGN_STYLE: Automatic
@@ -148,35 +148,35 @@ targets:
         product: ArgumentParser
 
 schemes:
-  Calyx:
+  CTerm:
     build:
       targets:
-        Calyx: all
+        CTerm: all
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - CalyxTests
-        - CalyxUITests
-  CalyxTests:
+        - CTermTests
+        - CTermUITests
+  CTermTests:
     build:
       targets:
-        Calyx: [run, test]
-        CalyxTests: test
+        CTerm: [run, test]
+        CTermTests: test
     test:
       config: Debug
       targets:
-        - CalyxTests
-  CalyxUITests:
+        - CTermTests
+  CTermUITests:
     build:
       targets:
-        Calyx: [run, test]
-        CalyxUITests: test
+        CTerm: [run, test]
+        CTermUITests: test
     test:
       config: Debug
       targets:
-        - CalyxUITests
+        - CTermUITests
 
 fileGroups:
-  - Calyx-Bridging-Header.h
+  - CTerm-Bridging-Header.h

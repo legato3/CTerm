@@ -6,7 +6,7 @@
 
 ## 1. ✅ Extract tab cleanup method
 
-**What**: Create `cleanupTabResources(id:)` on `CalyxWindowController` that consolidates the repeated pattern:
+**What**: Create `cleanupTabResources(id:)` on `CTermWindowController` that consolidates the repeated pattern:
 
 ```swift
 private func cleanupTabResources(id tabID: UUID) {
@@ -82,15 +82,15 @@ enum SecurityUtils {
 }
 ```
 
-**Why**: 3 call sites with identical logic (`AppDelegate`, `CalyxWindowController`, `BrowserServer`).
+**Why**: 3 call sites with identical logic (`AppDelegate`, `CTermWindowController`, `BrowserServer`).
 
 **Visible effect**: Reduced duplication, consistent security behavior.
 
 ## 5. ✅ Add observers for all 9 previously-unhandled notifications (done)
 
-**What was missing**: 9 notification names were posted by `GhosttyAction.swift` but had no observers in `CalyxWindowController`, silently discarding real libghostty callbacks.
+**What was missing**: 9 notification names were posted by `GhosttyAction.swift` but had no observers in `CTermWindowController`, silently discarding real libghostty callbacks.
 
-**What was done**: All 9 handlers added to `CalyxWindowController` and registered in `setupNotificationObservers()`:
+**What was done**: All 9 handlers added to `CTermWindowController` and registered in `setupNotificationObservers()`:
 
 | Notification | Handler | Behavior |
 |---|---|---|
@@ -141,7 +141,7 @@ if isUITesting, mods == [.control, .shift],
 
 ## 8. ✅ Remove dead binding
 
-**What**: Delete line 1324 in `CalyxWindowController.swift`:
+**What**: Delete line 1324 in `CTermWindowController.swift`:
 
 ```swift
 // Before:
@@ -167,12 +167,12 @@ if isUITesting, mods == [.control, .shift],
 **What**: Replace silent error swallowing with logged warnings:
 
 ```swift
-// CalyxWindowController.swift:1611 (loadMoreCommits)
+// CTermWindowController.swift:1611 (loadMoreCommits)
 } catch {
     logger.warning("Failed to load more commits: \(error.localizedDescription)")
 }
 
-// CalyxWindowController.swift:1636 (expandCommit)
+// CTermWindowController.swift:1636 (expandCommit)
 } catch {
     logger.warning("Failed to expand commit \(hash): \(error.localizedDescription)")
 }

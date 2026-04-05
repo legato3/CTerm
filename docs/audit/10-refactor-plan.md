@@ -6,7 +6,7 @@ Constraints: No full rewrite. Incremental changes only. Each step is independent
 ## Step 1: ✅ Extract TabCleanupHelper (done — commit `1ec1c9d`)
 
 ### What
-Create a method `cleanupTabResources(id:)` on `CalyxWindowController`:
+Create a method `cleanupTabResources(id:)` on `CTermWindowController`:
 
 ```swift
 private func cleanupTabResources(id tabID: UUID) {
@@ -28,7 +28,7 @@ private func cleanupTabResources(id tabID: UUID) {
 Low. Pure extraction, no behavior change. All 4 call sites have identical cleanup sequences.
 
 ### Verification
-Run `CalyxTests` -- all existing tests should pass unchanged.
+Run `CTermTests` -- all existing tests should pass unchanged.
 
 ## Step 2: ✅ Extract GitController (done — commit `7a4a246`)
 
@@ -53,7 +53,7 @@ final class GitController {
 }
 ```
 
-### Methods to move from CalyxWindowController
+### Methods to move from CTermWindowController
 - `refreshGitStatus()` (lines 1545-1588)
 - `loadMoreCommits()` (lines 1590-1616)
 - `expandCommit(hash:)` (lines 1618-1641)
@@ -61,7 +61,7 @@ final class GitController {
 - `handleCommitFileSelected(_:)` (lines 1659-1665)
 - `findWorkDir()` (lines 1728-1751)
 
-### CalyxWindowController keeps
+### CTermWindowController keeps
 - `private let gitController = GitController()`
 - Delegates sidebar callbacks to `gitController`
 - Owns `openDiffTab(source:)` (because it manages tab lifecycle)
@@ -94,7 +94,7 @@ final class ReviewController {
 }
 ```
 
-### Methods to move from CalyxWindowController
+### Methods to move from CTermWindowController
 - `submitDiffReview(tabID:)` (lines 1899-1918)
 - `submitAllDiffReviews()` (lines 1920-1937)
 - `discardAllDiffReviews()` (lines 1939-1954)
@@ -187,7 +187,7 @@ Low. SwiftUI environment is the standard pattern for this. No behavior change, j
 ## Step 7: ✅ Extract BrowserManager (done)
 
 ### What
-Created `BrowserManager` in `Calyx/Features/Browser/BrowserManager.swift`:
+Created `BrowserManager` in `CTerm/Features/Browser/BrowserManager.swift`:
 
 ```swift
 @MainActor
@@ -201,7 +201,7 @@ final class BrowserManager {
 }
 ```
 
-### What moved from CalyxWindowController
+### What moved from CTermWindowController
 - `browserControllers: [UUID: BrowserTabController]` dict
 - `wireBrowserCallbacks(controller:tab:)` — now private to `BrowserManager`
 - `browserController(for:)` now delegates to `browserManager.controller(for:tab:)`
@@ -213,7 +213,7 @@ Low. Clean boundary: browser lifecycle doesn't interact with split/tab model dir
 ## Step 8: ✅ Extract ComposeOverlayController (done)
 
 ### What
-Created `ComposeOverlayController` in `Calyx/Features/ComposeOverlay/ComposeOverlayController.swift`:
+Created `ComposeOverlayController` in `CTerm/Features/ComposeOverlay/ComposeOverlayController.swift`:
 
 ```swift
 @MainActor
@@ -227,7 +227,7 @@ final class ComposeOverlayController {
 }
 ```
 
-### What moved from CalyxWindowController
+### What moved from CTermWindowController
 - `composeOverlayTargetSurfaceID` → `composeController.targetSurfaceID`
 - `toggleComposeOverlay()` → delegates to `composeController.toggle(...)`
 - `retargetComposeOverlayIfNeeded()` → delegates to `composeController.retargetIfNeeded(...)`
@@ -235,12 +235,12 @@ final class ComposeOverlayController {
 - `sendComposeText(_:)` body → delegates to `composeController.send(...)`
 
 ### Risk
-Low. Clean boundary: compose overlay state and text dispatch logic is self-contained. CalyxWindowController retains ownership of focus restoration (since that requires `focusManager` and window context).
+Low. Clean boundary: compose overlay state and text dispatch logic is self-contained. CTermWindowController retains ownership of focus restoration (since that requires `focusManager` and window context).
 
 ## Step 9: ✅ Extract SplitController (done)
 
 ### What
-Created `Calyx/Views/MainWindow/SplitController.swift`:
+Created `CTerm/Views/MainWindow/SplitController.swift`:
 
 ```swift
 @MainActor
@@ -259,7 +259,7 @@ final class SplitController {
 }
 ```
 
-### What moved from CalyxWindowController
+### What moved from CTermWindowController
 - Full bodies of `handleNewSplitNotification`, `handleGotoSplitNotification`, `handleResizeSplitNotification`, `handleEqualizeSplitsNotification`, `handleDividerDrag`
 - `belongsToThisWindow` — CWC delegates to `splitController.belongsToThisWindow(_:)`
 - Note: `handleCloseSurfaceNotification` remains in CWC — it mixes split-tree and tab-lifecycle concerns
@@ -270,12 +270,12 @@ Low. All split operations are self-contained in the split tree; no tab model mut
 ## Step 10: ✅ Extract IPCWindowController (done)
 
 ### What
-Created `Calyx/Features/IPC/IPCWindowController.swift`:
+Created `CTerm/Features/IPC/IPCWindowController.swift`:
 
 ```swift
 @MainActor
 final class IPCWindowController {
-    private let mcpServer: CalyxMCPServer
+    private let mcpServer: CTermMCPServer
     private weak var windowSession: WindowSession?
 
     var onCreateNewTab: ((String?) -> Void)?
@@ -287,12 +287,12 @@ final class IPCWindowController {
     func enableIPC()
     func disableIPC()
     func handleReviewRequested()
-    func handleLaunchWorkflow(event: CalyxIPCLaunchWorkflowEvent)
+    func handleLaunchWorkflow(event: CTermIPCLaunchWorkflowEvent)
     func sendToAgent(_ payload: String) -> ReviewSendResult
 }
 ```
 
-### What moved from CalyxWindowController
+### What moved from CTermWindowController
 - `enableIPC()`, `disableIPC()`, `showIPCAlert()`, `configStatusMessage()` — IPC toggle cluster
 - `handleIPCLaunchWorkflowNotification` body → `handleLaunchWorkflow(event:)`
 - `handleIPCReviewRequestedNotification` body → `handleReviewRequested()`
@@ -305,7 +305,7 @@ Medium. Workflow launch creates tabs (via callback) and sends keystrokes (via ca
 ## Step 11: ✅ Extract TabLifecycleController (done)
 
 ### What
-Created `Calyx/Views/MainWindow/TabLifecycleController.swift`:
+Created `CTerm/Views/MainWindow/TabLifecycleController.swift`:
 
 ```swift
 @MainActor
@@ -334,7 +334,7 @@ final class TabLifecycleController {
 }
 ```
 
-### What moved from CalyxWindowController
+### What moved from CTermWindowController
 - All tab/group creation, switching, and teardown methods
 - `closingTabIDs` guard set (was CWC property)
 - `cleanupTabResources` (now delegates to browserManager + reviewController)
@@ -384,7 +384,7 @@ Step 1 (tab cleanup)         -- no dependencies, do first
 Step 2 (GitController)      -- independent of Step 3
 Step 3 (ReviewController)    -- independent of Step 2
     |
-Step 4 (FocusManager)       -- after Steps 2-3 reduce CalyxWindowController
+Step 4 (FocusManager)       -- after Steps 2-3 reduce CTermWindowController
     |
 Step 5 (typed notifications) -- after controller extractions stabilize
     |

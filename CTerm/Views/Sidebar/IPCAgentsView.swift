@@ -1,0 +1,1023 @@
+// IPCAgentsView.swift
+// CTerm
+//
+// Sidebar panel for the IPC MCP feature: server status, connected agents,
+// broadcast composer, activity feed, and workflow launcher.
+
+import SwiftUI
+
+struct IPCAgentsView: View {
+    private var agentState: IPCAgentState { IPCAgentState.shared }
+    private let server = CTermMCPServer.shared
+
+    @State private var broadcastText = ""
+    @State private var isSending = false
+    @State private var selectedPeerFilter: UUID? = nil
+    @State private var selectedTopicFilter: String? = nil
+    @State private var showWorkflowSheet = false
+    @State private var showManualConnectSheet = false
+    @State private var selectedWorkflow: AgentWorkflow = AgentWorkflow.templates[1]
+
+    // MARK: - Derived
+
+    private var visiblePeers: [Peer] {
+        agentState.peers.filter { $0.name != "cterm-app" }
+    }
+
+    private var peerNameMap: [UUID: String] {
+        Dictionary(uniqueKeysWithValues: agentState.peers.map { ($0.id, $0.name) })
+    }
+
+    private var availableTopics: [String] {
+        Array(Set(agentState.activityLog.compactMap(\.topic))).sorted()
+    }
+
+    private var filteredLog: [Message] {
+        var msgs = agentState.activityLog
+        if let pf = selectedPeerFilter {
+            msgs = msgs.filter { $0.from == pf || $0.to == pf }
+        }
+        if let tf = selectedTopicFilter {
+            msgs = msgs.filter { $0.topic == tf }
+        }
+        return Array(msgs.suffix(50).reversed())
+    }
+
+    // MARK: - Body
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                // Warp-style: active agents panel at top when running
+                if agentState.isRunning && !visiblePeers.isEmpty {
+                    activeAgentsPanel
+                }
+
+                serverStatusSection
+                if agentState.isRunning {
+                    if visiblePeers.isEmpty {
+                        peersSection
+                    }
+                    if !visiblePeers.isEmpty {
+                        liveCostSection
+                    }
+                    quickActionsSection
+                    if !agentState.activityLog.isEmpty {
+                        activitySection
+                    }
+                    workflowSection
+                } else {
+                    startHintSection
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+        }
+        .onAppear {
+            agentState.isAgentsTabActive = true
+            agentState.markRead()
+        }
+        .onDisappear {
+            agentState.isAgentsTabActive = false
+        }
+        .sheet(isPresented: $showManualConnectSheet) {
+            ManualConnectSheet(port: agentState.port, token: server.token, onDone: { showManualConnectSheet = false })
+        }
+        .sheet(isPresented: $showWorkflowSheet) {
+            LaunchWorkflowSheet(
+                selectedWorkflow: $selectedWorkflow,
+                onLaunch: { params in
+                    showWorkflowSheet = false
+                    var userInfo: [String: Any] = [
+                        "roleNames": params.workflow.roles.map(\.name),
+                        "autoStart": params.autoStart,
+                        "sessionName": params.sessionName,
+                        "initialTask": params.initialTask,
+                    ]
+                    params.runtime.notificationUserInfo.forEach { userInfo[$0.key] = $0.value }
+                    NotificationCenter.default.post(
+                        name: .ctermIPCLaunchWorkflow,
+                        object: nil,
+                        userInfo: userInfo
+                    )
+                },
+                onCancel: { showWorkflowSheet = false }
+            )
+        }
+    }
+
+    // MARK: - Active Agents Panel (Warp-style prominent status)
+
+    private var activeAgentsPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.purple)
+                Text("Active Agents")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                Spacer()
+                Text("\(visiblePeers.filter { AgentStatus.infer(from: $0) == .active }.count) active")
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(.green)
+            }
+
+            VStack(spacing: 4) {
+                ForEach(visiblePeers, id: \.id) { peer in
+                    WarpPeerStatusRow(
+                        peer: peer,
+                        isSelected: peer.id == selectedPeerFilter,
+                        onTap: { selectedPeerFilter = selectedPeerFilter == peer.id ? nil : peer.id },
+                        onNudge: {
+                            _ = TerminalControlBridge.shared.delegate?
+                                .runInPaneMatching(titleContains: peer.name, text: "Continue with the next step.", pressEnter: true)
+                        }
+                    )
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.purple.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.purple.opacity(0.12), lineWidth: 1))
+    }
+
+    // MARK: - Server Status
+
+    private var serverStatusSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionHeader("MCP Server", icon: "network")
+
+            VStack(spacing: 6) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(agentState.isRunning ? Color.green : Color.secondary.opacity(0.5))
+                        .frame(width: 7, height: 7)
+                    Text(agentState.isRunning ? "Port \(agentState.port)" : "Stopped")
+                        .font(.system(size: 12, design: .rounded))
+                    Spacer()
+                    Button(agentState.isRunning ? "Stop" : "Enable") {
+                        NotificationCenter.default.post(
+                            name: agentState.isRunning ? .ctermIPCDisable : .ctermIPCEnable,
+                            object: nil
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                if agentState.isRunning {
+                    HStack(spacing: 6) {
+                        Text("http://127.0.0.1:\(agentState.port)/mcp")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        Button(action: { showManualConnectSheet = true }) {
+                            Image(systemName: "info.circle")
+                                .font(.system(size: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Show connection instructions")
+                        Button(action: copyConnectionInfo) {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Copy URL, token, and JSON config to clipboard")
+                    }
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.06)))
+        }
+    }
+
+    // MARK: - Peers
+
+    private var peersSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                sectionHeader("Agents (\(visiblePeers.count))", icon: "person.2")
+                Spacer()
+                if selectedPeerFilter != nil {
+                    Button("Clear filter") { selectedPeerFilter = nil }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+
+            if visiblePeers.isEmpty {
+                Text("No agents connected yet.\nStart an MCP-capable agent in a terminal to connect.")
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.leading)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.04)))
+            } else {
+                VStack(spacing: 3) {
+                    ForEach(visiblePeers, id: \.id) { peer in
+                        PeerRowView(
+                            peer: peer,
+                            isSelected: peer.id == selectedPeerFilter,
+                            onTap: {
+                                selectedPeerFilter = selectedPeerFilter == peer.id ? nil : peer.id
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Live Cost
+
+    private var liveCostSection: some View {
+        let monitor = ClaudeUsageMonitor.shared
+        return VStack(alignment: .leading, spacing: 6) {
+            sectionHeader("Today's Cost", icon: "dollarsign.circle")
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(String(format: "$%.4f", monitor.today.costUSD))
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    Text("estimated")
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(ClaudeUsageMonitor.formatTokens(monitor.today.totalTokens))
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                    Text("tokens")
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                }
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+        }
+    }
+
+    // MARK: - Quick Actions
+
+    private var quickActionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Broadcast", icon: "megaphone")
+
+            VStack(spacing: 6) {
+                HStack(spacing: 6) {
+                    TextField("Message all agents…", text: $broadcastText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12, design: .rounded))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.white.opacity(0.06)))
+                        .onSubmit { sendBroadcast(broadcastText) }
+
+                    Button(action: { sendBroadcast(broadcastText) }) {
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(broadcastText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending)
+                }
+
+                HStack(spacing: 4) {
+                    ForEach(QuickCommand.all, id: \.label) { cmd in
+                        Button(cmd.label) { sendBroadcast(cmd.text, topic: cmd.topic) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.mini)
+                            .font(.system(size: 10, design: .rounded))
+                    }
+                    Spacer()
+                }
+            }
+        }
+    }
+
+    // MARK: - Activity Feed
+
+    private var activitySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                sectionHeader("Activity (\(agentState.activityLog.count))", icon: "bubble.left.and.bubble.right")
+                Spacer()
+                Button("Clear") { agentState.clearLog() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            // Topic filter chips
+            if !availableTopics.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(availableTopics, id: \.self) { topic in
+                            Button(topic) {
+                                selectedTopicFilter = selectedTopicFilter == topic ? nil : topic
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule().fill(
+                                    selectedTopicFilter == topic
+                                        ? Color.accentColor.opacity(0.4)
+                                        : Color.white.opacity(0.08)
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            if filteredLog.isEmpty {
+                Text("No messages match the current filter.")
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(.tertiary)
+                    .padding(.vertical, 4)
+            } else {
+                VStack(spacing: 3) {
+                    ForEach(filteredLog, id: \.id) { msg in
+                        MessageRowView(message: msg, peerNames: peerNameMap)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Workflow
+
+    private var workflowSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionHeader("Start Session", icon: "play.circle")
+            Button(action: { showWorkflowSheet = true }) {
+                HStack {
+                    Image(systemName: "person.badge.plus")
+                    Text("Launch Agent Workflow…")
+                    Spacer()
+                }
+                .font(.system(size: 12, design: .rounded))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            if let roleNames = agentState.lastWorkflow, !visiblePeers.isEmpty {
+                Button(action: { rejoinSession(roleNames: roleNames) }) {
+                    HStack {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Rejoin Session (\(roleNames.joined(separator: ", ")))")
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer()
+                    }
+                    .font(.system(size: 12, design: .rounded))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Re-send role context to connected peers from the last workflow")
+            }
+        }
+    }
+
+    // MARK: - Start Hint
+
+    private var startHintSection: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "network.slash")
+                .font(.system(size: 28))
+                .foregroundStyle(.tertiary)
+            Text("Enable the MCP server to let\nClaude agents communicate.")
+                .font(.system(size: 11, design: .rounded))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+    }
+
+    // MARK: - Actions
+
+    private func sendBroadcast(_ text: String, topic: String? = nil) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        broadcastText = ""
+        isSending = true
+        Task {
+            await server.ensureAppPeerRegistered()
+            guard let appPeerID = server.appPeerID else { isSending = false; return }
+            _ = try? await server.store.broadcast(from: appPeerID, content: trimmed, topic: topic)
+            isSending = false
+        }
+    }
+
+    private func rejoinSession(roleNames: [String]) {
+        let port = agentState.port
+        Task {
+            await server.ensureAppPeerRegistered()
+            guard let appPeerID = server.appPeerID else { return }
+            let peers = await CTermMCPServer.shared.store.listPeers()
+            for peer in peers where peer.name != "cterm-app" {
+                if roleNames.contains(where: { $0.lowercased() == peer.name.lowercased() }) {
+                    let prompt = AgentWorkflow.rolePrompt(roleName: peer.name, allRoles: roleNames, port: port)
+                    _ = try? await CTermMCPServer.shared.store.sendMessage(
+                        from: appPeerID, to: peer.id, content: prompt, topic: "role-context", replyTo: nil
+                    )
+                }
+            }
+        }
+    }
+
+    private func copyConnectionInfo() {
+        let url = "http://127.0.0.1:\(agentState.port)/mcp"
+        let token = server.token
+        let info = """
+        MCP URL: \(url)
+        Token:   \(token)
+
+        JSON config snippet:
+        {
+          "mcpServers": {
+            "cterm-ipc": {
+              "url": "\(url)",
+              "headers": { "Authorization": "Bearer \(token)" }
+            }
+          }
+        }
+        """
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(info, forType: .string)
+    }
+
+    // MARK: - Helper
+
+    private func sectionHeader(_ title: String, icon: String) -> some View {
+        Label(title, systemImage: icon)
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .foregroundStyle(.secondary)
+            .tracking(0.5)
+    }
+}
+
+// MARK: - Quick Commands
+
+private struct QuickCommand {
+    let label: String
+    let text: String
+    let topic: String?
+
+    static let all: [QuickCommand] = [
+        QuickCommand(label: "Status?", text: "Status update — what are you working on right now?", topic: "status"),
+        QuickCommand(label: "Pause", text: "Pause your current work and wait for further instructions.", topic: "control"),
+        QuickCommand(label: "Resume", text: "Resume your work.", topic: "control"),
+    ]
+}
+
+// MARK: - PeerRowView
+
+private struct PeerRowView: View {
+    let peer: Peer
+    let isSelected: Bool
+    var onTap: () -> Void
+
+    @State private var nudgeState: NudgeState = .idle
+
+    private enum NudgeState {
+        case idle, sent, failed
+    }
+
+    private var status: AgentStatus { AgentStatus.infer(from: peer) }
+
+    private var statusColor: Color {
+        switch status {
+        case .active:       return Color.green
+        case .idle:         return Color.yellow
+        case .disconnected: return Color.gray
+        }
+    }
+
+    private var ageLabel: String {
+        let age = Date().timeIntervalSince(peer.lastSeen)
+        if age < 5 { return "just now" }
+        if age < 60 { return "\(Int(age))s ago" }
+        return "\(Int(age / 60))m ago"
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 7) {
+                    // Status dot + label
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 7, height: 7)
+                    Text(status.label)
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(statusColor.opacity(0.85))
+                    Spacer()
+                    if isSelected {
+                        Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.accentColor)
+                    } else {
+                        Text(ageLabel)
+                            .font(.system(size: 9, design: .rounded))
+                            .foregroundStyle(.quaternary)
+                    }
+                }
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(peer.name)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .lineLimit(1)
+                        if !peer.role.isEmpty {
+                            Text(peer.role)
+                                .font(.system(size: 10, design: .rounded))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    Spacer()
+                    nudgeButton
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.white.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.4) : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var nudgeButton: some View {
+        Button {
+            let sent = TerminalControlBridge.shared.delegate?
+                .runInPaneMatching(
+                    titleContains: peer.name,
+                    text: "Continue with the next step.",
+                    pressEnter: true
+                ) ?? false
+            nudgeState = sent ? .sent : .failed
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                nudgeState = .idle
+            }
+        } label: {
+            Group {
+                switch nudgeState {
+                case .idle:
+                    Label("nudge", systemImage: "arrow.forward.circle")
+                        .labelStyle(.iconOnly)
+                case .sent:
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.green)
+                case .failed:
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundStyle(Color.orange)
+                }
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help("Nudge: inject \"Continue with the next step.\" into this agent's pane")
+        .disabled(nudgeState != .idle)
+    }
+}
+
+// MARK: - MessageRowView
+
+private struct MessageRowView: View {
+    let message: Message
+    let peerNames: [UUID: String]
+
+    private var fromName: String { peerNames[message.from] ?? "?" }
+    private var toName: String { peerNames[message.to] ?? "?" }
+
+    private var timeLabel: String {
+        let age = Date().timeIntervalSince(message.timestamp)
+        if age < 5 { return "now" }
+        if age < 60 { return "\(Int(age))s" }
+        return "\(Int(age / 60))m"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Text(fromName)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                Text(toName)
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(.secondary)
+                if let topic = message.topic {
+                    Text(topic)
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.25)))
+                }
+                Spacer()
+                Text(timeLabel)
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundStyle(.quaternary)
+            }
+            Text(message.content.prefix(120).trimmingCharacters(in: .whitespacesAndNewlines))
+                .font(.system(size: 10, design: .rounded))
+                .foregroundStyle(.tertiary)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.03)))
+    }
+}
+
+// MARK: - LaunchWorkflowSheet
+
+struct LaunchWorkflowSheet: View {
+    @Binding var selectedWorkflow: AgentWorkflow
+    var onLaunch: (WorkflowLaunchParams) -> Void
+    var onCancel: () -> Void
+
+    @State private var autoStart = false
+    @State private var sessionName = ""
+    @State private var initialTask = ""
+    @State private var runtimePreset: AgentRuntimePreset = .claudeCode
+    @State private var launchCommand = AgentRuntimeConfiguration.default.launchCommand
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Launch Agent Workflow")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+
+            // Template picker
+            VStack(spacing: 8) {
+                ForEach(AgentWorkflow.templates) { workflow in
+                    WorkflowTemplateRow(
+                        workflow: workflow,
+                        isSelected: workflow.id == selectedWorkflow.id,
+                        onSelect: { selectedWorkflow = workflow }
+                    )
+                }
+            }
+
+            // Config box
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Opens \(selectedWorkflow.roles.count) terminal tab\(selectedWorkflow.roles.count == 1 ? "" : "s"):")
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(.secondary)
+
+                ForEach(selectedWorkflow.roles) { role in
+                    HStack(spacing: 6) {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                        Text(role.name)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                        Text("—")
+                            .foregroundStyle(.tertiary)
+                        Text(role.description)
+                            .font(.system(size: 12, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Divider()
+
+                // Session name
+                HStack {
+                    Text("Session name")
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 100, alignment: .leading)
+                    TextField("e.g. auth refactor", text: $sessionName)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .rounded))
+                }
+
+                // Initial task
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Initial task (broadcast to all agents after startup)")
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(.secondary)
+                    TextField("Describe the task…", text: $initialTask, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .rounded))
+                        .lineLimit(3...5)
+                }
+
+                Divider()
+
+                HStack {
+                    Text("Runtime")
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 100, alignment: .leading)
+                    Picker("", selection: $runtimePreset) {
+                        ForEach(AgentRuntimePreset.allCases) { preset in
+                            Text(preset.displayName).tag(preset)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .font(.system(size: 12, design: .rounded))
+                }
+
+                HStack {
+                    Text("Launch command")
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 100, alignment: .leading)
+                    TextField(
+                        runtimePreset == .ollama
+                            ? OllamaCommandService.currentLaunchCommand()
+                            : "Enter the command to launch this agent",
+                        text: $launchCommand
+                    )
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                }
+
+                if !runtimePreset.defaultRegistersWithIPC {
+                    Text("Ollama or custom runtimes can point at local or remote backends through the launch command. They launch directly in the tab and do not auto-register as CTerm IPC peers.")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+
+                Divider()
+
+                Toggle(isOn: $autoStart) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Auto-start agent with role instructions")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                        Text("Runs the selected launch command in each tab and then sends startup context once the shell is ready.")
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.checkbox)
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.06)))
+
+            HStack {
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Launch") {
+                    onLaunch(WorkflowLaunchParams(
+                        workflow: selectedWorkflow,
+                        autoStart: autoStart,
+                        sessionName: sessionName.trimmingCharacters(in: .whitespacesAndNewlines),
+                        initialTask: initialTask.trimmingCharacters(in: .whitespacesAndNewlines),
+                        runtime: AgentRuntimeConfiguration(
+                            preset: runtimePreset,
+                            displayName: runtimePreset.displayName,
+                            launchCommand: launchCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? runtimePreset.defaultLaunchCommand
+                                : launchCommand.trimmingCharacters(in: .whitespacesAndNewlines),
+                            registersWithIPC: runtimePreset.defaultRegistersWithIPC,
+                            inputStyle: runtimePreset.defaultInputStyle
+                        )
+                    ))
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 420)
+        .onChange(of: runtimePreset) { _, newPreset in
+            launchCommand = AgentRuntimeConfiguration(preset: newPreset).launchCommand
+        }
+    }
+}
+
+// MARK: - ManualConnectSheet
+
+private struct ManualConnectSheet: View {
+    let port: Int
+    let token: String
+    var onDone: () -> Void
+
+    private var cliCommand: String {
+        "claude mcp add --transport http cterm-ipc http://127.0.0.1:\(port)/mcp --header \"Authorization: Bearer \(token)\""
+    }
+
+    private var jsonSnippet: String {
+        """
+        {
+          "mcpServers": {
+            "cterm-ipc": {
+              "url": "http://127.0.0.1:\(port)/mcp",
+              "headers": { "Authorization": "Bearer \(token)" }
+            }
+          }
+        }
+        """
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Connect an MCP Agent Manually")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+
+            Text("Run this in a terminal session where Claude Code is running:")
+                .font(.system(size: 12, design: .rounded))
+                .foregroundStyle(.secondary)
+
+            CodeBlockView(code: cliCommand, copyLabel: "Copy Command")
+
+            Divider()
+
+            Text("Or add this to your \u{007E}/.claude.json:")
+                .font(.system(size: 12, design: .rounded))
+                .foregroundStyle(.secondary)
+
+            CodeBlockView(code: jsonSnippet, copyLabel: "Copy JSON")
+
+            HStack {
+                Spacer()
+                Button("Done", action: onDone)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
+    }
+}
+
+private struct CodeBlockView: View {
+    let code: String
+    let copyLabel: String
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(code)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.07)))
+
+            Button(copyLabel) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(code, forType: .string)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .font(.system(size: 11, design: .rounded))
+        }
+    }
+}
+
+private struct WorkflowTemplateRow: View {
+    let workflow: AgentWorkflow
+    let isSelected: Bool
+    var onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 12) {
+                Image(systemName: workflow.icon)
+                    .font(.system(size: 18))
+                    .foregroundStyle(isSelected ? .white : .secondary)
+                    .frame(width: 32)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(workflow.name)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(isSelected ? .white : .primary)
+                    Text(workflow.description)
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(isSelected ? .white.opacity(0.7) : .secondary)
+                }
+
+                Spacer()
+
+                Text("\(workflow.roles.count) tab\(workflow.roles.count == 1 ? "" : "s")")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(isSelected ? Color.white.opacity(0.7) : Color.secondary.opacity(0.6))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? Color.accentColor : Color.primary.opacity(0.06))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Warp-style Peer Status Row
+
+private struct WarpPeerStatusRow: View {
+    let peer: Peer
+    let isSelected: Bool
+    let onTap: () -> Void
+    let onNudge: () -> Void
+
+    @State private var nudgeSent = false
+
+    private var status: AgentStatus { AgentStatus.infer(from: peer) }
+
+    private var statusColor: Color {
+        switch status {
+        case .active: return .green
+        case .idle: return .yellow
+        case .disconnected: return .gray
+        }
+    }
+
+    private var ageLabel: String {
+        let age = Date().timeIntervalSince(peer.lastSeen)
+        if age < 5 { return "just now" }
+        if age < 60 { return "\(Int(age))s ago" }
+        return "\(Int(age / 60))m ago"
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                // Status indicator
+                ZStack {
+                    Circle().fill(statusColor.opacity(0.15)).frame(width: 28, height: 28)
+                    if status == .active {
+                        Circle().fill(statusColor.opacity(0.3)).frame(width: 28, height: 28)
+                            .scaleEffect(nudgeSent ? 1.3 : 1.0)
+                            .animation(.easeOut(duration: 0.6), value: nudgeSent)
+                    }
+                    Circle().fill(statusColor).frame(width: 8, height: 8)
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(peer.name)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text(status.label)
+                            .font(.system(size: 10, design: .rounded))
+                            .foregroundStyle(statusColor)
+                        Text("·")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.quaternary)
+                        Text(ageLabel)
+                            .font(.system(size: 10, design: .rounded))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
+                Spacer()
+
+                // Nudge button
+                Button {
+                    onNudge()
+                    nudgeSent = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { nudgeSent = false }
+                } label: {
+                    Image(systemName: nudgeSent ? "checkmark.circle.fill" : "arrow.forward.circle")
+                        .font(.system(size: 14))
+                        .foregroundStyle(nudgeSent ? Color.green : Color.secondary.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+                .help("Nudge: send \"Continue with the next step.\"")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.white.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.3) : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}

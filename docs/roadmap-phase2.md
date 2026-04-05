@@ -1,6 +1,6 @@
 # Roadmap Phase 2: Closing the Loop
 
-All 10 phases of the original roadmap are complete. Claude can now control Calyx, see all agents, auto-approve tools, queue tasks, track file changes, and visualize the IPC mesh.
+All 10 phases of the original roadmap are complete. Claude can now control CTerm, see all agents, auto-approve tools, queue tasks, track file changes, and visualize the IPC mesh.
 
 The remaining gap: **Claude edits code, but has no automatic awareness of whether it worked.** The user still acts as a relay — copying stderr, pasting test failures, re-explaining project context at the start of every session.
 
@@ -10,7 +10,7 @@ This phase closes those loops.
 
 ## Design Principles (unchanged)
 
-1. **Claude controls Calyx, not the other way around.**
+1. **Claude controls CTerm, not the other way around.**
 2. **The MCP surface is the primary API.** New capabilities are exposed as MCP tools first; UI second.
 3. **Minimal friction.** Fewer clicks to get an agent running and productive.
 4. **Visible state.** The user can always see what every Claude instance is doing.
@@ -52,7 +52,7 @@ This phase closes those loops.
 
 **The solution**: A persistent, project-scoped knowledge base that Claude agents can read and write via MCP tools.
 
-**Storage**: `~/.calyx/memories/{project-hash}.json` where project-hash is derived from the git remote URL or cwd path.
+**Storage**: `~/.cterm/memories/{project-hash}.json` where project-hash is derived from the git remote URL or cwd path.
 
 **MCP tools**:
 | Tool | Description |
@@ -86,8 +86,8 @@ recall("auth")  // → returns the auth-system entry
 **The solution**: A sidebar panel that watches a running test process, shows live results, and routes failures to Claude automatically.
 
 **How it works**:
-- User specifies a watch command in the panel (e.g. `xcodebuild test -scheme CalyxTests`, `npm test -- --watch`, `cargo watch -x test`)
-- Calyx spawns this as a managed child process (not in a terminal pane)
+- User specifies a watch command in the panel (e.g. `xcodebuild test -scheme CTermTests`, `npm test -- --watch`, `cargo watch -x test`)
+- CTerm spawns this as a managed child process (not in a terminal pane)
 - Output is parsed for pass/fail patterns per test framework (XCTest, Jest, pytest, cargo test, Go test)
 - Results shown as a live checklist: ✅ `SplitTreeTests` / ❌ `WindowSessionTests`
 - On failure: "Route to Claude" button per test, or "Route all failures" — injects structured failure context into the target pane
@@ -112,7 +112,7 @@ recall("auth")  // → returns the auth-system entry
 
 **The problem**: Every new Claude session requires the user to re-explain the project. "We're working in Swift 6, using XcodeGen, don't use force unwraps..." — this is noise that should be automatic.
 
-**The solution**: When a new peer registers via IPC, Calyx gathers live project context and makes it available via an MCP tool. Claude agents call this at session start as their first tool use.
+**The solution**: When a new peer registers via IPC, CTerm gathers live project context and makes it available via an MCP tool. Claude agents call this at session start as their first tool use.
 
 **MCP tool**: `get_project_context()` returns:
 ```json
@@ -120,7 +120,7 @@ recall("auth")  // → returns the auth-system entry
   "claude_md": "...",          // content of CLAUDE.md if present
   "branch": "feature/phase-11",
   "recent_commits": ["abc123 Add ShellErrorMonitor", ...],
-  "dirty_files": ["Calyx/Features/IPC/IPCStore.swift"],
+  "dirty_files": ["CTerm/Features/IPC/IPCStore.swift"],
   "open_memories": [...],       // from Phase 12
   "failing_tests": [...],       // from Phase 13 if runner active
   "active_peers": [...],        // other connected agents
@@ -157,7 +157,7 @@ User-configurable "when X, do Y" automation rules. The automation glue that conn
 - `advance_queue` — manually advance the task queue
 - `remember(key, value)` — write to agent memory
 
-**Storage**: `~/.calyx/triggers.json`
+**Storage**: `~/.cterm/triggers.json`
 
 **UI**: Sidebar tab (lightning bolt icon) with rule list and inline editor. Each rule has an enable/disable toggle, trigger picker, action picker, and test button.
 
@@ -176,7 +176,7 @@ Structured, append-only record of everything agents did in a session.
 - Tokens spent per pane (from Phase 9)
 - Tasks completed (from Phase 10)
 
-**Storage**: `~/.calyx/sessions/{date}-{session-id}.json`
+**Storage**: `~/.cterm/sessions/{date}-{session-id}.json`
 
 **UI**: Sidebar tab (clock icon) with a timeline view. Filter by pane, event type, or time range. Export as markdown or JSON. Shows session summary: total tokens, files changed, tasks completed, errors encountered.
 
@@ -191,7 +191,7 @@ Route different tasks to different Claude models based on complexity or cost.
 **How it works**:
 - Task queue items gain a `model` field (default: inherited from pane)
 - Options: `auto`, `haiku`, `sonnet`, `opus`
-- `auto` mode: Calyx infers based on task description keywords ("refactor" → sonnet, "explain" → haiku, "architect" → opus)
+- `auto` mode: CTerm infers based on task description keywords ("refactor" → sonnet, "explain" → haiku, "architect" → opus)
 - When advancing to the next task, the `--model` flag is prepended to the injected prompt (Claude Code's `--model` flag)
 
 **UI**: Per-task model picker dropdown in the task queue panel. Global default in settings.

@@ -17,7 +17,7 @@ This is excellent. The codebase consistently uses optional binding and proper er
 
 ### Unused notification names
 
-13 notification names are defined in `GhosttyApp.swift:528-556` but may not be observed in CalyxWindowController:
+13 notification names are defined in `GhosttyApp.swift:528-556` but may not be observed in CTermWindowController:
 
 ```
 ghosttyCloseTab          ghosttyCloseWindow
@@ -37,7 +37,7 @@ Some of these are observed in `SurfaceView` or `SurfaceScrollView`, but several 
 9 individual `@objc` methods that all call `selectTabByIndex`:
 
 ```swift
-// CalyxWindowController.swift:1343-1351
+// CTermWindowController.swift:1343-1351
 @objc func selectTab1(_ sender: Any?) { selectTabByIndex(0) }
 @objc func selectTab2(_ sender: Any?) { selectTabByIndex(1) }
 // ... through selectTab9
@@ -48,7 +48,7 @@ These exist for NSMenu target-action. Could be consolidated into a single tagged
 ### Dead binding
 
 ```swift
-// CalyxWindowController.swift:1324
+// CTermWindowController.swift:1324
 _ = group // silence warning
 ```
 
@@ -61,7 +61,7 @@ Same 32-byte `SecRandomCopyBytes` -> hex pattern:
 | Location | File:Line |
 |----------|-----------|
 | IPC auto-start | `AppDelegate.swift:571-576` |
-| IPC enable | `CalyxWindowController.swift:1758-1764` |
+| IPC enable | `CTermWindowController.swift:1758-1764` |
 | Browser server | `BrowserServer.swift:79-82` |
 
 **Extract to a shared `SecurityUtils.generateHexToken()` function.**
@@ -72,8 +72,8 @@ Identical `ghostty_input_key_s` setup with keycode 0x24:
 
 | Location | File:Line |
 |----------|-----------|
-| Compose overlay send | `CalyxWindowController.swift:901-931` |
-| Review submission | `CalyxWindowController.swift:1869-1891` |
+| Compose overlay send | `CTermWindowController.swift:901-931` |
+| Review submission | `CTermWindowController.swift:1869-1891` |
 
 **Extract to a `sendEnterKey(to controller:, delay:)` helper.**
 
@@ -98,7 +98,7 @@ Found in: `closeTab`, `closeActiveGroup`, `closeAllTabsInGroup`, `windowWillClos
 
 | File | Lines | Concern |
 |------|-------|---------|
-| CalyxWindowController.swift | 1,965 | **CRITICAL** -- God object, needs decomposition |
+| CTermWindowController.swift | 1,965 | **CRITICAL** -- God object, needs decomposition |
 | SurfaceView.swift | 881 | Large input handler (keyboard, mouse, IME) |
 | AppDelegate.swift | 845 | Too many responsibilities (menu, persistence, IPC, testing) |
 | GhosttyAction.swift | 797 | 40+ action case handlers in single router |
@@ -106,7 +106,7 @@ Found in: `closeTab`, `closeActiveGroup`, `closeAllTabsInGroup`, `windowWillClos
 | SidebarContentView.swift | 626 | SwiftUI view with multiple sub-views |
 | GhosttyApp.swift | 557 | Singleton + C callbacks |
 | SurfaceScrollView.swift | 543 | Scroll handling + search bar + throttling |
-| CalyxMCPServer.swift | 520 | TCP server + JSON-RPC + routing |
+| CTermMCPServer.swift | 520 | TCP server + JSON-RPC + routing |
 | GitService.swift | 492 | Process spawning + async bridge |
 | SettingsWindowController.swift | 456 | Settings UI + config management |
 
@@ -153,5 +153,5 @@ Reads JSON from pasteboard, calculates cell positions, simulates mouse drags via
 | Enter key event duplication | Needs refactor (extract helper) |
 | Tab cleanup pattern duplication | Needs refactor (extract method) |
 | `performDebugSelect` in production | Needs refactor (move behind `#if DEBUG`) |
-| CalyxWindowController size | Dangerous to touch without incremental plan |
+| CTermWindowController size | Dangerous to touch without incremental plan |
 | SurfaceView size | Dangerous to touch (deep AppKit/ghostty coupling) |

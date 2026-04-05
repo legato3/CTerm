@@ -21,7 +21,7 @@ This pattern appears 3 times, blocking for up to 1-2 seconds each. During sessio
 Called on every notification handler. Scans all groups -> all tabs -> all registry entries:
 
 ```swift
-// CalyxWindowController.swift:1437-1446
+// CTermWindowController.swift:1437-1446
 private func findTab(for surfaceView: SurfaceView) -> (Tab, TabGroup)? {
     for group in windowSession.groups {
         for tab in group.tabs {
@@ -45,7 +45,7 @@ With many tabs, this is O(n^2) per notification since `registry.id(for:)` does a
 ### 1. refreshHostingView() sets all properties
 
 ```swift
-// CalyxWindowController.swift:419-426
+// CTermWindowController.swift:419-426
 private func updateViewState() {
     windowViewState.activeBrowserController = activeBrowserController
     windowViewState.activeDiffState = activeDiffState

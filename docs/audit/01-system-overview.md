@@ -2,13 +2,13 @@
 
 ## What the Application Does
 
-Calyx is a macOS 26+ native terminal emulator that wraps [libghostty](https://github.com/ghostty-org/ghostty) -- Ghostty's Metal-accelerated terminal rendering engine -- with a Liquid Glass UI shell. It is not just a terminal: it's a multi-modal workspace combining:
+CTerm is a macOS 26+ native terminal emulator that wraps [libghostty](https://github.com/ghostty-org/ghostty) -- Ghostty's Metal-accelerated terminal rendering engine -- with a Liquid Glass UI shell. It is not just a terminal: it's a multi-modal workspace combining:
 
 1. **Terminal tabs with split panes** -- Ghostty surfaces rendered via Metal, organized in a binary split tree
 2. **Embedded browser tabs** -- WebKit-based tabs alongside terminals
 3. **Git integration** -- Diff viewer, commit history, file staging sidebar
 4. **AI agent IPC** -- MCP server enabling Claude Code / Codex CLI instances to communicate across panes
-5. **Browser scripting** -- A local HTTP server (`localhost:41840`) for CLI-driven browser automation
+5. **Browser scripting** -- A local HTTP server (first available localhost port in `41840...41849`) for CLI-driven browser automation
 6. **Code review overlay** -- Compose overlay and diff review comments that can be sent directly to AI agent terminals
 7. **Session persistence** -- Atomic save/restore with crash-loop detection
 8. **Quick Terminal** -- Visor-style dropdown terminal
@@ -24,7 +24,7 @@ AppDelegate.applicationDidFinishLaunching
   -> init GhosttyAppController.shared (ghostty_app_t singleton)
   -> createNewWindow()
   -> WindowSession + Tab
-  -> CalyxWindowController
+  -> CTermWindowController
   -> setupTerminalSurface()
   -> SurfaceRegistry.createSurface()
   -> GhosttySurface
@@ -37,7 +37,8 @@ AppDelegate.applicationDidFinishLaunching
 User input
   -> ghostty C callbacks
   -> NotificationCenter posts (.ghosttyNewSplit, .ghosttyCloseSurface, etc.)
-  -> CalyxWindowController notification handlers
+  -> typed event wrappers in GhosttyNotificationEvents
+  -> CTermWindowController notification handlers
   -> mutate SplitTree (value type)
   -> SplitContainerView.updateLayout()
 ```
@@ -71,10 +72,10 @@ restoreSession()
 | **App** | Lifecycle, window management | `AppDelegate`, `main.swift` |
 | **GhosttyBridge** | All ghostty C FFI, surface management, config, event translation | `GhosttyFFI`, `GhosttyApp`, `GhosttyConfig`, `SurfaceView`, `MetalView` |
 | **Models** | Session hierarchy, split tree, surface registry | `AppSession`, `WindowSession`, `TabGroup`, `Tab`, `SplitTree`, `SurfaceRegistry` |
-| **Views** | SwiftUI views + AppKit bridging | `MainContentView`, `CalyxWindowController`, `SidebarContentView`, `TabBarContentView` |
+| **Views** | SwiftUI views + AppKit bridging | `MainContentView`, `CTermWindowController`, `SidebarContentView`, `TabBarContentView` |
 | **Features** | Self-contained modules | Browser, IPC, Git, Search, CommandPalette, Persistence, QuickTerminal, Settings, etc. |
 | **Input** | Keyboard handling | `ShortcutManager`, `GlobalEventTap` |
-| **CalyxCLI** | Bundled CLI tool | `calyx browser`, MCP client commands |
+| **CTermCLI** | Bundled CLI tool | `cterm browser`, MCP client commands |
 
 ## Data Flow
 
@@ -82,9 +83,10 @@ restoreSession()
 
 ```
 ghostty C callbacks
-  -> Notification posts (with userInfo dictionaries)
-    -> CalyxWindowController handlers
-      -> Model mutation (Tab.splitTree, Tab.title, etc.)
+  -> Notification posts
+    -> typed notification event wrappers
+      -> CTermWindowController handlers
+        -> Model mutation (Tab.splitTree, Tab.title, etc.)
         -> @Observable propagation -> SwiftUI re-render
         -> SessionPersistenceActor.save() (debounced)
 ```
@@ -118,11 +120,11 @@ AppDelegate
 
 ### View bridge
 
-`WindowViewState` is an `@Observable` bridge owned by `CalyxWindowController`, passed once to `MainContentView` at setup. The controller calls `updateViewState()` whenever the active tab changes, making SwiftUI updates automatic without rebuilding the view tree.
+`WindowViewState` is an `@Observable` bridge owned by `CTermWindowController`, passed once to `MainContentView` at setup. The controller calls `updateViewState()` whenever the active tab changes, making SwiftUI updates automatic without rebuilding the view tree.
 
 ### Event bus
 
-`NotificationCenter` is the primary inter-layer communication mechanism. 28 notification names are defined, all posted from ghostty C callbacks through `GhosttyApp.swift`.
+`NotificationCenter` is the primary inter-layer communication mechanism. 28 notification names are defined, all posted from ghostty C callbacks through `GhosttyApp.swift`, with payloads decoded in `GhosttyNotificationEvents.swift` rather than ad hoc in controllers.
 
 ### Singletons
 
@@ -131,7 +133,7 @@ AppDelegate
 | Singleton | Purpose |
 |-----------|---------|
 | `GhosttyAppController.shared` | ghostty_app_t lifecycle, config |
-| `CalyxMCPServer.shared` | IPC server |
+| `CTermMCPServer.shared` | IPC server |
 | `BrowserServer.shared` | Browser automation server |
 | `SessionPersistenceActor.shared` | Session save/restore |
 | `SettingsWindowController.shared` | Settings window |

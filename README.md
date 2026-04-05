@@ -1,8 +1,8 @@
-# Calyx
+# CTerm
 
 A macOS 26+ native terminal application built on [libghostty](https://github.com/ghostty-org/ghostty) with Liquid Glass UI.
 
-![Calyx Terminal](assets/screenshot.png)
+![CTerm Terminal](assets/screenshot.png)
 
 ## Features
 
@@ -23,13 +23,13 @@ A macOS 26+ native terminal application built on [libghostty](https://github.com
 - **Diff Review Comments** -- click the gutter `+` button to add inline comments to diff lines, then Submit Review to send directly to a Claude Code or Codex terminal tab
 ([demo video](https://www.youtube.com/watch?v=_O2Lr4oFf4c))
 - **AI Agent IPC** -- MCP server for communication between AI agent instances (Claude Code, Codex CLI) across tabs and panes ([demo video](https://www.youtube.com/watch?v=Xty0ad9gGcM))
-- **Scriptable Browser** -- 25 CLI commands for browser automation (like cmux): snapshot, click, fill, eval, screenshot, wait, get-attribute, get-links, get-inputs, is-visible, hover, scroll. No enable step needed. `calyx` CLI bundled in the app
-- **Ghostty config compatibility** -- reads `~/.config/ghostty/config` (most keys hot-reload on save; see Settings for Calyx-managed keys)
+- **Scriptable Browser** -- 25 CLI commands for browser automation (like cmux): snapshot, click, fill, eval, screenshot, wait, get-attribute, get-links, get-inputs, is-visible, hover, scroll. No enable step needed. `cterm` CLI bundled in the app
+- **Ghostty config compatibility** -- reads `~/.config/ghostty/config` (most keys hot-reload on save; see Settings for CTerm-managed keys)
 - **Compose Overlay** -- floating text editor over the terminal for comfortable multiline input (`Cmd+Shift+E`), useful for writing long commands or AI prompts ([demo video](https://www.youtube.com/watch?v=qhwYnk8adF4))
 - **Quick Terminal** -- system-wide drop-down terminal toggled via global keybind
 - **Clipboard Confirmation** -- prompts before pasting potentially unsafe content (respects Ghostty's `clipboard-paste-protection` setting)
 - **Secure Keyboard Entry** -- prevents other apps from intercepting keystrokes (toggle via app menu)
-- **Auto-update** -- Sparkle-based updates for direct downloads (Homebrew installs use `brew upgrade`)
+- **Distribution** -- install via Homebrew cask or download builds from GitHub Releases
 
 ## Keyboard Shortcuts
 
@@ -92,7 +92,7 @@ A macOS 26+ native terminal application built on [libghostty](https://github.com
 
 ## IPC (Inter-Pane Communication)
 
-AI agent instances (Claude Code, Codex CLI) running in different Calyx tabs or panes can communicate with each other via a built-in MCP server.
+AI agent instances (Claude Code, Codex CLI) running in different CTerm tabs or panes can communicate with each other via a built-in MCP server.
 
 1. Open the command palette (`Cmd+Shift+P`) and run **Enable AI Agent IPC**
 2. Start agents (Claude Code, Codex, or both) in two or more terminal panes
@@ -109,47 +109,47 @@ To disable, open the command palette and run **Disable AI Agent IPC**.
 Agents can programmatically control browser tabs via 25 CLI commands, similar to cmux's browser automation.
 
 1. Open a browser tab and navigate to a page
-2. Use `calyx browser` commands from any terminal tab — no enable step needed
+2. Use `cterm browser` commands from any terminal tab — no enable step needed
 
 ### CLI Commands
 
 ```bash
-calyx browser list                         # List all browser tabs
-calyx browser snapshot --tab-id <id>       # Accessibility tree with element refs
-calyx browser get-text h1 --tab-id <id>    # Get element text
-calyx browser click a --tab-id <id>        # Click element
-calyx browser fill input --value "text"    # Fill input field
-calyx browser eval 'document.title'        # Execute JavaScript
-calyx browser screenshot                   # Capture to temp file
-calyx browser wait --selector ".loaded"    # Wait for condition
-calyx browser get-attribute a href         # Get element attribute
-calyx browser get-links                    # List all links (JSON)
-calyx browser get-inputs                   # List all form inputs (JSON)
-calyx browser is-visible '#sidebar'        # Check element visibility
-calyx browser hover '#menu-item'           # Hover over element
-calyx browser scroll down --amount 500     # Scroll page/element
+cterm browser list                         # List all browser tabs
+cterm browser snapshot --tab-id <id>       # Accessibility tree with element refs
+cterm browser get-text h1 --tab-id <id>    # Get element text
+cterm browser click a --tab-id <id>        # Click element
+cterm browser fill input --value "text"    # Fill input field
+cterm browser eval 'document.title'        # Execute JavaScript
+cterm browser screenshot                   # Capture to temp file
+cterm browser wait --selector ".loaded"    # Wait for condition
+cterm browser get-attribute a href         # Get element attribute
+cterm browser get-links                    # List all links (JSON)
+cterm browser get-inputs                   # List all form inputs (JSON)
+cterm browser is-visible '#sidebar'        # Check element visibility
+cterm browser hover '#menu-item'           # Hover over element
+cterm browser scroll down --amount 500     # Scroll page/element
 ```
 
-The `calyx` CLI binary is bundled inside `Calyx.app/Contents/Resources/bin/`. To install it to your PATH, run **Install CLI to PATH** from the command palette.
+The `cterm` CLI binary is bundled inside `CTerm.app/Contents/Resources/bin/`. To install it to your PATH, run **Install CLI to PATH** from the command palette.
 
-The browser server starts automatically with the app and listens on `localhost:41840`. Connection info is written to `~/.config/calyx/browser.json`.
+The browser server starts automatically with the app and binds to the first available localhost port in the `41840...41849` range. Connection info is written to `~/.config/cterm/browser.json`.
 
 ## Installation
 
 ### Homebrew
 
 ```bash
-brew tap yuuichieguchi/calyx
-brew install --cask calyx
+brew tap yuuichieguchi/cterm
+brew install --cask cterm
 ```
 
 ### Manual
 
-1. Download `Calyx.zip` from the [latest release](https://github.com/yuuichieguchi/Calyx/releases/latest)
+1. Download `CTerm.zip` from the [latest release](https://github.com/yuuichieguchi/CTerm/releases/latest)
 2. Unzip the file
-3. Drag `Calyx.app` into `/Applications`
+3. Drag `CTerm.app` into `/Applications`
 
-Direct downloads include automatic update checking via Sparkle. Homebrew installs are updated via `brew upgrade`.
+Homebrew installs are updated via `brew upgrade`. Direct downloads should be replaced from the latest GitHub release.
 
 ## Building from Source
 
@@ -164,12 +164,12 @@ Direct downloads include automatic update checking via Sparkle. Homebrew install
 
 ```bash
 # Clone with submodules
-git clone --recursive https://github.com/yuuichieguchi/Calyx.git
-cd Calyx
+git clone --recursive https://github.com/yuuichieguchi/CTerm.git
+cd CTerm
 
 # Build libghostty xcframework
 cd ghostty
-zig build -Demit-xcframework=true -Dxcframework-target=native
+SSL_CERT_FILE=/etc/ssl/cert.pem zig build -Demit-xcframework=true -Dxcframework-target=native
 cd ..
 
 # Copy framework
@@ -177,23 +177,23 @@ cp -R ghostty/macos/GhosttyKit.xcframework .
 
 # Generate Xcode project & build
 xcodegen generate
-xcodebuild -project Calyx.xcodeproj -scheme Calyx -configuration Debug build
+xcodebuild -project CTerm.xcodeproj -scheme CTerm -configuration Debug build
 ```
 
 ## Architecture
 
-Calyx uses AppKit for window, tab, and focus management with SwiftUI for view rendering, bridged via `NSHostingView`.
+CTerm uses AppKit for window, tab, and focus management with SwiftUI for view rendering, bridged via `NSHostingView`.
 
 - All ghostty C API calls go through the `GhosttyFFI` enum
 - `@MainActor` enforced on all UI and model code
-- Action dispatch via `NotificationCenter`
+- Action dispatch via `NotificationCenter`, with typed payload decoding in `GhosttyNotificationEvents`
 
 **Tech stack**: Swift 6.2, AppKit, SwiftUI, libghostty (Metal), XcodeGen
 
 ## Known Limitations
 
 - **Cursor click-to-move on full-width text** -- cursor placement may be offset on Japanese/full-width text lines because Ghostty's cursor-click-to-move internally translates clicks into arrow-key steps over terminal cells.
-- **Calyx-managed config keys** -- `background-opacity`, `background-blur`, `background-opacity-cells`, `font-codepoint-map`, `foreground` are overridden by Calyx for Glass UI. See Settings > Ghostty Config Compatibility for the full list.
+- **CTerm-managed config keys** -- `background-opacity`, `background-blur`, `background-opacity-cells`, `font-codepoint-map`, `foreground` are overridden by CTerm for Glass UI. See Settings > Ghostty Config Compatibility for the full list.
 
 ## License
 
@@ -202,4 +202,3 @@ This project is licensed under the [MIT License](LICENSE).
 ## Acknowledgements
 
 Built on [libghostty](https://github.com/ghostty-org/ghostty) by Mitchell Hashimoto (MIT License).
-

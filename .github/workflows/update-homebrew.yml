@@ -15,12 +15,12 @@ jobs:
           app-id: ${{ secrets.HOMEBREW_APP_ID }}
           private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
           owner: yuuichieguchi
-          repositories: homebrew-calyx
+          repositories: homebrew-cterm
 
-      - name: Dispatch to homebrew-calyx
+      - name: Dispatch to homebrew-cterm
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ steps.app-token.outputs.token }}
-          repository: yuuichieguchi/homebrew-calyx
+          repository: yuuichieguchi/homebrew-cterm
           event-type: update-cask
           client-payload: '{"tag": "${{ github.event.release.tag_name }}"}'

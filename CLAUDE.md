@@ -5,13 +5,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Audit
 
 A full codebase audit lives in `docs/audit/`. Read it before major changes. Key docs:
-- `docs/audit/02-architecture.md` — structural risks, the CalyxWindowController god class problem
+- `docs/audit/02-architecture.md` — structural risks, the CTermWindowController god class problem
 - `docs/audit/07-fragility-map.md` — what breaks easily and why
 - `docs/audit/10-refactor-plan.md` — incremental decomposition plan
 
 ## What This Is
 
-Calyx is a macOS 26+ native terminal application built on [libghostty](https://github.com/ghostty-org/ghostty). It wraps the Ghostty terminal engine (via xcframework) with a native Liquid Glass UI, adding tabs, splits, sidebar, browser tabs, IPC, and other features on top.
+CTerm is a macOS 26+ native terminal application built on [libghostty](https://github.com/ghostty-org/ghostty). It wraps the Ghostty terminal engine (via xcframework) with a native Liquid Glass UI, adding tabs, splits, sidebar, browser tabs, IPC, and other features on top.
 
 **Tech stack**: Swift 6.2, AppKit + SwiftUI (bridged via `NSHostingView`), libghostty (Metal GPU rendering), XcodeGen for project generation.
 
@@ -41,25 +41,25 @@ The `ghostty/` directory is a git submodule. Zig version must match what's in `g
 xcodegen generate
 ```
 
-Must re-run whenever `project.yml` changes. The `.xcodeproj` is not committed.
+Must re-run whenever `project.yml` changes. `CTerm.xcodeproj` is generated and not committed.
 
 ### Build
 
 ```bash
-xcodebuild -project Calyx.xcodeproj -scheme Calyx -configuration Debug build
+xcodebuild -project CTerm.xcodeproj -scheme CTerm -configuration Debug build
 ```
 
 ### Run tests
 
 ```bash
 # All unit tests
-xcodebuild -project Calyx.xcodeproj -scheme CalyxTests -configuration Debug test
+xcodebuild -project CTerm.xcodeproj -scheme CTermTests -configuration Debug test
 
 # Single test class
-xcodebuild -project Calyx.xcodeproj -scheme CalyxTests -configuration Debug test -only-testing:CalyxTests/SplitTreeTests
+xcodebuild -project CTerm.xcodeproj -scheme CTermTests -configuration Debug test -only-testing:CTermTests/SplitTreeTests
 
 # UI tests
-xcodebuild -project Calyx.xcodeproj -scheme CalyxUITests -configuration Debug test
+xcodebuild -project CTerm.xcodeproj -scheme CTermUITests -configuration Debug test
 ```
 
 ## Architecture
@@ -80,30 +80,31 @@ AppDelegate
 ### Key conventions
 
 - **`@MainActor` everywhere** — all UI and model code is `@MainActor`. Never dispatch UI work off the main actor.
-- **All ghostty C API calls go through `GhosttyFFI`** (`Calyx/GhosttyBridge/GhosttyFFI.swift`). This is a thin enum of static wrapper methods — no business logic there.
-- **Action dispatch via `NotificationCenter`** — inter-component communication uses 28 named notifications with untyped `userInfo` dictionaries. These are a known fragility point (see `docs/audit/07-fragility-map.md`).
+- **All ghostty C API calls go through `GhosttyFFI`** (`CTerm/GhosttyBridge/GhosttyFFI.swift`). This is a thin enum of static wrapper methods — no business logic there.
+- **NotificationCenter remains the event bus** — notification payload decoding should go through the typed wrappers in `CTerm/GhosttyBridge/GhosttyNotificationEvents.swift`. Do not add new raw `userInfo` parsing in controllers.
+- **`WindowActions` replaces the old closure explosion** — view-to-controller actions are injected through the SwiftUI environment from `CTermWindowController`.
 - **`GhosttyAppController.shared`** is the singleton that owns `ghostty_app_t`, manages config reload, and handles C callbacks from libghostty.
 - **No force unwraps, force casts, or `try!` in production code.** Keep it that way.
-- **`nonisolated(unsafe)`** is used in ~25 places for C interop and read-only-after-init patterns. Each use is intentional — don't add new ones without justification.
+- **`nonisolated(unsafe)`** is used for documented C interop and read-only-after-init patterns. Follow `docs/CONCURRENCY.md` before adding new ones.
 
 ### Known architectural issues
 
-- **`CalyxWindowController` is 1,965 lines** — it is a god class handling tabs, splits, git, diffs, IPC, browser, reviews, focus, and session snapshots. See `docs/audit/10-refactor-plan.md` for the decomposition plan. Avoid adding more responsibilities here.
-- **`MainContentView` takes 22+ callback closures** — a symptom of the god controller. Planned migration to `@Environment` actions.
-- **10 singletons** with `static let shared` — no dependency injection. Test backdoors use `#if DEBUG`.
+- **`CTermWindowController` is still too large** — despite the extracted controllers (`GitController`, `ReviewController`, `FocusManager`, `BrowserManager`, `ComposeOverlayController`, `SplitController`, `IPCWindowController`, `TabLifecycleController`), it still concentrates too much responsibility. Avoid adding new concerns there.
+- **Session and tab lifecycle logic is still distributed** across `AppDelegate`, `CTermWindowController`, and feature controllers. Be careful when changing restore, close, or cleanup behavior.
+- **Singleton-heavy design remains** — `GhosttyAppController.shared`, `CTermMCPServer.shared`, `BrowserServer.shared`, `SessionPersistenceActor.shared`, and others still own global state.
 
 ### Directory structure
 
-- `Calyx/App/` — `AppDelegate`, `main.swift`
-- `Calyx/GhosttyBridge/` — all ghostty integration: `GhosttyFFI`, `GhosttyApp`, `GhosttyConfig`, `GhosttySurface`, `SurfaceView`, `MetalView`, config watcher/reloader, event translation
-- `Calyx/Models/` — data model: `AppSession`, `WindowSession`, `TabGroup`, `Tab`, `SplitTree`, `SurfaceRegistry`, `ThemeColor`
-- `Calyx/Views/` — SwiftUI views organized by area: `MainWindow/`, `Sidebar/`, `TabBar/`, `Split/`, `Browser/`, `Git/`, `Glass/`
-- `Calyx/Features/` — self-contained feature modules: `Browser/`, `CommandPalette/`, `ComposeOverlay/`, `Git/`, `IPC/`, `Notifications/`, `Persistence/`, `QuickTerminal/`, `Search/`, `SecureInput/`, `Settings/`, `Update/`
-- `Calyx/Input/` — global event tap, shortcut manager
-- `Calyx/Helpers/` — utilities
-- `CalyxCLI/` — the `calyx` CLI tool (bundled into app; uses `swift-argument-parser`)
-- `CalyxTests/` — unit tests
-- `CalyxUITests/` — UI tests (pass `--uitesting` launch arg)
+- `CTerm/App/` — `AppDelegate`, `main.swift`
+- `CTerm/GhosttyBridge/` — all ghostty integration: `GhosttyFFI`, `GhosttyApp`, `GhosttyConfig`, `GhosttySurface`, `SurfaceView`, `MetalView`, config watcher/reloader, event translation
+- `CTerm/Models/` — data model: `AppSession`, `WindowSession`, `TabGroup`, `Tab`, `SplitTree`, `SurfaceRegistry`, `ThemeColor`
+- `CTerm/Views/` — SwiftUI views organized by area: `MainWindow/`, `Sidebar/`, `TabBar/`, `Split/`, `Browser/`, `Git/`, `Glass/`
+- `CTerm/Features/` — self-contained feature modules: `Browser/`, `CommandPalette/`, `ComposeOverlay/`, `Git/`, `IPC/`, `Notifications/`, `Persistence/`, `QuickTerminal/`, `Search/`, `SecureInput/`, `Settings/`, `TerminalSearch/`, `TestRunner/`, `TriggerEngine/`, `Usage/`
+- `CTerm/Input/` — global event tap, shortcut manager
+- `CTerm/Helpers/` — utilities
+- `CTermCLI/` — the `cterm` CLI tool (bundled into app; uses `swift-argument-parser`)
+- `CTermTests/` — unit tests
+- `CTermUITests/` — UI tests (pass `--uitesting` launch arg)
 
 ### Split pane model
 
@@ -111,25 +112,25 @@ AppDelegate
 
 ### Ghostty config
 
-`GhosttyConfigManager` reads `~/.config/ghostty/config` and applies overrides for Calyx-managed keys (background opacity, blur, etc.). The file watcher triggers debounced reloads via `ConfigReloadCoordinator`. Config changes propagate via `ghostty_app_reload_config`.
+`GhosttyConfigManager` reads `~/.config/ghostty/config` and applies overrides for CTerm-managed keys (background opacity, blur, etc.). The file watcher triggers debounced reloads via `ConfigReloadCoordinator`. Config changes propagate via `ghostty_app_reload_config`.
 
 ### IPC / MCP server
 
-`CalyxMCPServer` implements a local MCP server (port 41830-41839) enabling Claude Code and Codex CLI instances in different terminal panes to communicate. `IPCConfigManager` writes the MCP config to `~/.claude.json` and `~/.codex/config.toml`. Backed by `IPCStore` actor with TTL-based peer/message expiration. See `docs/audit/04-networking.md`.
+`CTermMCPServer` implements a local MCP server (port 41830-41839) enabling Claude Code and Codex CLI instances in different terminal panes to communicate. `IPCConfigManager` writes the MCP config to `~/.claude.json` and `~/.codex/config.toml`. Backed by `IPCStore` actor with TTL-based peer/message expiration. See `docs/audit/04-networking.md`.
 
 ### Browser scripting
 
-`BrowserServer` runs on `localhost:41840-41849`. `BrowserTabBroker` coordinates between `BrowserTabController` instances and the CLI. The `calyx browser` subcommand (in `CalyxCLI/BrowserCommands.swift`) communicates with this server. Both servers use a hand-rolled `HTTPParser` and bearer token auth. See `docs/audit/04-networking.md`.
+`BrowserServer` binds to the first available localhost port in `41840...41849`. `BrowserTabBroker` coordinates between `BrowserTabController` instances and the CLI. The `cterm browser` subcommand (in `CTermCLI/BrowserCommands.swift`) communicates with this server. Both servers use a hand-rolled `HTTPParser` and bearer token auth. See `docs/audit/04-networking.md`.
 
 ## Project configuration
 
 `project.yml` (XcodeGen spec) is the source of truth for targets, dependencies, and build settings. Targets:
-- **Calyx** — main app, depends on `GhosttyKit.xcframework`, Sparkle, CalyxCLI
-- **CalyxCLI** — `calyx` command-line tool, depends on `swift-argument-parser`
-- **CalyxTests** / **CalyxUITests** — test bundles
+- **CTerm** — main app, depends on `GhosttyKit.xcframework`, system frameworks, and `CTermCLI`
+- **CTermCLI** — `cterm` command-line tool, depends on `swift-argument-parser`
+- **CTermTests** / **CTermUITests** — test bundles
 
-The `Calyx-Bridging-Header.h` (listed as a `fileGroup`) bridges GhosttyKit C headers into Swift.
+The `CTerm-Bridging-Header.h` (listed as a `fileGroup`) bridges GhosttyKit C headers into Swift.
 
 ## Session persistence
 
-`SessionPersistenceActor` (Swift actor) saves/restores to `~/.calyx/sessions.json` with atomic temp+rename writes, backup rotation, and crash-loop detection (max 3 recovery attempts). Debounced saves trigger on every meaningful state change via `requestSave()`. Diff tabs are excluded from persistence by design.
+`SessionPersistenceActor` (Swift actor) saves/restores to `~/.cterm/sessions.json` with atomic temp+rename writes, backup rotation, and crash-loop detection (max 3 recovery attempts). Debounced saves trigger on every meaningful state change via `requestSave()`. Diff tabs are excluded from persistence by design.

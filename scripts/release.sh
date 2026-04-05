@@ -2,10 +2,10 @@
 set -euo pipefail
 
 VERSION=$(grep 'MARKETING_VERSION' project.yml | grep -v '\$(' | sed 's/.*"\(.*\)"/\1/')
-APP_PATH="/tmp/CalyxRelease/Build/Products/Release/Calyx.app"
-ZIP_PATH="/tmp/Calyx.zip"
+APP_PATH="/tmp/CTermRelease/Build/Products/Release/CTerm.app"
+ZIP_PATH="/tmp/CTerm.zip"
 
-echo "=== Calyx Release v$VERSION ==="
+echo "=== CTerm Release v$VERSION ==="
 
 # 1. Check required env vars
 echo "Checking required environment variables..."
@@ -20,16 +20,16 @@ xcodegen generate
 echo "Xcode project generated."
 
 # 3. Build
-echo "Building Calyx (Release)..."
+echo "Building CTerm (Release)..."
 xcodebuild \
-  -project Calyx.xcodeproj \
-  -scheme Calyx \
+  -project CTerm.xcodeproj \
+  -scheme CTerm \
   -configuration Release \
   ARCHS=arm64 \
   CODE_SIGN_IDENTITY="Developer ID Application: Yuuichi Eguchi (PQQBSRKD72)" \
   CODE_SIGN_STYLE=Manual \
   DEVELOPMENT_TEAM=PQQBSRKD72 \
-  -derivedDataPath /tmp/CalyxRelease \
+  -derivedDataPath /tmp/CTermRelease \
   clean build
 echo "Build succeeded."
 
@@ -90,7 +90,7 @@ codesign --force --sign "$SIGN_IDENTITY" --timestamp "$SPARKLE_FW"
 
 # 5. Re-sign the outer app (inner re-signing invalidates outer seal)
 codesign --force --sign "$SIGN_IDENTITY" --timestamp --options runtime \
-  --entitlements Calyx/Calyx.entitlements "$APP_PATH"
+  --entitlements CTerm/CTerm.entitlements "$APP_PATH"
 echo "Sparkle framework and app signed."
 
 # 3.5d. Pre-notarization verification gate (spctl skipped — requires notarization)
@@ -132,8 +132,8 @@ echo "Final zip created at $ZIP_PATH."
 echo "Verifying final distributed artifact..."
 VERIFY_DIR=$(mktemp -d)
 ditto -x -k "$ZIP_PATH" "$VERIFY_DIR"
-codesign --verify --deep --strict "$VERIFY_DIR/Calyx.app"
-spctl --assess --type exec "$VERIFY_DIR/Calyx.app"
+codesign --verify --deep --strict "$VERIFY_DIR/CTerm.app"
+spctl --assess --type exec "$VERIFY_DIR/CTerm.app"
 rm -rf "$VERIFY_DIR"
 echo "Distributed artifact verification passed."
 
@@ -165,7 +165,7 @@ fi
 RELEASE_BODY="## What's Changed
 $NOTES"
 gh release create "v$VERSION" "$ZIP_PATH" \
-  --title "Calyx v$VERSION" \
+  --title "CTerm v$VERSION" \
   --notes "$RELEASE_BODY"
 echo "GitHub release v$VERSION created."
 
@@ -173,11 +173,11 @@ echo "GitHub release v$VERSION created."
 echo "Generating appcast..."
 GENERATE_APPCAST=$(find ~/Library/Developer/Xcode/DerivedData -name "generate_appcast" -path "*/Sparkle/bin/*" 2>/dev/null | head -1)
 if [ -n "$GENERATE_APPCAST" ]; then
-  APPCAST_DIR="/tmp/CalyxAppcast"
+  APPCAST_DIR="/tmp/CTermAppcast"
   mkdir -p "$APPCAST_DIR"
   cp "$ZIP_PATH" "$APPCAST_DIR/"
   "$GENERATE_APPCAST" \
-    --download-url-prefix "https://github.com/yuuichieguchi/Calyx/releases/download/v$VERSION/" \
+    --download-url-prefix "https://github.com/yuuichieguchi/CTerm/releases/download/v$VERSION/" \
     "$APPCAST_DIR"
 
   # Push appcast to gh-pages

@@ -1,6 +1,6 @@
 # Phase 7: Fragility Map
 
-## 1. ✅ CalyxWindowController Notification Handlers (fixed)
+## 1. ✅ CTermWindowController Notification Handlers (fixed)
 
 ### What was fragile
 All ghostty events arrived as untyped `NotificationCenter` posts. Each handler did `as?` casts on `notification.object` and `notification.userInfo`. If ghostty changed the shape of its callback data, these failed silently.
@@ -77,10 +77,10 @@ Hard crash (EXC_BAD_ACCESS) in C callback handler.
 `BrowserServer` token generation did not check the `SecRandomCopyBytes` return value. A failure would produce an all-zero predictable token, creating a theoretical auth bypass.
 
 ### Fix
-`SecRandomCopyBytes` return value is now checked; failure triggers `fatalError`. Shared `SecurityUtils.generateHexToken()` utility used by both `BrowserServer` and `CalyxMCPServer`.
+`SecRandomCopyBytes` return value is now checked; failure triggers `fatalError`. Shared `SecurityUtils.generateHexToken()` utility used by both `BrowserServer` and `CTermMCPServer`.
 
 ### Remaining
-- Any malicious local process running as the same user can still read `~/.config/calyx/browser.json` (inherent to local IPC)
+- Any malicious local process running as the same user can still read `~/.config/cterm/browser.json` (inherent to local IPC)
 - State file not cleaned up if app crashes (stale token) — acceptable: token regenerated on next `start()`
 
 ## 6. ✅ TOML Parser for Codex Config (fully hardened)

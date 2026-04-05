@@ -19,7 +19,7 @@
 
 ## Where Separation is Broken
 
-### 1. ✅ CalyxWindowController god class — PARTIALLY RESOLVED
+### 1. ✅ CTermWindowController god class — PARTIALLY RESOLVED
 
 8 extraction steps complete (see `docs/audit/10-refactor-plan.md`). Extracted: GitController, ReviewController, FocusManager, BrowserManager, ComposeOverlayController + WindowActions environment + typed notification events. File reduced from 1,965 lines. Remaining: split operations, IPC enable/disable, review dispatch, tab/group lifecycle.
 
@@ -65,7 +65,7 @@ NotificationCenter.default.post(name: .ghosttyNewSplit, object: surfaceView, use
     "inherited_config": config
 ])
 
-// Receiving (in CalyxWindowController):
+// Receiving (in CTermWindowController):
 let direction = notification.userInfo?["direction"] as? ghostty_action_split_direction_e
 let config = notification.userInfo?["inherited_config"] as? ghostty_surface_config_s
 ```
@@ -74,7 +74,7 @@ If the posting side changes the key name or value type, the receiving side silen
 
 ## Top 5 Structural Risks
 
-### 1. ⚠️ CalyxWindowController (~1,350 lines) — SUBSTANTIALLY MITIGATED
+### 1. ⚠️ CTermWindowController (~1,350 lines) — SUBSTANTIALLY MITIGATED
 
 12 extraction / completion steps completed (Steps 1-12 of `10-refactor-plan.md`). Extracted: GitController, ReviewController, FocusManager, BrowserManager, ComposeOverlayController, WindowActions, SplitController, IPCWindowController, TabLifecycleController. `SplitController.removeSurface(_:fromTab:)` added in Step 12 extracts the surface-level work from `handleCloseSurfaceNotification`; tab teardown remains in CWC. Both previously-stubbed notification handlers (`handleColorChangeNotification`, `handleShowChildExitedNotification`) are now fully implemented.
 
@@ -84,7 +84,7 @@ All 28 notification handlers now use typed event wrappers (`GhosttyNotificationE
 
 ### 3. ⚠️ 10 singletons with no dependency injection — PARTIALLY MITIGATED
 
-`CalyxMCPServer._testSetToken()` `#if DEBUG` backdoor removed; tests now use `CalyxMCPServer(testToken:)`. `CalyxWindowController` accepts injected `mcpServer`. Remaining: `GhosttyAppController.shared`, `ClaudeUsageMonitor.shared`, and 7 other singletons still require the full app for testing.
+`CTermMCPServer._testSetToken()` `#if DEBUG` backdoor removed; tests now use `CTermMCPServer(testToken:)`. `CTermWindowController` accepts injected `mcpServer`. Remaining: `GhosttyAppController.shared`, `ClaudeUsageMonitor.shared`, and 7 other singletons still require the full app for testing.
 
 ### 4. ✅ Callback-closure architecture for view-to-controller communication — FIXED
 

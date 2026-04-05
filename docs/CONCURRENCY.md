@@ -1,6 +1,6 @@
 # Concurrency Notes
 
-This document explains the ~25 `nonisolated(unsafe)` instances in the Calyx codebase.
+This document explains the ~25 `nonisolated(unsafe)` instances in the CTerm codebase.
 They are intentional escape hatches from Swift's strict concurrency checking, not bugs.
 Do not add new ones without justification.
 

@@ -36,7 +36,7 @@ The 28 untyped notifications are the biggest maintenance burden. Migrate one at 
 
 Use typed structs with factory methods (see fragility-map.md for pattern).
 
-### CalyxWindowController god class -> Focused controllers
+### CTermWindowController god class -> Focused controllers
 
 Extract into:
 - `GitController` (~200 lines: git status, commit history, diff loading)
@@ -101,7 +101,7 @@ The hand-coded regex parser has 520 lines of tests. It's good enough. A dependen
 
 | Task | Effort | Impact |
 |------|--------|--------|
-| Extract GitController from CalyxWindowController | 1 day | -200 lines from god class |
+| Extract GitController from CTermWindowController | 1 day | -200 lines from god class |
 | Extract ReviewController | 1 day | -150 lines from god class |
 | Extract FocusManager | 0.5 day | -100 lines, cleaner focus logic |
 | Type top 5 notifications | 2 days | Compile-time safety |
@@ -114,7 +114,7 @@ The hand-coded regex parser has 520 lines of tests. It's good enough. A dependen
 | Task | Effort | Impact |
 |------|--------|--------|
 | Complete notification -> typed events migration | 2 weeks | Full compile-time safety |
-| CalyxWindowController below 500 lines | 1 week | Maintainable core |
+| CTermWindowController below 500 lines | 1 week | Maintainable core |
 | Add error recovery UI (toast/banner) | 1 week | Better UX for git/network errors |
 | Consider plugin architecture for features | Design phase | Extensibility |
 | Evaluate NWListener replacement options | Research | Simplify HTTP servers |

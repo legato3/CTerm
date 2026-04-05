@@ -7,7 +7,7 @@
 Set via `handleSetTitleNotification` on the focused surface view, but only if that surface is the focused one in the active tab. Background tabs receiving title updates from ghostty are silently ignored. A user switching tabs may see stale titles.
 
 ```swift
-// CalyxWindowController.swift:1188-1200
+// CTermWindowController.swift:1188-1200
 @objc private func handleSetTitleNotification(_ notification: Notification) {
     guard let surfaceView = notification.object as? SurfaceView else { return }
     guard belongsToThisWindow(surfaceView) else { return }
@@ -32,13 +32,13 @@ Set via `handleSetTitleNotification` on the focused surface view, but only if th
 Stored in `tab.content = .browser(url:)` AND in `browserController.browserState.url`. The snapshot reads from the controller first, falling back to the tab content. Navigation in the browser updates both, but there's a window where they diverge.
 
 ```swift
-// CalyxWindowController.swift:1392
+// CTermWindowController.swift:1392
 browserURL = browserControllers[tab.id]?.browserState.url ?? configuredURL
 ```
 
 ### `hasMoreCommits` flag
 
-Lives as a bare `Bool` on `CalyxWindowController`, not on the git model. If you have two views showing git state, this flag isn't shared.
+Lives as a bare `Bool` on `CTermWindowController`, not on the git model. If you have two views showing git state, this flag isn't shared.
 
 ## State Duplication
 
@@ -70,7 +70,7 @@ This pattern appears in 3 places (`applicationWillTerminate`, `saveImmediately`,
 `attemptFocusRestore` retries every 10ms for 500ms. If the view hierarchy is slow to attach (e.g., complex SwiftUI layout), this silently gives up and registers a deferred callback that might never fire.
 
 ```swift
-// CalyxWindowController.swift:946-984
+// CTermWindowController.swift:946-984
 private func attemptFocusRestore(requestID: UInt64, startTime: Double) {
     guard requestID == focusRequestID else { return }
     let elapsed = CACurrentMediaTime() - startTime
@@ -89,7 +89,7 @@ private func attemptFocusRestore(requestID: UInt64, startTime: Double) {
 Uses `DispatchQueue.main.asyncAfter(deadline: .now() + 0.5)` for key event delays. These are fragile timing assumptions -- if the terminal is slow (e.g., processing a large paste), the Enter key arrives too early or too late.
 
 ```swift
-// CalyxWindowController.swift:909-923
+// CTermWindowController.swift:909-923
 if isAgent {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
         // First Enter (confirm paste)

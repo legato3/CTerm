@@ -1,10 +1,10 @@
 # Roadmap: The Ultimate Terminal for Claude & Codex
 
-Calyx's goal is to be the best environment in the world for running AI coding agents — not just a terminal that happens to run `claude`, but a platform where Claude and Codex instances can *see* the terminal, *control* it, coordinate with each other, and operate with full situational awareness.
+CTerm's goal is to be the best environment in the world for running AI coding agents — not just a terminal that happens to run `claude`, but a platform where Claude and Codex instances can *see* the terminal, *control* it, coordinate with each other, and operate with full situational awareness.
 
 ## Current Foundation
 
-Calyx already provides:
+CTerm already provides:
 - **MCP server** with peer-to-peer IPC: Claude instances in different panes can register, message each other, broadcast, and thread replies
 - **Multi-agent workflows**: Solo / Pair / Team templates that auto-spawn and connect agents
 - **Browser automation**: Claude can control a browser tab and read page snapshots
@@ -63,7 +63,7 @@ A sidebar or HUD overlay showing every running Claude/Codex instance across all 
 - **Save** named prompts via command palette "Save Prompt As…" (dialog with name + content fields)
 - **Inject** any saved prompt into the focused pane via command palette `Prompt: {title}`
 - **Delete** prompts via command palette `Delete Prompt: {title}`
-- Persisted to `~/.calyx/prompts.json` via atomic writes; commands auto-refresh on changes
+- Persisted to `~/.cterm/prompts.json` via atomic writes; commands auto-refresh on changes
 
 ---
 
@@ -74,7 +74,7 @@ When a Claude session registers via IPC (`register_peer`):
 - 5-minute cooldown prevents duplicate checkpoints across rapid reconnects
 - **Roll back to checkpoint** button appears in the git sidebar when a checkpoint commit is in the recent 10 commits — confirmation alert before `git reset --hard`
 - **Command palette**: "Checkpoint Now" (immediate), "Enable/Disable Auto-Checkpoint"
-- Enabled flag persisted to `~/.calyx/checkpoint-enabled`; off by default
+- Enabled flag persisted to `~/.cterm/checkpoint-enabled`; off by default
 
 ---
 
@@ -103,7 +103,7 @@ Implemented: `AutoAcceptMonitor` polls each tab's surfaces every 400ms, detects 
 ### 8. Visual IPC Mesh ✅ **(Implemented)**
 
 Canvas-based sidebar panel ("network" icon tab) showing all connected peers and message flow:
-- **Nodes**: registered peers as circles, Calyx hub centered, others arranged in a circle
+- **Nodes**: registered peers as circles, CTerm hub centered, others arranged in a circle
 - **Edges**: animated flow dot travels along each edge when a message was exchanged in the last 10s; older edges are dim
 - **Status colors**: green (active <30s), yellow (idle), gray (disconnected); active nodes pulse with a ring
 - **Click to focus**: tap any peer node → `runInPaneMatching` jumps to that agent's pane
@@ -151,7 +151,7 @@ Queue multiple tasks for a Codex/Claude pane to process one after another:
 
 ## Design Principles
 
-1. **Claude controls Calyx, not the other way around.** Every feature should make Claude more capable of operating autonomously in this environment.
+1. **Claude controls CTerm, not the other way around.** Every feature should make Claude more capable of operating autonomously in this environment.
 2. **The MCP surface is the primary API.** New capabilities are exposed as MCP tools first; UI second.
 3. **Minimal friction.** The fewer clicks required to get an agent running and productive, the better.
 4. **Visible state.** The user should always be able to see what every Claude instance is doing.

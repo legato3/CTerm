@@ -6,13 +6,13 @@ Three independent localhost-only services:
 
 | Server | Port Range | Auth | Protocol | Purpose |
 |--------|-----------|------|----------|---------|
-| `CalyxMCPServer` | 41830-41839 | Bearer token | HTTP/1.1 + JSON-RPC | AI agent IPC |
+| `CTermMCPServer` | 41830-41839 | Bearer token | HTTP/1.1 + JSON-RPC | AI agent IPC |
 | `BrowserServer` | 41840-41849 | Bearer token | HTTP/1.1 + JSON | Browser automation CLI |
-| CLI (`calyx` tool) | Client only | Bearer token | curl subprocess | CLI commands |
+| CLI (`cterm` tool) | Client only | Bearer token | curl subprocess | CLI commands |
 
 All use a hand-rolled `HTTPParser` (211 lines) instead of URLSession.
 
-## CalyxMCPServer
+## CTermMCPServer
 
 ### Architecture
 - `@MainActor` singleton using `Network.framework` (`NWListener`, `NWConnection`)
@@ -77,11 +77,11 @@ Combined with `DispatchSemaphore` and `withCheckedThrowingContinuation` to bridg
 - 10-second hard timeout for all git operations
 - No retry logic
 
-## CLI (calyx tool)
+## CLI (cterm tool)
 
 ### Architecture
 - Uses `swift-argument-parser` for 24 browser subcommands
-- Reads connection info from `~/.config/calyx/browser.json`
+- Reads connection info from `~/.config/cterm/browser.json`
 - Invokes `/usr/bin/curl` as subprocess for HTTP requests
 
 ### Timeouts
@@ -114,8 +114,8 @@ The HTTP parser defines a `timeout` error case but never throws it. Slow clients
 
 | Location | What's swallowed |
 |----------|-----------------|
-| `CalyxWindowController:1611` | `loadMoreCommits` errors |
-| `CalyxWindowController:1636` | `expandCommit` errors |
+| `CTermWindowController:1611` | `loadMoreCommits` errors |
+| `CTermWindowController:1636` | `expandCommit` errors |
 | `BrowserServer.start()` | Port binding failures (loops through 10 ports silently) |
 
 ## Recommended Improvements

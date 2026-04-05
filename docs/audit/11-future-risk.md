@@ -4,7 +4,7 @@ Assumes active development on this fork for 12 months.
 
 ## What Will Become Painful
 
-### 1. ⚠️ CalyxWindowController keeps growing — PARTIALLY MITIGATED
+### 1. ⚠️ CTermWindowController keeps growing — PARTIALLY MITIGATED
 
 8 extraction steps completed: TabCleanupHelper, GitController, ReviewController, FocusManager, typed notifications, WindowActions environment, BrowserManager, ComposeOverlayController. File is now ~1,877 lines. Remaining responsibility clusters not yet extracted: tab/group lifecycle, split operations, IPC enable/disable, review dispatch. See `10-refactor-plan.md` for planned Steps 9+.
 
@@ -22,13 +22,13 @@ The timing-dependent polling loop was replaced with `SplitContainerView.onDeferr
 
 The MCP server currently supports basic tool calls (8 tools). As AI coding tools evolve:
 - More IPC capabilities needed (streaming, file transfer, workspace context)
-- `CalyxWindowController.sendReviewToAgent()` is tightly coupled to the terminal surface
+- `CTermWindowController.sendReviewToAgent()` is tightly coupled to the terminal surface
 - Hard-coded timing delays (500ms) for paste confirmation won't work for all AI tools
 
 ### 5. ✅ Testing complexity — PARTIALLY MITIGATED
 
-- `CalyxMCPServer._testSetToken()` `#if DEBUG` backdoor eliminated — replaced with `init(testToken:)`
-- `CalyxWindowController` already accepts injected `mcpServer: CalyxMCPServer = .shared`
+- `CTermMCPServer._testSetToken()` `#if DEBUG` backdoor eliminated — replaced with `init(testToken:)`
+- `CTermWindowController` already accepts injected `mcpServer: CTermMCPServer = .shared`
 - Remaining: `GhosttyAppController.shared`, `ClaudeUsageMonitor.shared`, and 7 other singletons still require full app for testing
 
 ## What Will Break First
@@ -50,7 +50,7 @@ Current cost to add a tab type (e.g., "markdown preview"):
 2. Add snapshot encoding/decoding
 3. Add restore logic in AppDelegate
 4. Add view rendering in MainContentView
-5. Add lifecycle management in CalyxWindowController (creation, activation, deactivation, cleanup)
+5. Add lifecycle management in CTermWindowController (creation, activation, deactivation, cleanup)
 6. ~~Thread callbacks through MainContentView's 22 closures~~ — now uses `WindowActions` environment object
 7. Update `closeTab`, `closeActiveGroup`, `closeAllTabsInGroup`, `windowWillClose`
 
@@ -58,7 +58,7 @@ Steps 5 and 7 still touch the controller. This is now closer to half a day of fo
 
 ### Adding a new sidebar mode
 
-Current cost: modify `SidebarMode` enum, add view in `SidebarContentView`, add handlers in `CalyxWindowController`. The `WindowActions` environment object has reduced callback churn here.
+Current cost: modify `SidebarMode` enum, add view in `SidebarContentView`, add handlers in `CTermWindowController`. The `WindowActions` environment object has reduced callback churn here.
 
 ### ✅ Debugging notification-based bugs — IMPROVED
 
@@ -66,7 +66,7 @@ Current cost: modify `SidebarMode` enum, add view in `SidebarContentView`, add h
 
 ## Fix NOW to Avoid Future Pain
 
-### 1. ✅ Extract from CalyxWindowController (Priority: Critical) — DONE
+### 1. ✅ Extract from CTermWindowController (Priority: Critical) — DONE
 
 Steps 1-8 completed: TabCleanupHelper, GitController, ReviewController, FocusManager, typed notifications, WindowActions environment, BrowserManager, ComposeOverlayController.
 
@@ -84,4 +84,4 @@ Polling loop replaced with `SplitContainerView.onDeferredLayoutComplete` callbac
 
 ### 5. ✅ Add dependency injection for testability (Priority: Medium) — DONE
 
-`CalyxMCPServer._testSetToken()` `#if DEBUG` backdoor removed. Tests now use `CalyxMCPServer(testToken:)`. `CalyxWindowController` already accepts injected `mcpServer: CalyxMCPServer = .shared`. Pattern can be extended to other singletons as needed.
+`CTermMCPServer._testSetToken()` `#if DEBUG` backdoor removed. Tests now use `CTermMCPServer(testToken:)`. `CTermWindowController` already accepts injected `mcpServer: CTermMCPServer = .shared`. Pattern can be extended to other singletons as needed.

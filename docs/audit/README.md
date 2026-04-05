@@ -1,4 +1,4 @@
-# Calyx Codebase Takeover Audit
+# CTerm Codebase Takeover Audit
 
 **Date**: 2026-03-22
 **Auditor**: Claude Opus 4.6
@@ -36,10 +36,10 @@
 | `print()` in production | 0 |
 | TODO/FIXME in production | 0 |
 | Empty catch blocks | 0 |
-| Largest file | CalyxWindowController.swift (1,965 lines) |
+| Largest file | CTermWindowController.swift (1,965 lines) |
 
 ## Overall Health Score: 7.5/10
 
 **Strengths**: Zero unsafe patterns in production, comprehensive tests, proper actor isolation, clean FFI layer, excellent error handling.
 
-**Primary concern**: CalyxWindowController god class (1,965 lines) and 28 untyped NotificationCenter events.
+**Primary concern**: CTermWindowController god class (1,965 lines) and 28 untyped NotificationCenter events.
