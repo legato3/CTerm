@@ -162,6 +162,9 @@ final class ApprovalPresenter: AgentSessionObserver {
     // MARK: - Helpers
 
     private func keyFrom(context: ApprovalContext) -> GrantKey {
+        if let key = context.grantKey {
+            return key
+        }
         // Reconstruct a grant key from the descriptor. ActionDescriber always
         // formats shell commands as "Run: <command>"; strip that prefix.
         let what = context.action.what

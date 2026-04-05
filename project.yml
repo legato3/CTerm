@@ -110,6 +110,8 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: T3F87H6Y8Y
     dependencies:
       - target: CTerm
 
@@ -122,6 +124,8 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: CTerm
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: T3F87H6Y8Y
     dependencies:
       - target: CTerm
 

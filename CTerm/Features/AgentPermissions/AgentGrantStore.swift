@@ -126,11 +126,8 @@ final class AgentGrantStore {
     private func ensureRepoLoaded(_ repoKey: String) {
         guard !loadedRepos.contains(repoKey) else { return }
         loadedRepos.insert(repoKey)
-        Task { [weak self] in
-            guard let file = await GrantsPersistence.shared.load(repoKey: repoKey) else { return }
-            await MainActor.run {
-                self?.repoGrants[repoKey] = file
-            }
+        if let file = loadRepoGrantFromDisk(repoKey: repoKey) {
+            repoGrants[repoKey] = file
         }
     }
 
@@ -143,6 +140,23 @@ final class AgentGrantStore {
         loadedRepos.insert(repoKey)
         let snapshot = file
         Task { await GrantsPersistence.shared.save(snapshot) }
+    }
+
+    private func loadRepoGrantFromDisk(repoKey: String) -> RepoGrantsFile? {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let url = home
+            .appendingPathComponent(".cterm/grants", isDirectory: true)
+            .appendingPathComponent("\(repoKey).json")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        do {
+            return try decoder.decode(RepoGrantsFile.self, from: data)
+        } catch {
+            logger.warning("Failed to decode grants for \(repoKey): \(error.localizedDescription)")
+            return nil
+        }
     }
 
     // MARK: - Test hook

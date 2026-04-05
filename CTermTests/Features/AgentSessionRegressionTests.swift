@@ -79,7 +79,7 @@ struct AgentSessionRegressionTests {
     }
 
     @Test("Inline sessions keep the visible goal separate from the enriched raw prompt")
-    func inlineSessionSeparatesGoalFromRawPrompt() {
+    func inlineSessionSeparatesGoalFromRawPrompt() throws {
         let registry = AgentSessionRegistry.shared
         registry._resetForTesting()
         defer { registry._resetForTesting() }

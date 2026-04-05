@@ -47,6 +47,7 @@ enum ApprovalGate {
         gitBranch: String?
     ) -> GateDecision {
         let assessment = RiskScorer.assess(command: command, pwd: pwd, gitBranch: gitBranch)
+        let key = GrantKey.from(command: command, assessment: assessment)
 
         // 1. Hard-stop always surfaces the sheet.
         if let reason = HardStopGuard.isHardStop(command, gitBranch: gitBranch) {
@@ -56,13 +57,13 @@ enum ApprovalGate {
                 riskScore: assessment.score,
                 riskTier: assessment.tier,
                 action: descriptor,
+                grantKey: key,
                 suggestedScope: .once
             )
             return .hardStop(reason: reason, context: ctx, assessment: assessment)
         }
 
         // 2. Existing grant covers this?
-        let key = GrantKey.from(command: command, assessment: assessment)
         let context = GrantContext(sessionID: session?.id, pwd: pwd)
         if AgentGrantStore.shared.hasGrant(key: key, in: context) {
             return .autoApprove
@@ -85,6 +86,7 @@ enum ApprovalGate {
                 riskScore: assessment.score,
                 riskTier: assessment.tier,
                 action: descriptor,
+                grantKey: key,
                 suggestedScope: defaultScope(for: assessment)
             )
             return .requireApproval(context: ctx, assessment: assessment)
@@ -127,6 +129,7 @@ enum ApprovalGate {
                 riskScore: assessment.score,
                 riskTier: assessment.tier,
                 action: descriptor,
+                grantKey: key,
                 suggestedScope: .thisTask
             )
             return .requireApproval(context: ctx, assessment: assessment)

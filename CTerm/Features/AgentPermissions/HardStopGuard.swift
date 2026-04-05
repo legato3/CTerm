@@ -93,24 +93,55 @@ enum HardStopGuard {
     }
 
     private static func mentionsProtectedBranch(_ lower: String, currentBranch: String?) -> Bool {
+        for destination in explicitPushDestinations(lower) {
+            if isProtectedBranchName(destination) {
+                return true
+            }
+        }
         for branch in protectedBranches {
             if lower.contains(" \(branch)") || lower.hasSuffix(" \(branch)") {
                 return true
             }
         }
         if lower.contains("release/") { return true }
-        // if no explicit ref, treat current branch as the push target
-        if !lower.contains(" origin ") && !lower.contains(" upstream ") {
-            return isOnProtectedBranch(currentBranch)
-        }
-        return false
+        // If no explicit protected destination is named, treat the current
+        // branch as the push target.
+        return isOnProtectedBranch(currentBranch)
     }
 
     private static func isOnProtectedBranch(_ branch: String?) -> Bool {
         guard let branch else { return false }
-        let b = branch.lowercased()
-        if protectedBranches.contains(b) { return true }
-        if b.hasPrefix("release/") { return true }
+        return isProtectedBranchName(branch)
+    }
+
+    private static func explicitPushDestinations(_ lower: String) -> [String] {
+        lower
+            .split(whereSeparator: \.isWhitespace)
+            .compactMap { token in
+                guard token.contains(":") else { return nil }
+                let destination = token.split(separator: ":", omittingEmptySubsequences: false).last.map(String.init) ?? ""
+                guard !destination.isEmpty else { return nil }
+                return normalizedBranchName(destination)
+            }
+    }
+
+    private static func normalizedBranchName(_ branch: String) -> String {
+        let lowered = branch.lowercased()
+        if let stripped = lowered.split(separator: "/").suffix(2).joined(separator: "/").nilIfEmpty,
+           lowered.contains("refs/heads/") {
+            return stripped
+        }
+        return lowered
+    }
+
+    private static func isProtectedBranchName(_ branch: String) -> Bool {
+        let normalized = normalizedBranchName(branch)
+        if protectedBranches.contains(normalized) { return true }
+        if normalized.hasPrefix("release/") { return true }
         return false
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

@@ -232,7 +232,8 @@ final class AgentPromptContextBuilderTests: XCTestCase {
         tab.lastShellError = ShellErrorEvent(
             tabID: tab.id,
             tabTitle: "Claude",
-            snippet: "Tests failed in ComposeOverlayTests"
+            snippet: "Tests failed in ComposeOverlayTests",
+            exitCode: 1
         )
         let block = TerminalCommandBlock(
             id: UUID(),

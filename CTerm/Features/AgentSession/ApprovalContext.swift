@@ -40,6 +40,7 @@ struct ApprovalContext: Sendable {
     let riskScore: Int            // 0-100, from RiskScorer
     let riskTier: RiskTier        // derived from score
     let action: ActionDescriptor
+    let grantKey: GrantKey?
     let suggestedScope: ApprovalScope
     var decision: ApprovalAnswer?
     var grantedScope: ApprovalScope?
@@ -49,12 +50,14 @@ struct ApprovalContext: Sendable {
         riskScore: Int,
         riskTier: RiskTier,
         action: ActionDescriptor,
+        grantKey: GrantKey? = nil,
         suggestedScope: ApprovalScope = .once
     ) {
         self.stepID = stepID
         self.riskScore = riskScore
         self.riskTier = riskTier
         self.action = action
+        self.grantKey = grantKey
         self.suggestedScope = suggestedScope
         self.decision = nil
         self.grantedScope = nil

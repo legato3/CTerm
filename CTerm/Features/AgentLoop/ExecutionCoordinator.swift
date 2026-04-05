@@ -315,7 +315,13 @@ final class ExecutionCoordinator {
         session.transition(to: .running)
 
         // Dispatch to terminal via TerminalControlBridge
-        let dispatched = TerminalControlBridge.shared.routeToNearestAgentPaneOrActive(text: command)
+        let dispatched: Bool
+        if let tabID = session.tabID,
+           let delegate = TerminalControlBridge.shared.delegate {
+            dispatched = delegate.runInPane(tabID: tabID, paneID: nil, text: command, pressEnter: true)
+        } else {
+            dispatched = TerminalControlBridge.shared.routeToNearestAgentPaneOrActive(text: command)
+        }
         if !dispatched {
             plan.steps[index].status = .failed
             plan.steps[index].output = "No terminal pane available"
@@ -461,11 +467,14 @@ final class ExecutionCoordinator {
     private func executeBrowserResearch(startingAt index: Int) {
         guard let plan = session.plan else { return }
 
-        // Collect all remaining approved browser steps
-        let browserSteps = plan.steps[index...].filter { step in
-            guard step.status == .approved || step.status == .pending else { return false }
-            guard let cmd = step.command?.lowercased() else { return true } // informational
-            return cmd.hasPrefix("browse:") || cmd.hasPrefix("browser:") || cmd.hasPrefix("open http") || cmd.isEmpty
+        guard let browserSteps = prepareBrowserResearchSteps(startingAt: index, in: plan) else {
+            return
+        }
+        guard !browserSteps.isEmpty else {
+            executionTask = Task { @MainActor [weak self] in
+                self?.executeNextStep()
+            }
+            return
         }
 
         guard let handler = BrowserServer.shared.toolHandler else {
@@ -485,15 +494,6 @@ final class ExecutionCoordinator {
 
             // (workflow.execute publishes its BrowserResearchSession onto
             //  self.session.browserResearchSession — see BrowserResearchWorkflow)
-
-            // Auto-approve all browser steps for the research workflow
-            for i in plan.steps.indices {
-                if plan.steps[i].status == .pending,
-                   let cmd = plan.steps[i].command?.lowercased(),
-                   cmd.hasPrefix("browse:") || cmd.hasPrefix("browser:") || cmd.hasPrefix("open http") {
-                    plan.steps[i].status = .approved
-                }
-            }
 
             // Build a stable ID→planIndex map before the async call so we can
             // write results back to the correct slots even if the plan mutates.
@@ -547,6 +547,65 @@ final class ExecutionCoordinator {
             self.browserResearchWorkflow = nil
             self.executeNextStep()
         }
+    }
+
+    private func prepareBrowserResearchSteps(startingAt index: Int, in plan: AgentPlan) -> [AgentPlanStep]? {
+        let pwd = TerminalControlBridge.shared.delegate?.activeTabPwd
+        var runnable: [AgentPlanStep] = []
+
+        for planIndex in plan.steps.indices where planIndex >= index {
+            let step = plan.steps[planIndex]
+            guard step.status == .approved || step.status == .pending else { continue }
+            guard isBrowserResearchStep(step) else { continue }
+
+            guard step.status == .pending, let command = step.command, !command.isEmpty else {
+                runnable.append(step)
+                continue
+            }
+
+            let tier = RiskTier.from(score: browserRiskScore(for: command))
+            let gate = ApprovalGate.evaluate(
+                action: .browserAction(command: command, tier: tier),
+                session: session,
+                pwd: pwd,
+                gitBranch: nil
+            )
+
+            switch gate {
+            case .autoApprove:
+                plan.steps[planIndex].status = .approved
+                runnable.append(plan.steps[planIndex])
+
+            case .blocked(let reason):
+                plan.steps[planIndex].status = .failed
+                plan.steps[planIndex].output = "Blocked: \(reason)"
+
+            case .requireApproval(let context, _):
+                if runnable.isEmpty {
+                    presentApproval(context: context, hardStop: nil, pwd: pwd, step: step, index: planIndex)
+                    return nil
+                }
+                return runnable
+
+            case .hardStop(let reason, let context, _):
+                if runnable.isEmpty {
+                    presentApproval(context: context, hardStop: reason, pwd: pwd, step: step, index: planIndex)
+                    return nil
+                }
+                return runnable
+            }
+        }
+
+        return runnable
+    }
+
+    private func isBrowserResearchStep(_ step: AgentPlanStep) -> Bool {
+        guard let command = step.command?.lowercased(), !command.isEmpty else {
+            return true
+        }
+        return command.hasPrefix("browse:")
+            || command.hasPrefix("browser:")
+            || command.hasPrefix("open http")
     }
 
     /// Parse and dispatch a browser command string.

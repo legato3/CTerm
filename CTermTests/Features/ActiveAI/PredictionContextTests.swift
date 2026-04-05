@@ -37,7 +37,8 @@ final class PredictionContextTests: XCTestCase {
             gitBranch: gitBranch,
             gitStatusLines: nil,
             projectType: "Node.js",
-            activeEnv: nil
+            activeEnv: nil,
+            ctermEnvironment: nil
         )
     }
 
