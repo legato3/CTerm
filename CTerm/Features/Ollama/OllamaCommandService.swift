@@ -773,14 +773,17 @@ enum OllamaCommandService {
     static func streamAgentPlan(
         goal: String,
         backend: AgentPlanningBackend = .ollama,
+        scope: GoalScope? = nil,
         pwd: String?,
         recentCommandContext: String,
         onPartial: @escaping @MainActor @Sendable (String) -> Void
     ) async throws -> [AgentPlanStep] {
-        let context = await TerminalContextGatherer.gather(pwd: pwd)
+        let resolvedScope = scope ?? IntentRouter.inferScope(goal)
+        let context = await TerminalContextGatherer.gather(pwd: pwd, scope: resolvedScope)
         let prompt = buildPlanPrompt(
             goal: goal,
             context: context,
+            scope: resolvedScope,
             recentCommandContext: recentCommandContext
         )
 
@@ -798,6 +801,7 @@ enum OllamaCommandService {
     private static func buildPlanPrompt(
         goal: String,
         context: TerminalContext,
+        scope: GoalScope,
         recentCommandContext: String
     ) -> String {
         """
@@ -813,12 +817,15 @@ enum OllamaCommandService {
         - If a step doesn't need a command (e.g. "verify the output"), omit the COMMAND line.
         - Keep descriptions under 15 words.
         - Prefer one command per step.
+        - Respect the goal scope.
+        - Do not default to git, repo, or project commands unless the scope is project or the user explicitly asked for them.
         - Do not use markdown fences.
         - Order steps logically.
         - If the goal is trivial (one command), output a single step.
 
         Context:
         \(context.contextBlock)
+        - Scope guidance: \(scope.label)
         - Goal: \(goal)
 
         Recent command history:
@@ -876,14 +883,17 @@ enum OllamaCommandService {
     static func streamAgentDecision(
         goal: String,
         backend: AgentPlanningBackend = .ollama,
+        scope: GoalScope? = nil,
         pwd: String?,
         recentCommandContext: String,
         priorAgentContext: String,
         onPartial: @escaping @MainActor @Sendable (String) -> Void
     ) async throws -> OllamaAgentDecision {
+        let resolvedScope = scope ?? IntentRouter.inferScope(goal)
         if backend == .claudeSubscription {
             return try await streamClaudeAgentDecision(
                 goal: goal,
+                scope: resolvedScope,
                 pwd: pwd,
                 recentCommandContext: recentCommandContext,
                 priorAgentContext: priorAgentContext,
@@ -891,10 +901,11 @@ enum OllamaCommandService {
             )
         }
 
-        let context = await TerminalContextGatherer.gather(pwd: pwd)
+        let context = await TerminalContextGatherer.gather(pwd: pwd, scope: resolvedScope)
         let prompt = buildAgentPrompt(
             goal: goal,
             context: context,
+            scope: resolvedScope,
             recentCommandContext: recentCommandContext,
             priorAgentContext: priorAgentContext
         )
@@ -904,15 +915,17 @@ enum OllamaCommandService {
 
     private static func streamClaudeAgentDecision(
         goal: String,
+        scope: GoalScope,
         pwd: String?,
         recentCommandContext: String,
         priorAgentContext: String,
         onPartial: @escaping @MainActor @Sendable (String) -> Void
     ) async throws -> OllamaAgentDecision {
-        let context = await TerminalContextGatherer.gather(pwd: pwd)
+        let context = await TerminalContextGatherer.gather(pwd: pwd, scope: scope)
         let prompt = buildClaudeAgentPrompt(
             goal: goal,
             context: context,
+            scope: scope,
             recentCommandContext: recentCommandContext,
             priorAgentContext: priorAgentContext
         )
@@ -1176,6 +1189,7 @@ enum OllamaCommandService {
     private static func buildAgentPrompt(
         goal: String,
         context: TerminalContext,
+        scope: GoalScope,
         recentCommandContext: String,
         priorAgentContext: String
     ) -> String {
@@ -1187,6 +1201,8 @@ enum OllamaCommandService {
         Rules:
         - Prefer one shell command per step.
         - Only propose commands that are necessary for progress.
+        - Respect the goal scope.
+        - Do not default to git, repo, or project commands unless the scope is project or the user explicitly asked for them.
         - Do not propose destructive commands unless the goal clearly requires them.
         - If the goal is complete, respond with ACTION: DONE.
         - If a command is needed, respond with ACTION: RUN.
@@ -1202,6 +1218,7 @@ enum OllamaCommandService {
 
         Context:
         \(context.contextBlock)
+        - Scope guidance: \(scope.label)
         - Goal: \(goal)
 
         Recent command history:
@@ -1215,6 +1232,7 @@ enum OllamaCommandService {
     private static func buildClaudeAgentPrompt(
         goal: String,
         context: TerminalContext,
+        scope: GoalScope,
         recentCommandContext: String,
         priorAgentContext: String
     ) -> String {
@@ -1226,6 +1244,8 @@ enum OllamaCommandService {
         Rules:
         - Prefer one shell command per step.
         - Only propose commands that are necessary for progress.
+        - Respect the goal scope.
+        - Do not default to git, repo, or project commands unless the scope is project or the user explicitly asked for them.
         - Do not propose destructive commands unless the goal clearly requires them.
         - If the goal is complete, respond with ACTION: DONE.
         - If a command is needed, respond with ACTION: RUN.
@@ -1241,6 +1261,7 @@ enum OllamaCommandService {
 
         Context:
         \(context.contextBlock)
+        - Scope guidance: \(scope.label)
         - Goal: \(goal)
 
         Recent command history:

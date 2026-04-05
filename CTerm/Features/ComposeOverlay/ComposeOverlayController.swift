@@ -735,6 +735,7 @@ final class ComposeOverlayController {
         let sessionID = session.id
         let tabID = activeTab.id
         let goal = session.goal
+        let scope = IntentRouter.inferScope(goal)
         let backend = session.backend.planningBackend ?? .ollama
         let pwd = activeTab.pwd
         let recentCommandContext = agentRecentCommandContext(for: activeTab)
@@ -755,6 +756,7 @@ final class ComposeOverlayController {
                 let decision = try await OllamaCommandService.streamAgentDecision(
                     goal: goal,
                     backend: backend,
+                    scope: scope,
                     pwd: pwd,
                     recentCommandContext: recentCommandContext,
                     priorAgentContext: priorAgentContext

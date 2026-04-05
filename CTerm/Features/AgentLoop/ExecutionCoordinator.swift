@@ -65,7 +65,7 @@ final class ExecutionCoordinator {
 
         // Ensure the session has a plan; if not (shouldn't happen for multiStep), bail.
         if session.plan == nil {
-            let plan = planStore.createPlan(goal: session.userIntent, backend: .ollama)
+            let plan = planStore.createPlan(goal: session.rawPrompt, backend: .ollama)
             session.plan = plan
         } else if let plan = session.plan {
             planStore.adoptPlan(plan)

@@ -10,7 +10,7 @@ import Foundation
 enum AgentPromptContextBuilder {
     private static let maxCommandSnippetLength = 1_200
 
-    static func buildPrompt(goal: String, activeTab: Tab?) -> String {
+    static func buildPrompt(goal: String, activeTab: Tab?, scope: GoalScope? = nil) -> String {
         // Resolve any `@block:<shortID>` tokens the user typed directly and
         // strip them from the visible prompt. Attached blocks are the union
         // of explicitly-attached IDs and token-matched IDs.
@@ -20,6 +20,7 @@ enum AgentPromptContextBuilder {
             : BlockMentionToken.stripTokens(from: goal)
         let trimmedGoal = strippedGoal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedGoal.isEmpty else { return "" }
+        let resolvedScope = scope ?? IntentRouter.inferScope(trimmedGoal)
 
         let tokenBlockIDs: Set<UUID> = {
             guard let activeTab, !tokenShortIDs.isEmpty else { return [] }
@@ -31,7 +32,7 @@ enum AgentPromptContextBuilder {
             return Set(matches)
         }()
 
-        let sections = contextSections(for: activeTab, extraBlockIDs: tokenBlockIDs)
+        let sections = contextSections(for: activeTab, scope: resolvedScope, extraBlockIDs: tokenBlockIDs)
         guard !sections.isEmpty else { return trimmedGoal }
 
         return """
@@ -45,13 +46,15 @@ enum AgentPromptContextBuilder {
 
     private static func contextSections(
         for activeTab: Tab?,
+        scope: GoalScope,
         extraBlockIDs: Set<UUID> = []
     ) -> [String] {
         guard let activeTab else { return [] }
 
         var sections: [String] = []
 
-        if let pwd = activeTab.pwd?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if scope.includesProjectContext,
+           let pwd = activeTab.pwd?.trimmingCharacters(in: .whitespacesAndNewlines),
            !pwd.isEmpty {
             sections.append(ProjectContextProvider.formattedBlock(for: pwd))
 
@@ -73,7 +76,8 @@ enum AgentPromptContextBuilder {
         let unionIDs = activeTab.attachedBlockIDs.union(extraBlockIDs)
         if let attachedBlocks = attachedBlocksSection(for: activeTab, blockIDs: unionIDs) {
             sections.append(attachedBlocks)
-        } else if let recentCommands = recentCommandSection(for: activeTab) {
+        } else if scope.includesWorkspaceContext,
+                  let recentCommands = recentCommandSection(for: activeTab) {
             sections.append(recentCommands)
         }
 

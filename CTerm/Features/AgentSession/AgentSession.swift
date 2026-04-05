@@ -62,6 +62,8 @@ final class AgentSession: Identifiable {
 
     /// Intent classification produced during the thinking phase (multiStep kind).
     var classifiedIntent: IntentCategory?
+    /// Goal scope inferred from the raw user request before any prompt enrichment.
+    var classifiedScope: GoalScope?
 
     /// Legacy coarse approval requirement. Temporary bridge until per-step
     /// ApprovalContext replaces all call sites.
@@ -339,6 +341,9 @@ final class AgentSession: Identifiable {
 
     /// Alias kept for migration from AgentSessionState.userIntent.
     var userIntent: String { rawPrompt }
+
+    /// Raw user request before prompt enrichment.
+    var rawIntent: String { intent }
 
     /// Alias kept for migration from AgentSessionState.displayIntent.
     var displayIntent: String { intent }

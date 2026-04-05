@@ -271,6 +271,45 @@ final class AgentPromptContextBuilderTests: XCTestCase {
         let prompt = AgentPromptContextBuilder.buildPrompt(goal: "  Explain this output  ", activeTab: nil)
         XCTAssertEqual(prompt, "Explain this output")
     }
+
+    func test_buildPrompt_skipsProjectContext_forSystemScopedGoal() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        try "Repo-only guidance.".write(
+            to: tempDir.appendingPathComponent("CLAUDE.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let tab = Tab(title: "Local Agent", pwd: tempDir.path)
+        tab.commandBlocks = [
+            TerminalCommandBlock(
+                id: UUID(),
+                source: .shell,
+                surfaceID: nil,
+                command: "git status",
+                startedAt: Date(),
+                finishedAt: Date(),
+                status: .succeeded,
+                outputSnippet: "working tree clean",
+                errorSnippet: nil,
+                exitCode: 0,
+                durationNanoseconds: 500_000_000
+            )
+        ]
+
+        let prompt = AgentPromptContextBuilder.buildPrompt(
+            goal: "Check for issues on my Mac",
+            activeTab: tab,
+            scope: .system
+        )
+
+        XCTAssertTrue(prompt.contains("Check for issues on my Mac"))
+        XCTAssertFalse(prompt.contains("<cterm_project_context>"))
+        XCTAssertFalse(prompt.contains("Repo-only guidance."))
+        XCTAssertFalse(prompt.contains("<recent_terminal_activity>"))
+    }
 }
 
 // MARK: - Claude Workflow Launch Tests

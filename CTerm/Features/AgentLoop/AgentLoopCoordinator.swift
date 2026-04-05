@@ -46,7 +46,12 @@ final class AgentLoopCoordinator {
             archiveSession(existing)
         }
 
-        let enrichedIntent = AgentPromptContextBuilder.buildPrompt(goal: intent, activeTab: activeTab)
+        let scope = IntentRouter.inferScope(intent)
+        let enrichedIntent = AgentPromptContextBuilder.buildPrompt(
+            goal: intent,
+            activeTab: activeTab,
+            scope: scope
+        )
         // Route the planning backend through ModelRouter. The profile is
         // captured on the session after start(), so fold in the active
         // profile's preferredBackend as a hard-override up-front.
@@ -69,6 +74,7 @@ final class AgentLoopCoordinator {
         // multiStep sessions expose a plan for explicit step tracking.
         let planningBackendLegacy = planningBackendAgent.planningBackend ?? .ollama
         session.plan = AgentPlan(goal: enrichedIntent, backend: planningBackendLegacy)
+        session.classifiedScope = scope
         activeSession = session
         streamingPreview = nil
 
@@ -76,9 +82,9 @@ final class AgentLoopCoordinator {
 
         // Classify
         session.transition(to: .thinking)
-        let (category, confidence) = IntentRouter.classify(enrichedIntent)
+        let (category, confidence) = IntentRouter.classify(intent, scope: scope)
         if confidence < 0.4 {
-            session.classifiedIntent = await IntentRouter.classifyWithLLM(intent, pwd: pwd)
+            session.classifiedIntent = await IntentRouter.classifyWithLLM(intent, pwd: pwd, scope: scope)
         } else {
             session.classifiedIntent = category
         }

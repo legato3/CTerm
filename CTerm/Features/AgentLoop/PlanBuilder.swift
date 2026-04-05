@@ -40,22 +40,38 @@ enum PlanBuilder {
             steps = [AgentPlanStep(title: "Generate command for: \(session.displayIntent.prefix(60))")]
 
         case .inspectRepo:
-            steps = buildInspectPlan(session.userIntent, pwd: pwd)
+            steps = buildInspectPlan(
+                session.rawIntent,
+                pwd: pwd,
+                scope: session.classifiedScope ?? IntentRouter.inferScope(session.rawIntent)
+            )
 
         case .executeCommand:
-            steps = buildExecutePlan(session.userIntent)
+            steps = buildExecutePlan(session.rawIntent)
 
         case .fixError:
-            steps = await buildFixPlanStreaming(session.userIntent, pwd: pwd)
+            steps = await buildFixPlanStreaming(
+                session.rawIntent,
+                scope: session.classifiedScope ?? IntentRouter.inferScope(session.rawIntent),
+                pwd: pwd
+            )
 
         case .runWorkflow:
-            steps = await buildWorkflowPlanStreaming(session.userIntent, pwd: pwd)
+            steps = await buildWorkflowPlanStreaming(
+                session.rawIntent,
+                scope: session.classifiedScope ?? IntentRouter.inferScope(session.rawIntent),
+                pwd: pwd
+            )
 
         case .delegateToPeer:
-            steps = buildDelegatePlan(session.userIntent)
+            steps = buildDelegatePlan(session.rawIntent)
 
         case .browserResearch:
-            steps = await buildBrowserResearchPlan(session.userIntent, pwd: pwd)
+            steps = await buildBrowserResearchPlan(
+                session.rawIntent,
+                scope: session.classifiedScope ?? IntentRouter.inferScope(session.rawIntent),
+                pwd: pwd
+            )
         }
 
         // Tag willAsk per step by running a lightweight gate simulation.
@@ -83,7 +99,7 @@ enum PlanBuilder {
 
     // MARK: - Inspect Plans
 
-    private static func buildInspectPlan(_ input: String, pwd: String?) -> [AgentPlanStep] {
+    private static func buildInspectPlan(_ input: String, pwd: String?, scope: GoalScope) -> [AgentPlanStep] {
         let lower = input.lowercased()
         var steps: [AgentPlanStep] = []
 
@@ -96,10 +112,30 @@ enum PlanBuilder {
         if lower.contains("structure") || lower.contains("files") || lower.contains("list") {
             steps.append(AgentPlanStep(title: "List project structure", command: "find . -maxdepth 2 -type f | head -50"))
         }
+        if lower.contains("disk") || lower.contains("storage") || lower.contains("space") {
+            steps.append(AgentPlanStep(title: "Check disk usage", command: "df -h"))
+        }
+        if lower.contains("memory") || lower.contains("ram") {
+            steps.append(AgentPlanStep(title: "Check memory pressure", command: "vm_stat"))
+        }
+        if lower.contains("cpu") || lower.contains("process") {
+            steps.append(AgentPlanStep(title: "Inspect top processes", command: "top -l 1 | head -20"))
+        }
 
         if steps.isEmpty {
-            steps.append(AgentPlanStep(title: "Check git status", command: "git status"))
-            steps.append(AgentPlanStep(title: "List directory", command: "ls -la"))
+            switch scope {
+            case .project:
+                steps.append(AgentPlanStep(title: "Check git status", command: "git status"))
+                steps.append(AgentPlanStep(title: "List directory", command: "ls -la"))
+            case .workspace:
+                steps.append(AgentPlanStep(title: "Show working directory", command: "pwd"))
+                steps.append(AgentPlanStep(title: "List directory", command: "ls -la"))
+            case .system:
+                steps.append(AgentPlanStep(title: "Show macOS version", command: "sw_vers"))
+                steps.append(AgentPlanStep(title: "Check disk usage", command: "df -h"))
+            case .browser, .general:
+                steps.append(AgentPlanStep(title: "Review request before acting", kind: .manual))
+            }
         }
 
         return steps
@@ -134,10 +170,11 @@ enum PlanBuilder {
 
     // MARK: - Fix Plans (LLM-assisted, streaming)
 
-    private static func buildFixPlanStreaming(_ input: String, pwd: String?) async -> [AgentPlanStep] {
+    private static func buildFixPlanStreaming(_ input: String, scope: GoalScope, pwd: String?) async -> [AgentPlanStep] {
         do {
             let steps = try await OllamaCommandService.streamAgentPlan(
                 goal: input,
+                scope: scope,
                 pwd: pwd,
                 recentCommandContext: ""
             ) { partial in
@@ -159,10 +196,11 @@ enum PlanBuilder {
 
     // MARK: - Workflow Plans (LLM-assisted, streaming)
 
-    private static func buildWorkflowPlanStreaming(_ input: String, pwd: String?) async -> [AgentPlanStep] {
+    private static func buildWorkflowPlanStreaming(_ input: String, scope: GoalScope, pwd: String?) async -> [AgentPlanStep] {
         do {
             let steps = try await OllamaCommandService.streamAgentPlan(
                 goal: input,
+                scope: scope,
                 pwd: pwd,
                 recentCommandContext: ""
             ) { partial in
@@ -188,16 +226,16 @@ enum PlanBuilder {
 
     // MARK: - Browser Research Plans
 
-    private static func buildBrowserResearchPlan(_ input: String, pwd: String?) async -> [AgentPlanStep] {
+    private static func buildBrowserResearchPlan(_ input: String, scope: GoalScope, pwd: String?) async -> [AgentPlanStep] {
         // Try LLM-generated plan first
-        let llmSteps = await buildBrowserResearchPlanStreaming(input, pwd: pwd)
+        let llmSteps = await buildBrowserResearchPlanStreaming(input, scope: scope, pwd: pwd)
         if !llmSteps.isEmpty { return llmSteps }
 
         // Fallback: heuristic plan based on keywords
         return buildBrowserResearchPlanFallback(input)
     }
 
-    private static func buildBrowserResearchPlanStreaming(_ input: String, pwd: String?) async -> [AgentPlanStep] {
+    private static func buildBrowserResearchPlanStreaming(_ input: String, scope: GoalScope, pwd: String?) async -> [AgentPlanStep] {
         let prompt = """
         Generate a short browser research plan (2-5 steps) for this task.
         Each step must use browser automation commands.
@@ -215,6 +253,7 @@ enum PlanBuilder {
         - browser:wait {"selector":"<css>"}      — wait for element
 
         Task: \(input.prefix(500))
+        Scope: \(scope.label)
 
         Steps:
         """

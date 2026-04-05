@@ -7,6 +7,7 @@
 import Foundation
 
 struct TerminalContext: Sendable {
+    let scope: GoalScope
     let pwd: String?
     let shell: String
     let gitBranch: String?
@@ -17,9 +18,30 @@ struct TerminalContext: Sendable {
     /// Nil when gathered outside a CTerm window context.
     let ctermEnvironment: CTermEnvironmentContext?
 
+    init(
+        scope: GoalScope = .project,
+        pwd: String?,
+        shell: String,
+        gitBranch: String?,
+        gitStatusLines: String?,
+        projectType: String?,
+        activeEnv: String?,
+        ctermEnvironment: CTermEnvironmentContext?
+    ) {
+        self.scope = scope
+        self.pwd = pwd
+        self.shell = shell
+        self.gitBranch = gitBranch
+        self.gitStatusLines = gitStatusLines
+        self.projectType = projectType
+        self.activeEnv = activeEnv
+        self.ctermEnvironment = ctermEnvironment
+    }
+
     /// Compact one-liner for embedding in prompts.
     var contextBlock: String {
         var lines: [String] = []
+        lines.append("- Goal scope: \(scope.label)")
         lines.append("- Shell: \(shell)")
         if let pwd { lines.append("- Working directory: \(pwd)") }
         if let branch = gitBranch { lines.append("- Git branch: \(branch)") }
@@ -72,17 +94,18 @@ struct CTermEnvironmentContext: Sendable {
 enum TerminalContextGatherer {
     private static let gitTimeout: TimeInterval = 2.0
 
-    static func gather(pwd: String?) async -> TerminalContext {
+    static func gather(pwd: String?, scope: GoalScope = .project) async -> TerminalContext {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
 
-        async let gitBranch = fetchGitBranch(pwd: pwd)
-        async let gitStatus = fetchGitStatusLines(pwd: pwd)
+        async let gitBranch = scope.includesProjectContext ? fetchGitBranch(pwd: pwd) : nil
+        async let gitStatus = scope.includesProjectContext ? fetchGitStatusLines(pwd: pwd) : nil
 
-        let projectType = pwd.flatMap { detectProjectType(at: $0) }
+        let projectType = scope.includesProjectContext ? pwd.flatMap { detectProjectType(at: $0) } : nil
         let activeEnv = buildEnvSummary()
         let ctermEnv = await MainActor.run { buildCTermEnvironment(pwd: pwd) }
 
         return TerminalContext(
+            scope: scope,
             pwd: pwd,
             shell: shell,
             gitBranch: await gitBranch,
