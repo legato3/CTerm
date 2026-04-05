@@ -1057,12 +1057,16 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
         // attached blocks intact until the agent flow actually consumes them.
         activeAIEngine.clear()
         nextCommandPredictor.dismiss()
+        let mode = composeController.assistantState.mode
         let sent = composeController.send(
             text,
             activeTab: activeTab,
             focusedController: focusedController,
             sendEnterKey: { [weak self] controller in self?.sendEnterKey(to: controller) }
         )
+        if sent, mode == .claudeAgent || mode == .ollamaAgent {
+            revealDedicatedAgentSidebar()
+        }
         syncActiveAIState()
         return sent
     }
@@ -1149,7 +1153,13 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
                 activeTab: activeTab
             )
         }
+        revealDedicatedAgentSidebar()
         syncActiveAIState()
+    }
+
+    private func revealDedicatedAgentSidebar() {
+        windowSession.showSidebar = true
+        windowSession.sidebarMode = .agentSession
     }
 
     private func applySuggestedDiff(_ diff: SuggestedDiff) {

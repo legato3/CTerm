@@ -27,6 +27,7 @@ struct SidebarContentView: View {
     var onOpenDiff: ((DiffSource) -> Void)?
     var onOpenAggregateDiff: ((String) -> Void)?
 
+    @Environment(WindowActions.self) private var actions
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private var agentState: IPCAgentState { IPCAgentState.shared }
 
@@ -61,6 +62,7 @@ struct SidebarContentView: View {
             VStack(spacing: 2) {
                 railButton(mode: .tabs, icon: "square.on.square", help: "Tabs")
                 railButton(mode: .changes, icon: "arrow.triangle.2.circlepath", help: "Changes")
+                railButton(mode: .agentSession, icon: "sparkles", help: "Agent")
                 railButton(mode: .agents, icon: "person.2.fill", help: "Agents")
                     .overlay(alignment: .topTrailing) {
                         if agentState.unreadCount > 0 && sidebarMode != .agents {
@@ -130,6 +132,21 @@ struct SidebarContentView: View {
                 onRollbackToCheckpoint: onRollbackToCheckpoint
             )
             .padding(.top, 10)
+        case .agentSession:
+            if let assistant = actions.composeAssistantState {
+                AgentSessionSidebarView(
+                    assistant: assistant,
+                    agentSession: activeTab?.ollamaAgentSession,
+                    pwd: activeTab?.pwd
+                )
+            } else {
+                ContentUnavailableView(
+                    "Agent Unavailable",
+                    systemImage: "sparkles",
+                    description: Text("The assistant state has not been attached to this window.")
+                )
+                .padding(.top, 24)
+            }
         case .agents:
             IPCAgentsView()
                 .padding(.top, 4)
