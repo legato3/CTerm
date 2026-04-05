@@ -355,6 +355,9 @@ final class CTermMCPServer {
         case "wait_for_pane_idle":
             return await handleWaitForPaneIdle(id: id, arguments: arguments)
 
+        case "get_last_handoff":
+            return handleGetLastHandoff(id: id, arguments: arguments)
+
         default:
             return toolError(id: id, text: "Unknown tool: \(toolName)")
         }
@@ -932,6 +935,27 @@ final class CTermMCPServer {
         guard let data = try? JSONSerialization.data(withJSONObject: summary),
               let text = String(data: data, encoding: .utf8) else {
             return toolSuccess(id: id, text: "{}")
+        }
+        return toolSuccess(id: id, text: text)
+    }
+
+    // MARK: - Agent Handoff
+
+    private func handleGetLastHandoff(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
+        let workDir = arguments?["work_dir"]?.stringValue ?? resolvedWorkDir()
+        let projectKey = AgentMemoryStore.key(for: workDir)
+        guard let handoff = AgentMemoryStore.shared.lastHandoff(projectKey: projectKey) else {
+            return toolSuccess(id: id, text: "{\"found\":false}")
+        }
+        let result: [String: Any] = [
+            "found": true,
+            "summary": handoff.value,
+            "age": handoff.age,
+            "updated_at": Self.iso8601.string(from: handoff.updatedAt),
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: result),
+              let text = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{\"found\":false}")
         }
         return toolSuccess(id: id, text: text)
     }

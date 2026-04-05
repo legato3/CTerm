@@ -99,4 +99,19 @@ final class FileChangeStore {
         }
         return result
     }
+
+    /// Returns the most recently changed file paths across all peers.
+    func recentPaths(limit: Int = 20) -> [String] {
+        let allChanges = changesByPeer.values.flatMap { $0 }
+            .sorted { $0.timestamp > $1.timestamp }
+        var seen = Set<String>()
+        var result: [String] = []
+        for change in allChanges {
+            if seen.insert(change.path).inserted {
+                result.append(change.path)
+                if result.count >= limit { break }
+            }
+        }
+        return result
+    }
 }

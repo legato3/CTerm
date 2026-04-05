@@ -467,6 +467,13 @@ private struct OllamaGenerateStreamResponse: Decodable {
 enum OllamaAgentDecisionAction: String, Sendable {
     case run
     case done
+    case browse
+}
+
+struct BrowseAction: Sendable {
+    let url: String
+    let tool: String       // "browser_snapshot", "browser_get_text", etc.
+    let selector: String?
 }
 
 struct OllamaAgentDecision: Sendable {
@@ -474,6 +481,15 @@ struct OllamaAgentDecision: Sendable {
     let command: String?
     let message: String
     let rawResponse: String
+    let browseAction: BrowseAction?
+
+    init(action: OllamaAgentDecisionAction, command: String?, message: String, rawResponse: String, browseAction: BrowseAction? = nil) {
+        self.action = action
+        self.command = command
+        self.message = message
+        self.rawResponse = rawResponse
+        self.browseAction = browseAction
+    }
 }
 
 private struct OllamaTagsResponse: Decodable {
@@ -597,6 +613,113 @@ enum OllamaCommandService {
         let context = await TerminalContextGatherer.gather(pwd: pwd)
         let prompt = buildFixPrompt(command: command, output: output, context: context)
         return try await streamPrompt(prompt, temperature: 0.15, onPartial: onPartial)
+    }
+
+    // MARK: - Multi-Step Plan Generation
+
+    /// Generates a structured multi-step plan for a goal. Returns parsed steps.
+    /// Streams partial text to `onPartial` for shimmer/preview display.
+    static func streamAgentPlan(
+        goal: String,
+        backend: AgentPlanningBackend = .ollama,
+        pwd: String?,
+        recentCommandContext: String,
+        onPartial: @escaping @MainActor @Sendable (String) -> Void
+    ) async throws -> [AgentPlanStep] {
+        let context = await TerminalContextGatherer.gather(pwd: pwd)
+        let prompt = buildPlanPrompt(
+            goal: goal,
+            context: context,
+            recentCommandContext: recentCommandContext
+        )
+
+        let raw: String
+        if backend == .claudeSubscription {
+            await onPartial("Generating plan with Claude…")
+            raw = try await runClaudePrompt(prompt, cwd: pwd)
+        } else {
+            raw = try await streamPrompt(prompt, temperature: 0.15, onPartial: onPartial)
+        }
+
+        return parsePlanSteps(raw)
+    }
+
+    private static func buildPlanPrompt(
+        goal: String,
+        context: TerminalContext,
+        recentCommandContext: String
+    ) -> String {
+        """
+        You are CTerm Agent, a terminal agent embedded in a macOS terminal app.
+
+        Create a step-by-step plan to achieve the user's goal using shell commands.
+
+        Rules:
+        - Output 2-8 steps, each on its own line.
+        - Use exactly this format for each step:
+          STEP: <short description of what this step does>
+          COMMAND: <the shell command to run>
+        - If a step doesn't need a command (e.g. "verify the output"), omit the COMMAND line.
+        - Keep descriptions under 15 words.
+        - Prefer one command per step.
+        - Do not use markdown fences.
+        - Order steps logically.
+        - If the goal is trivial (one command), output a single step.
+
+        Context:
+        \(context.contextBlock)
+        - Goal: \(goal)
+
+        Recent command history:
+        \(recentCommandContext.isEmpty ? "(none)" : recentCommandContext)
+        """
+    }
+
+    private static func parsePlanSteps(_ raw: String) -> [AgentPlanStep] {
+        let cleaned = cleanResponse(raw)
+        let lines = cleaned.components(separatedBy: CharacterSet.newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var steps: [AgentPlanStep] = []
+        var currentTitle: String?
+        var currentCommand: String?
+
+        for line in lines {
+            let upper = line.uppercased()
+            if upper.hasPrefix("STEP:") {
+                // Flush previous step
+                if let title = currentTitle {
+                    steps.append(AgentPlanStep(title: title, command: currentCommand))
+                }
+                currentTitle = line
+                    .split(separator: ":", maxSplits: 1)
+                    .dropFirst().first
+                    .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                currentCommand = nil
+            } else if upper.hasPrefix("COMMAND:") {
+                currentCommand = line
+                    .split(separator: ":", maxSplits: 1)
+                    .dropFirst().first
+                    .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            }
+        }
+        // Flush last step
+        if let title = currentTitle {
+            steps.append(AgentPlanStep(title: title, command: currentCommand))
+        }
+
+        // Fallback: if parsing found nothing, try to extract a single command
+        if steps.isEmpty {
+            let decision = try? parseAgentDecision(raw)
+            if let decision, decision.action == .run, let cmd = decision.command {
+                steps.append(AgentPlanStep(title: decision.message, command: cmd))
+            } else if let decision, decision.action == .done {
+                steps.append(AgentPlanStep(title: decision.message))
+            }
+        }
+
+        return steps
     }
 
     static func streamAgentDecision(

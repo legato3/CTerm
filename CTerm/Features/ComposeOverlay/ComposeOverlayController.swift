@@ -510,6 +510,12 @@ final class ComposeOverlayController {
                     }
                 case .done:
                     activeTab.completeOllamaAgent(summary: decision.message)
+                case .browse:
+                    // Browser actions are surfaced as observations for now;
+                    // full browser-in-loop execution is wired through AgentPlanExecutor.
+                    let browseMsg = decision.browseAction.map { "Browse: \($0.url)" } ?? decision.message
+                    activeTab.recordOllamaAgentObservation(browseMsg)
+                    self.planNextAgentStep(for: activeTab)
                 }
             } catch is CancellationError {
                 return

@@ -20,20 +20,29 @@ enum TriggerType: String, Codable, CaseIterable, Sendable {
     case commandFail   = "commandFail"    // ShellErrorMonitor captured an error
     case testFail      = "testFail"       // Test runner finished with failures
     case peerConnect   = "peerConnect"    // An agent peer registered via IPC
+    case agentComplete = "agentComplete"  // Agent plan finished successfully
+    case agentStalled  = "agentStalled"   // Agent plan failed or hit limit
+    case planApproved  = "planApproved"   // User approved an agent plan
 
     var displayName: String {
         switch self {
-        case .commandFail:  return "Command fails"
-        case .testFail:     return "Tests fail"
-        case .peerConnect:  return "Agent connects"
+        case .commandFail:   return "Command fails"
+        case .testFail:      return "Tests fail"
+        case .peerConnect:   return "Agent connects"
+        case .agentComplete: return "Agent completes"
+        case .agentStalled:  return "Agent stalls"
+        case .planApproved:  return "Plan approved"
         }
     }
 
     var icon: String {
         switch self {
-        case .commandFail:  return "exclamationmark.triangle"
-        case .testFail:     return "xmark.circle"
-        case .peerConnect:  return "person.crop.circle.badge.plus"
+        case .commandFail:   return "exclamationmark.triangle"
+        case .testFail:      return "xmark.circle"
+        case .peerConnect:   return "person.crop.circle.badge.plus"
+        case .agentComplete: return "checkmark.seal"
+        case .agentStalled:  return "exclamationmark.octagon"
+        case .planApproved:  return "hand.thumbsup"
         }
     }
 }
@@ -152,6 +161,32 @@ final class TriggerEngine {
                     self?.fire(.peerConnect, context: ["peer_name": name, "peer_role": role])
                 }
             },
+            center.addObserver(forName: .agentPlanCompleted, object: nil, queue: .main) { [weak self] note in
+                let goal = note.userInfo?["goal"] as? String ?? ""
+                let completed = note.userInfo?["completedSteps"] as? Int ?? 0
+                let total = note.userInfo?["totalSteps"] as? Int ?? 0
+                Task { @MainActor [weak self] in
+                    self?.fire(.agentComplete, context: [
+                        "goal": goal,
+                        "completed_steps": "\(completed)",
+                        "total_steps": "\(total)",
+                    ])
+                }
+            },
+            center.addObserver(forName: .agentPlanFailed, object: nil, queue: .main) { [weak self] note in
+                let goal = note.userInfo?["goal"] as? String ?? ""
+                let status = note.userInfo?["status"] as? String ?? "failed"
+                Task { @MainActor [weak self] in
+                    self?.fire(.agentStalled, context: ["goal": goal, "status": status])
+                }
+            },
+            center.addObserver(forName: .agentPlanApproved, object: nil, queue: .main) { [weak self] note in
+                let goal = note.userInfo?["goal"] as? String ?? ""
+                let total = note.userInfo?["totalSteps"] as? Int ?? 0
+                Task { @MainActor [weak self] in
+                    self?.fire(.planApproved, context: ["goal": goal, "total_steps": "\(total)"])
+                }
+            },
         ]
         logger.info("TriggerEngine started with \(self.rules.count) rules")
     }
@@ -243,6 +278,19 @@ final class TriggerEngine {
         case .peerConnect:
             let name = context["peer_name"] ?? "agent"
             return "Agent \"\(name)\" connected. Ready to collaborate."
+        case .agentComplete:
+            let goal = context["goal"] ?? "task"
+            let completed = context["completed_steps"] ?? "?"
+            let total = context["total_steps"] ?? "?"
+            return "Agent completed \"\(goal)\" — \(completed)/\(total) steps succeeded."
+        case .agentStalled:
+            let goal = context["goal"] ?? "task"
+            let status = context["status"] ?? "failed"
+            return "Agent stalled on \"\(goal)\" with status: \(status)."
+        case .planApproved:
+            let goal = context["goal"] ?? "task"
+            let total = context["total_steps"] ?? "?"
+            return "Plan approved for \"\(goal)\" with \(total) steps."
         }
     }
 

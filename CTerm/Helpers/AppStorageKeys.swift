@@ -19,4 +19,8 @@ enum AppStorageKeys {
     static let activeAIEnabled = "activeAIEnabled"
     static let nextCommandEnabled = "nextCommandEnabled"
     static let suggestedDiffsEnabled = "suggestedDiffsEnabled"
+    // Agent UX features
+    static let agentInputBarEnabled = "agentInputBarEnabled"
+    static let memoryToastsEnabled = "memoryToastsEnabled"
+    static let ambientAgentEnabled = "ambientAgentEnabled"
 }

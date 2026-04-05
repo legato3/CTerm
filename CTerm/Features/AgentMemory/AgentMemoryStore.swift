@@ -126,6 +126,32 @@ final class AgentMemoryStore: @unchecked Sendable {
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 
+    // MARK: - Agent Handoff
+
+    /// Saves a session handoff summary so the next agent session can pick up where this one left off.
+    /// Stored under the "handoff/" namespace with a TTL of 7 days.
+    @discardableResult
+    func saveHandoff(projectKey: String, goal: String, stepsCompleted: Int, totalSteps: Int, filesChanged: [String], outcome: String) -> MemoryEntry {
+        let summary = [
+            "Goal: \(goal)",
+            "Steps: \(stepsCompleted)/\(totalSteps)",
+            filesChanged.isEmpty ? nil : "Files: \(filesChanged.prefix(10).joined(separator: ", "))",
+            "Outcome: \(outcome)",
+        ].compactMap { $0 }.joined(separator: "\n")
+
+        return remember(
+            projectKey: projectKey,
+            key: "handoff/last-session",
+            value: summary,
+            ttlDays: 7
+        )
+    }
+
+    /// Retrieves the most recent handoff summary, if any.
+    func lastHandoff(projectKey: String) -> MemoryEntry? {
+        recall(projectKey: projectKey, query: "handoff/last-session").first
+    }
+
     // MARK: - Project Key
 
     /// Derive a stable project key from a working directory path.

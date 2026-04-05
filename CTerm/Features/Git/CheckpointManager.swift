@@ -100,6 +100,29 @@ final class CheckpointManager {
         logger.info("Rolled back to \(hash) at \(root)")
     }
 
+    /// Creates a named checkpoint after an agent plan completes.
+    /// The commit message includes the plan goal for easy identification.
+    @discardableResult
+    func checkpointAfterPlan(workDir: String, goal: String) async -> String? {
+        guard isEnabled else { return nil }
+        do {
+            let root = try await GitService.repoRoot(workDir: workDir)
+            guard await GitService.isRepoDirty(workDir: root) else { return nil }
+            try await GitService.stageAll(workDir: root)
+            let truncatedGoal = goal.count > 60 ? String(goal.prefix(60)) + "…" : goal
+            let message = "wip: agent completed — \(truncatedGoal)"
+            let hash = try await GitService.commit(message: message, workDir: root)
+            lastCheckpointHash = hash
+            lastCheckpointDate = Date()
+            logger.info("Plan checkpoint created: \(hash)")
+            SessionAuditLogger.log(type: .checkpointCreated, detail: "Agent: \(hash.prefix(8)) — \(truncatedGoal)")
+            return hash
+        } catch {
+            logger.error("Plan checkpoint failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     // MARK: - Persistence
 
     private func persistEnabled() {

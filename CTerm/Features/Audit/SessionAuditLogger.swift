@@ -192,6 +192,11 @@ final class SessionAuditLogger {
 
     // MARK: - Summary
 
+    /// Returns the most recent entries of a given type.
+    func recentEntries(ofType type: AuditEventType, limit: Int = 5) -> [AuditEvent] {
+        Array(events.reversed().filter { $0.type == type }.prefix(limit))
+    }
+
     func summaryDict() -> [String: Any] {
         let duration = Int(Date().timeIntervalSince(startedAt) / 60)
         return [

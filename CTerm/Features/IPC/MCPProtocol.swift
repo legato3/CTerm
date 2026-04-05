@@ -642,6 +642,15 @@ struct MCPRouter: Sendable {
                     ]
                 )
             ),
+            MCPTool(
+                name: "get_last_handoff",
+                description: "Get the handoff summary from the last agent session in this project. Contains the previous goal, steps completed, files changed, and outcome. Use this at session start to understand what was done before and decide whether to continue or start fresh.",
+                inputSchema: schema(
+                    properties: [
+                        "work_dir": prop("string", "Working directory to scope the handoff lookup. Defaults to the active tab's directory."),
+                    ]
+                )
+            ),
         ]
     }
 
@@ -653,7 +662,8 @@ struct MCPRouter: Sendable {
 
     1. Call register_peer with a descriptive name and role. This returns your peer_id AND injects live project context (CLAUDE.md, git state, memories, active peers) so you orient yourself without asking the user. Save the peer_id — you need it for all peer tools.
     2. Call set_tab_title to label your terminal tab with your role (e.g. "orchestrator", "reviewer").
-    3. Call receive_messages to pick up any queued instructions from other agents or the previous session.
+    3. Call get_last_handoff to check if a previous agent session left a handoff summary — decide whether to continue that work or start fresh.
+    4. Call receive_messages to pick up any queued instructions from other agents or the previous session.
 
     ## What you can do — tool categories
 
@@ -691,6 +701,7 @@ struct MCPRouter: Sendable {
     - get_git_status — current branch and modified files
     - get_last_error — most recent shell error across all panes (check this after running commands in other panes)
     - get_session_summary — CTerm session audit log (events, errors routed, tasks completed)
+    - get_last_handoff — summary from the previous agent session (goal, steps, files changed, outcome) — check this at startup to decide whether to continue or start fresh
 
     ### Testing and file tracking
     - run_tests — trigger a test run in CTerm's Test Runner sidebar

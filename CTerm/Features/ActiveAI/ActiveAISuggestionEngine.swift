@@ -21,9 +21,10 @@ struct ActiveAISuggestion: Identifiable, Sendable {
     let blockID: UUID?   // the command block that triggered this suggestion
 
     enum Kind: Sendable {
-        case fix        // fix an error
-        case explain    // explain output
-        case nextStep   // suggest what to do next
+        case fix            // fix an error
+        case explain        // explain output
+        case nextStep       // suggest what to do next
+        case continueAgent  // continue from a completed agent plan
         case custom(String)
     }
 
@@ -49,6 +50,37 @@ final class ActiveAISuggestionEngine {
 
     private var generationTask: Task<Void, Never>?
     private var lastBlockID: UUID?
+    private var planObserver: NSObjectProtocol?
+
+    // MARK: - Lifecycle
+
+    /// Start listening for agent plan completions to offer continuation chips.
+    func startObserving() {
+        guard planObserver == nil else { return }
+        planObserver = NotificationCenter.default.addObserver(
+            forName: .agentPlanCompleted,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let goal = note.userInfo?["goal"] as? String ?? "the previous task"
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let chip = ActiveAISuggestion(
+                    prompt: "Continue from: \(goal)",
+                    icon: "arrow.right.circle.fill",
+                    kind: .continueAgent
+                )
+                self.suggestions.append(chip)
+            }
+        }
+    }
+
+    func stopObserving() {
+        if let observer = planObserver {
+            NotificationCenter.default.removeObserver(observer)
+            planObserver = nil
+        }
+    }
 
     // MARK: - Public API
 
