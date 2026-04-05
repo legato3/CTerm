@@ -1,192 +1,377 @@
 import SwiftUI
 
+// MARK: - AgentSessionSidebarView
+
+/// Warp-style agent panel: shows mode, auto-accept toggle, active session status,
+/// conversation history, plan steps, and quick actions.
 struct AgentSessionSidebarView: View {
     @Bindable var assistant: ComposeAssistantState
     let agentSession: OllamaAgentSession?
     let pwd: String?
 
     @Environment(WindowActions.self) private var actions
+    @Environment(\.openURL) private var openURL
 
     @State private var gitBranch: String?
+    @State private var thinkingPulse = false
+    @State private var selectedTab: AgentPanelTab = .session
 
-    private var hasContent: Bool {
-        agentSession != nil || !assistant.interactions.isEmpty
+    enum AgentPanelTab: String, CaseIterable {
+        case session = "Session"
+        case history = "History"
+        case changes = "Changes"
     }
 
-    private var titleText: String {
-        switch assistant.mode {
-        case .claudeAgent:
-            return "Agent"
-        case .ollamaAgent:
-            return "Local Agent"
-        case .ollamaCommand:
-            return "Ollama"
-        case .shell:
-            return "Agent"
-        }
+    private var isAgentActive: Bool {
+        agentSession?.status == .planning || agentSession?.status == .runningCommand || assistant.isBusy
     }
 
-    private var subtitleText: String {
-        switch assistant.mode {
-        case .claudeAgent:
-            return "Claude Subscription-backed workflow for long-running agent tasks."
-        case .ollamaAgent:
-            return "Plan, approvals, and execution stay here."
-        case .ollamaCommand:
-            return "Remote command suggestions and command-check assistance."
-        case .shell:
-            return "Switch the input mode to Agent or Ollama to start."
-        }
+    private var isAwaitingApproval: Bool {
+        agentSession?.canApprove == true
     }
 
     var body: some View {
         VStack(spacing: 0) {
             header
-
-            Divider()
-                .opacity(0.28)
-
-            if hasContent {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        if let agentSession {
-                            AgentSessionSidebarCard(
-                                session: agentSession,
-                                onApprove: { _ = actions.onApproveOllamaAgent?() },
-                                onStop: { actions.onStopOllamaAgent?() }
-                            )
-                        }
-
-                        ForEach(assistant.interactions) { entry in
-                            AgentHistoryEntryCard(
-                                entry: entry,
-                                onEdit: { _ = actions.onApplyComposeAssistantEntry?(entry.id, false) },
-                                onRun: { _ = actions.onApplyComposeAssistantEntry?(entry.id, true) },
-                                onExplain: { actions.onExplainComposeAssistantEntry?(entry.id) },
-                                onFix: { actions.onFixComposeAssistantEntry?(entry.id) }
-                            )
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 12)
-                }
-                .scrollIndicators(.hidden)
-            } else {
-                emptyState
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.horizontal, 18)
-            }
+            Divider().opacity(0.28)
+            tabPicker
+            Divider().opacity(0.20)
+            tabContent
         }
         .padding(.top, 4)
         .task(id: pwd) {
-            guard let pwd, !pwd.isEmpty else {
-                gitBranch = nil
-                return
-            }
+            guard let pwd, !pwd.isEmpty else { gitBranch = nil; return }
             gitBranch = await TerminalContextGatherer.runTool(
-                "git",
-                args: ["branch", "--show-current"],
-                cwd: pwd,
-                timeout: 2
+                "git", args: ["branch", "--show-current"], cwd: pwd, timeout: 2
             )
         }
     }
 
+    // MARK: - Header
+
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 8) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.purple)
-
-                Text(titleText)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                // Mode icon + label
+                HStack(spacing: 5) {
+                    Image(systemName: modeIcon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(modeTint)
+                    Text(modeLabel)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                }
 
                 Spacer()
 
-                if !assistant.interactions.isEmpty {
-                    Button("Clear") {
-                        assistant.clearHistory()
+                // Thinking indicator
+                if isAgentActive {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.purple)
+                            .frame(width: 6, height: 6)
+                            .opacity(thinkingPulse ? 1.0 : 0.25)
+                            .onAppear {
+                                withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+                                    thinkingPulse = true
+                                }
+                            }
+                            .onDisappear { thinkingPulse = false }
+                        Text("thinking")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(.purple)
                     }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
+                } else if isAwaitingApproval {
+                    Label("needs approval", systemImage: "hand.raised.fill")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(.orange)
                 }
             }
 
-            Text(subtitleText)
-                .font(.system(size: 11, design: .rounded))
-                .foregroundStyle(.secondary)
-
+            // Context chips row
             HStack(spacing: 6) {
-                Label(assistant.mode.displayName, systemImage: modeIcon)
+                // Mode badge
+                Text(assistant.mode.displayName)
                     .font(.system(size: 10, weight: .medium, design: .rounded))
                     .foregroundStyle(modeTint)
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 3)
                     .background(modeTint.opacity(0.12), in: Capsule())
 
+                // Git branch
                 if let gitBranch, !gitBranch.isEmpty {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 3) {
                         Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 9))
                         Text(gitBranch)
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
                     }
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
                     .background(Color.secondary.opacity(0.10), in: Capsule())
                 }
 
                 Spacer()
+
+                // Auto-accept toggle — Warp's most prominent agent control
+                autoAcceptToggle
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .background(Color.purple.opacity(0.05))
+        .padding(.vertical, 10)
+        .background(modeTint.opacity(0.04))
     }
 
+    // MARK: - Auto-Accept Toggle
+
+    private var autoAcceptToggle: some View {
+        let isOn = actions.activeTabAutoAcceptEnabled
+        return Button(action: { actions.onToggleAutoAccept?() }) {
+            HStack(spacing: 4) {
+                Image(systemName: isOn ? "bolt.fill" : "bolt")
+                    .font(.system(size: 10, weight: .semibold))
+                Text("Auto")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(isOn ? .white : .secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule().fill(isOn ? Color.orange : Color.white.opacity(0.08))
+            )
+        }
+        .buttonStyle(.plain)
+        .help(isOn ? "Auto-accept ON — Claude confirmations are accepted automatically" : "Auto-accept OFF — tap to enable")
+        .animation(.easeInOut(duration: 0.15), value: isOn)
+    }
+
+    // MARK: - Tab Picker
+
+    private var tabPicker: some View {
+        HStack(spacing: 0) {
+            ForEach(AgentPanelTab.allCases, id: \.self) { tab in
+                Button(action: { selectedTab = tab }) {
+                    Text(tab.rawValue)
+                        .font(.system(size: 11, weight: selectedTab == tab ? .semibold : .regular, design: .rounded))
+                        .foregroundStyle(selectedTab == tab ? .primary : .secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background(
+                            selectedTab == tab
+                                ? Color.white.opacity(0.08)
+                                : Color.clear
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: - Tab Content
+
+    @ViewBuilder
+    private var tabContent: some View {
+        switch selectedTab {
+        case .session:
+            sessionTab
+        case .history:
+            historyTab
+        case .changes:
+            changesTab
+        }
+    }
+
+    // MARK: - Session Tab
+
+    private var sessionTab: some View {
+        ScrollView {
+            LazyVStack(spacing: 10) {
+                // Active Ollama agent session card
+                if let agentSession {
+                    AgentSessionSidebarCard(
+                        session: agentSession,
+                        onApprove: { _ = actions.onApproveOllamaAgent?() },
+                        onStop: { actions.onStopOllamaAgent?() }
+                    )
+                }
+
+                // Claude agent quick actions (when no Ollama session but Claude is running)
+                if agentSession == nil && assistant.mode == .claudeAgent {
+                    claudeAgentCard
+                }
+
+                // Empty state
+                if agentSession == nil && !assistant.isBusy && assistant.interactions.isEmpty {
+                    emptyState
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    // MARK: - Claude Agent Card
+
+    private var claudeAgentCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.purple)
+                Text("Claude Agent")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                Spacer()
+                if assistant.isBusy {
+                    ProgressView().controlSize(.mini).scaleEffect(0.8)
+                    Text("working…")
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundStyle(.purple)
+                }
+            }
+
+            Text("Claude Code is running in a terminal pane. Use the input bar below to send prompts, or use the auto-accept toggle to approve confirmations automatically.")
+                .font(.system(size: 11, design: .rounded))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // Quick action buttons
+            HStack(spacing: 6) {
+                Button(action: { actions.onToggleAutoAccept?() }) {
+                    Label(
+                        actions.activeTabAutoAcceptEnabled ? "Disable Auto" : "Enable Auto",
+                        systemImage: actions.activeTabAutoAcceptEnabled ? "bolt.slash" : "bolt.fill"
+                    )
+                    .font(.system(size: 11, design: .rounded))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(actions.activeTabAutoAcceptEnabled ? .secondary : .orange)
+
+                Spacer()
+            }
+        }
+        .padding(12)
+        .background(Color.purple.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.purple.opacity(0.12), lineWidth: 1))
+    }
+
+    // MARK: - History Tab
+
+    private var historyTab: some View {
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                if assistant.interactions.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 24))
+                            .foregroundStyle(.tertiary)
+                        Text("No history yet")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 32)
+                } else {
+                    HStack {
+                        Spacer()
+                        Button("Clear") { assistant.clearHistory() }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+
+                    ForEach(assistant.interactions) { entry in
+                        AgentHistoryEntryCard(
+                            entry: entry,
+                            onEdit: { _ = actions.onApplyComposeAssistantEntry?(entry.id, false) },
+                            onRun: { _ = actions.onApplyComposeAssistantEntry?(entry.id, true) },
+                            onExplain: { actions.onExplainComposeAssistantEntry?(entry.id) },
+                            onFix: { actions.onFixComposeAssistantEntry?(entry.id) }
+                        )
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    // MARK: - Changes Tab
+
+    private var changesTab: some View {
+        FileChangesView(
+            onOpenDiff: actions.onOpenDiff,
+            onOpenAggregateDiff: actions.onOpenAggregateDiff
+        )
+    }
+
+    // MARK: - Empty State
+
     private var emptyState: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
             Image(systemName: "sparkles.rectangle.stack")
                 .font(.system(size: 28))
-                .foregroundStyle(.purple.opacity(0.7))
+                .foregroundStyle(.purple.opacity(0.6))
 
             Text("No active agent session")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
 
-            Text("Use the input bar below to start Agent or ask Ollama for command help. This sidebar stays dedicated to plans, approvals, and assistant output.")
+            Text("Use ⌘↩ to start an agent session, or switch the input mode to Agent.")
                 .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // Mode switcher shortcut
+            Button(action: {
+                assistant.mode = .claudeAgent
+            }) {
+                Label("Switch to Agent Mode", systemImage: "sparkles")
+                    .font(.system(size: 11, design: .rounded))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(.purple)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 24)
     }
 
-    private var modeTint: Color {
+    // MARK: - Helpers
+
+    private var modeLabel: String {
         switch assistant.mode {
-        case .claudeAgent, .ollamaAgent:
-            return .purple
-        case .ollamaCommand:
-            return .accentColor
-        case .shell:
-            return .secondary
+        case .claudeAgent: return "Agent"
+        case .ollamaAgent: return "Local Agent"
+        case .ollamaCommand: return "Ollama"
+        case .shell: return "Terminal"
         }
     }
 
     private var modeIcon: String {
         switch assistant.mode {
-        case .shell:
-            return "terminal"
-        case .ollamaCommand:
-            return "wand.and.stars"
-        case .ollamaAgent:
-            return "cpu"
-        case .claudeAgent:
-            return "sparkles"
+        case .shell: return "terminal"
+        case .ollamaCommand: return "wand.and.stars"
+        case .ollamaAgent: return "cpu"
+        case .claudeAgent: return "sparkles"
+        }
+    }
+
+    private var modeTint: Color {
+        switch assistant.mode {
+        case .claudeAgent, .ollamaAgent: return .purple
+        case .ollamaCommand: return .accentColor
+        case .shell: return .secondary
         }
     }
 }
+
+// MARK: - AgentSessionSidebarCard
 
 private struct AgentSessionSidebarCard: View {
     let session: OllamaAgentSession
@@ -195,18 +380,12 @@ private struct AgentSessionSidebarCard: View {
 
     private var statusTint: Color {
         switch session.status {
-        case .planning:
-            return .secondary
-        case .awaitingApproval:
-            return .orange
-        case .runningCommand:
-            return .accentColor
-        case .completed:
-            return .green
-        case .failed:
-            return .red
-        case .stopped:
-            return .secondary
+        case .planning: return .secondary
+        case .awaitingApproval: return .orange
+        case .runningCommand: return .accentColor
+        case .completed: return .green
+        case .failed: return .red
+        case .stopped: return .secondary
         }
     }
 
@@ -223,9 +402,7 @@ private struct AgentSessionSidebarCard: View {
                 Spacer()
 
                 if session.status == .planning || session.status == .runningCommand {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .scaleEffect(0.8)
+                    ProgressView().controlSize(.mini).scaleEffect(0.8)
                 }
 
                 Text(session.status.label)
@@ -284,10 +461,7 @@ private struct AgentSessionSidebarCard: View {
                 }
                 .padding(10)
                 .background(Color.orange.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.orange.opacity(0.2), lineWidth: 1)
-                )
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.2), lineWidth: 1))
             } else if !session.status.isTerminal {
                 HStack {
                     Spacer()
@@ -299,12 +473,11 @@ private struct AgentSessionSidebarCard: View {
         }
         .padding(12)
         .background(Color.purple.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.purple.opacity(0.12), lineWidth: 1)
-        )
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.purple.opacity(0.12), lineWidth: 1))
     }
 }
+
+// MARK: - AgentSessionStepRow
 
 private struct AgentSessionStepRow: View {
     let step: OllamaAgentStep
@@ -312,35 +485,23 @@ private struct AgentSessionStepRow: View {
 
     private var iconName: String {
         switch step.kind {
-        case .goal:
-            return "target"
-        case .plan:
-            return "list.bullet"
-        case .command:
-            return "terminal"
-        case .observation:
-            return "eye"
-        case .summary:
-            return "checkmark.circle.fill"
-        case .error:
-            return "xmark.circle.fill"
+        case .goal: return "target"
+        case .plan: return "list.bullet"
+        case .command: return "terminal"
+        case .observation: return "eye"
+        case .summary: return "checkmark.circle.fill"
+        case .error: return "xmark.circle.fill"
         }
     }
 
     private var tint: Color {
         switch step.kind {
-        case .goal:
-            return .purple
-        case .plan:
-            return .accentColor
-        case .command:
-            return .primary
-        case .observation:
-            return .secondary
-        case .summary:
-            return .green
-        case .error:
-            return .red
+        case .goal: return .purple
+        case .plan: return .accentColor
+        case .command: return .primary
+        case .observation: return .secondary
+        case .summary: return .green
+        case .error: return .red
         }
     }
 
@@ -389,6 +550,8 @@ private struct AgentSessionStepRow: View {
     }
 }
 
+// MARK: - AgentHistoryEntryCard
+
 private struct AgentHistoryEntryCard: View {
     let entry: ComposeAssistantEntry
     let onEdit: () -> Void
@@ -398,12 +561,9 @@ private struct AgentHistoryEntryCard: View {
 
     private var tint: Color {
         switch entry.status {
-        case .failed:
-            return .red
-        case .ran, .inserted:
-            return .green
-        default:
-            return .accentColor
+        case .failed: return .red
+        case .ran, .inserted: return .green
+        default: return .accentColor
         }
     }
 
@@ -418,9 +578,7 @@ private struct AgentHistoryEntryCard: View {
                     .background(tint.opacity(0.1), in: Capsule())
 
                 if entry.status == .pending {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .scaleEffect(0.8)
+                    ProgressView().controlSize(.mini).scaleEffect(0.8)
                 }
 
                 Spacer()
@@ -448,13 +606,11 @@ private struct AgentHistoryEntryCard: View {
                     .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
             }
 
-            if let contextSnippet = entry.contextSnippet,
-               !contextSnippet.isEmpty {
+            if let contextSnippet = entry.contextSnippet, !contextSnippet.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Context")
                         .font(.system(size: 9, weight: .medium, design: .rounded))
                         .foregroundStyle(.tertiary)
-
                     Text(contextSnippet)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.secondary)
@@ -466,29 +622,18 @@ private struct AgentHistoryEntryCard: View {
             if entry.canInsert || entry.canRun || entry.canExplain || entry.canFix {
                 HStack(spacing: 6) {
                     if entry.canInsert {
-                        Button("Edit", action: onEdit)
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                        Button("Edit", action: onEdit).buttonStyle(.bordered).controlSize(.small)
                     }
-
                     if entry.canRun {
                         Button(entry.kind == .shellDispatch ? "Run Again" : "Run", action: onRun)
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
+                            .buttonStyle(.borderedProminent).controlSize(.small)
                     }
-
                     if entry.canExplain {
-                        Button("Explain", action: onExplain)
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                        Button("Explain", action: onExplain).buttonStyle(.bordered).controlSize(.small)
                     }
-
                     if entry.canFix {
-                        Button("Fix", action: onFix)
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                        Button("Fix", action: onFix).buttonStyle(.bordered).controlSize(.small)
                     }
-
                     Spacer()
                 }
             }

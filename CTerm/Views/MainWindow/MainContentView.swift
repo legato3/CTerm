@@ -641,6 +641,13 @@ private struct ComposeCommandBarView: View {
         switch assistant.mode {
         case .shell:
             let hasHistory = !commandBlocks.isEmpty || !assistant.interactions.isEmpty
+            // Slash command hint when user types /
+            if draft.hasPrefix("/") {
+                return ContextHint(
+                    text: "/agent · /plan · /model — slash commands",
+                    icon: "sparkles", tint: .purple
+                )
+            }
             return ContextHint(
                 text: hasHistory ? "⌘↩ new agent  ·  ↑ expand history" : "⌘↩ to start an agent session",
                 tint: .secondary
@@ -650,7 +657,14 @@ private struct ComposeCommandBarView: View {
         case .ollamaAgent:
             return ContextHint(text: "↩ to start local agent loop", icon: "cpu", tint: .secondary)
         case .claudeAgent:
-            return ContextHint(text: "↩ to start Agent with Claude Subscription", icon: "sparkles", tint: .purple)
+            // Slash command hint when user types /
+            if draft.hasPrefix("/") {
+                return ContextHint(
+                    text: "/plan · /model · /fork · /compact — slash commands",
+                    icon: "sparkles", tint: .purple
+                )
+            }
+            return ContextHint(text: "↩ to send to Agent  ·  ⌘I to switch mode", icon: "sparkles", tint: .purple)
         }
     }
 

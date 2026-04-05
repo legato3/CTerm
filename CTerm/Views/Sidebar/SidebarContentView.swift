@@ -60,9 +60,16 @@ struct SidebarContentView: View {
     private var iconRail: some View {
         ScrollView {
             VStack(spacing: 2) {
+                // Primary: Agent panel (Warp-style — most prominent)
+                agentSessionRailButton
+
+                // Navigation
                 railButton(mode: .tabs, icon: "square.on.square", help: "Tabs")
                 railButton(mode: .changes, icon: "arrow.triangle.2.circlepath", help: "Changes")
-                railButton(mode: .agentSession, icon: "sparkles", help: "Agent")
+
+                railDivider
+
+                // Agent tools
                 railButton(mode: .agents, icon: "person.2.fill", help: "Agents")
                     .overlay(alignment: .topTrailing) {
                         if agentState.unreadCount > 0 && sidebarMode != .agents {
@@ -73,21 +80,78 @@ struct SidebarContentView: View {
                                 .allowsHitTesting(false)
                         }
                     }
-                railButton(mode: .mesh, icon: "network", help: "Mesh")
                 railButton(mode: .taskQueue, icon: "checklist", help: "Task Queue")
+                railButton(mode: .agentMemory, icon: "brain.head.profile", help: "Agent Memory")
                 railButton(mode: .agentPermissions, icon: "lock.shield", help: "Agent Permissions")
+
+                railDivider
+
+                // Dev tools
+                railButton(mode: .testRunner, icon: "testtube.2", help: "Test Runner")
+                railButton(mode: .triggers, icon: "bolt.fill", help: "Triggers")
+                railButton(mode: .mesh, icon: "network", help: "Mesh")
+
+                railDivider
+
+                // Info
                 railButton(mode: .usage, icon: "chart.bar.fill", help: "Usage")
                 railButton(mode: .context, icon: "doc.text.fill", help: "Context")
                 railButton(mode: .fileChanges, icon: "clock.arrow.circlepath", help: "File Changes")
-                railButton(mode: .agentMemory, icon: "brain.head.profile", help: "Agent Memory")
-                railButton(mode: .testRunner, icon: "testtube.2", help: "Test Runner")
-                railButton(mode: .triggers, icon: "bolt.fill", help: "Triggers")
                 railButton(mode: .auditLog, icon: "scroll", help: "Session Log")
             }
             .padding(.vertical, 10)
         }
         .frame(width: 40)
         .scrollIndicators(.never)
+    }
+
+    /// The primary agent button — larger, with auto-accept badge and thinking pulse.
+    private var agentSessionRailButton: some View {
+        let isSelected = sidebarMode == .agentSession
+        let isAutoAccept = actions.activeTabAutoAcceptEnabled
+        let isThinking = actions.composeAssistantState?.isBusy == true
+
+        return Button(action: {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                sidebarMode = isSelected ? nil : .agentSession
+            }
+        }) {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 32, height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(isSelected
+                                  ? Color.purple.opacity(0.25)
+                                  : Color.purple.opacity(0.08))
+                    )
+                    .foregroundStyle(isSelected ? Color.purple : Color.purple.opacity(0.6))
+
+                // Auto-accept badge (orange bolt)
+                if isAutoAccept {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 12, height: 12)
+                        .background(Circle().fill(Color.orange))
+                        .offset(x: 2, y: -2)
+                } else if isThinking {
+                    // Thinking pulse dot
+                    ThinkingDot()
+                        .offset(x: 2, y: -2)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Agent" + (isAutoAccept ? " (Auto-accept ON)" : ""))
+    }
+
+    private var railDivider: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.08))
+            .frame(width: 20, height: 1)
+            .padding(.vertical, 3)
     }
 
     private func railButton(mode: SidebarMode, icon: String, help: String) -> some View {
@@ -384,5 +448,26 @@ extension TabContent {
     var isDiff: Bool {
         if case .diff = self { return true }
         return false
+    }
+}
+
+// MARK: - ThinkingDot
+
+/// Animated pulsing dot shown on the agent rail button while the agent is thinking.
+private struct ThinkingDot: View {
+    @State private var pulse = false
+
+    var body: some View {
+        Circle()
+            .fill(Color.purple)
+            .frame(width: 8, height: 8)
+            .opacity(pulse ? 1.0 : 0.3)
+            .scaleEffect(pulse ? 1.1 : 0.9)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                    pulse = true
+                }
+            }
+            .onDisappear { pulse = false }
     }
 }

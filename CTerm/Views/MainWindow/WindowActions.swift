@@ -74,9 +74,13 @@ final class WindowActions {
     var onAttachBlock: ((UUID) -> Void)?
     /// Detach a previously attached block.
     var onDetachBlock: ((UUID) -> Void)?
+    /// Toggle auto-accept mode on the active tab.
+    var onToggleAutoAccept: (() -> Void)?
     // Active AI state (read by views)
     var activeAISuggestions: [ActiveAISuggestion] = []
     var nextCommandSuggestion: String? = nil
     var suggestedDiffStatus: SuggestedDiffStatus = .idle
     var attachedBlockIDs: Set<UUID> = []
+    /// Whether auto-accept is enabled on the currently active tab.
+    var activeTabAutoAcceptEnabled: Bool = false
 }

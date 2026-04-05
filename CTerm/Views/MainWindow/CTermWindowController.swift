@@ -778,6 +778,11 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
             self?.activeTab?.detachBlock(blockID)
             self?.syncActiveAIState()
         }
+        windowActions.onToggleAutoAccept = { [weak self] in
+            guard let self else { return }
+            self.toggleAutoAccept()
+            windowActions.activeTabAutoAcceptEnabled = self.activeTab?.autoAcceptEnabled ?? false
+        }
     }
 
     private func jumpToSearchPane(paneID: String) {
@@ -1132,6 +1137,7 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
         windowActions.nextCommandSuggestion = nextCommandPredictor.suggestion
         windowActions.suggestedDiffStatus = suggestedDiffEngine.status
         windowActions.attachedBlockIDs = activeTab?.attachedBlockIDs ?? []
+        windowActions.activeTabAutoAcceptEnabled = activeTab?.autoAcceptEnabled ?? false
     }
 
     private func acceptActiveAISuggestion(_ suggestion: ActiveAISuggestion) {
