@@ -44,8 +44,10 @@ actor SessionPersistenceActor {
     /// Returns true if migration was performed.
     @discardableResult
     nonisolated func migrateFromLegacyPath() -> Bool {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let legacyPath = appSupport.appendingPathComponent("CTerm/session.json")
+        guard let appSupportBase = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return false
+        }
+        let legacyPath = appSupportBase.appendingPathComponent("CTerm/session.json")
 
         guard FileManager.default.fileExists(atPath: legacyPath.path),
               !FileManager.default.fileExists(atPath: savePath.path) else {

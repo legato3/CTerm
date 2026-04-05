@@ -174,6 +174,12 @@ struct AgentSessionSidebarView: View {
                     claudeAgentCard
                 }
 
+                if agentSession == nil,
+                   assistant.mode == .ollamaCommand,
+                   let latestEntry = assistant.interactions.first {
+                    currentOllamaCommandCard(entry: latestEntry)
+                }
+
                 // Empty state
                 if agentSession == nil && !assistant.isBusy && assistant.interactions.isEmpty {
                     emptyState
@@ -183,6 +189,40 @@ struct AgentSessionSidebarView: View {
             .padding(.vertical, 12)
         }
         .scrollIndicators(.hidden)
+    }
+
+    @ViewBuilder
+    private func currentOllamaCommandCard(entry: ComposeAssistantEntry) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                Text("Current Ollama Request")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+
+                Spacer()
+
+                if entry.status == .pending {
+                    ProgressView().controlSize(.mini).scaleEffect(0.8)
+                }
+
+                Text(entry.status.label)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(entry.status == .failed ? .red : .accentColor)
+            }
+
+            AgentHistoryEntryCard(
+                entry: entry,
+                onEdit: { _ = actions.onApplyComposeAssistantEntry?(entry.id, false) },
+                onRun: { _ = actions.onApplyComposeAssistantEntry?(entry.id, true) },
+                onExplain: { actions.onExplainComposeAssistantEntry?(entry.id) },
+                onFix: { actions.onFixComposeAssistantEntry?(entry.id) }
+            )
+        }
+        .padding(12)
+        .background(Color.accentColor.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.accentColor.opacity(0.12), lineWidth: 1))
     }
 
     // MARK: - Claude Agent Card
@@ -286,9 +326,9 @@ struct AgentSessionSidebarView: View {
 
             // Mode switcher shortcut
             Button(action: {
-                assistant.mode = .claudeAgent
+                assistant.mode = assistant.lastAgentMode.startsAgentSession ? assistant.lastAgentMode : .claudeAgent
             }) {
-                Label("Switch to Agent Mode", systemImage: "sparkles")
+                Label("Switch to Agent Mode", systemImage: assistant.lastAgentMode == .ollamaAgent ? "cpu" : "sparkles")
                     .font(.system(size: 11, design: .rounded))
             }
             .buttonStyle(.bordered)

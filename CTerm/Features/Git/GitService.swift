@@ -300,7 +300,7 @@ enum GitService {
             let part = String(parts[i])
             guard !part.isEmpty else { i += 1; continue }
 
-            let firstChar = part.first!
+            guard let firstChar = part.first else { i += 1; continue }
 
             if firstChar == "?" {
                 let path = String(part.dropFirst(2))
@@ -463,7 +463,7 @@ enum GitService {
             let part = parts[i]
             guard !part.isEmpty else { i += 1; continue }
 
-            let statusChar = part.first!
+            guard let statusChar = part.first else { i += 1; continue }
 
             switch statusChar {
             case "M", "A", "D", "T":

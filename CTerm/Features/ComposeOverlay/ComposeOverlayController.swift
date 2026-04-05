@@ -451,6 +451,9 @@ final class ComposeOverlayController {
                     self?.onStateChanged?()
                 }
                 self.assistantState.finishEntry(id: entryID, response: response, command: response)
+                if self.assistantState.mode == .ollamaCommand {
+                    _ = self.assistantState.loadDraft(from: entryID)
+                }
                 self.onStateChanged?()
             } catch {
                 self.assistantState.failEntry(id: entryID, message: error.localizedDescription)

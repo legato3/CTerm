@@ -305,15 +305,18 @@ class SplitContainerView: NSView {
         for subview in subviews {
             if let wrapper = subview as? SurfaceScrollView {
                 let id = registry.id(for: wrapper.surfaceView)
-                if id == nil || !treeIDs.contains(id!) {
+                // id == nil means the surface is unregistered — always orphaned
+                guard let id, treeIDs.contains(id) else {
                     subview.removeFromSuperview()
                     if let id { scrollWrappers.removeValue(forKey: id) }
+                    continue
                 }
             } else if let surface = subview as? SurfaceView {
                 // Legacy: shouldn't happen, but clean up
                 let id = registry.id(for: surface)
-                if id == nil || !treeIDs.contains(id!) {
+                guard let id, treeIDs.contains(id) else {
                     subview.removeFromSuperview()
+                    continue
                 }
             }
         }

@@ -54,7 +54,8 @@ struct TerminalCommandBlock: Identifiable, Sendable {
 
     var titleText: String {
         let trimmed = command?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (trimmed?.isEmpty == false) ? trimmed! : "Manual command"
+        guard let trimmed, !trimmed.isEmpty else { return "Manual command" }
+        return trimmed
     }
 
     var primarySnippet: String? {

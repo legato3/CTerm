@@ -38,6 +38,60 @@ enum ComposeAssistantMode: String, CaseIterable, Identifiable, Sendable {
         case .ollamaCommand, .ollamaAgent, .claudeAgent: return true
         }
     }
+
+    /// Whether this mode starts and manages an inline agent session.
+    var startsAgentSession: Bool {
+        switch self {
+        case .ollamaAgent, .claudeAgent:
+            return true
+        case .shell, .ollamaCommand:
+            return false
+        }
+    }
+}
+
+enum OllamaSuggestionBehavior: String, CaseIterable, Identifiable, Sendable {
+    case suggestOnly
+    case autofill
+    case autorunSafe
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .suggestOnly: return "Suggest Only"
+        case .autofill: return "Suggest + Autofill"
+        case .autorunSafe: return "Autorun Safe"
+        }
+    }
+
+    var helpText: String {
+        switch self {
+        case .suggestOnly:
+            return "Keep suggestions in history until you explicitly load or run them."
+        case .autofill:
+            return "Load high-confidence runnable suggestions into the compose bar automatically."
+        case .autorunSafe:
+            return "Automatically run low-risk suggestions, otherwise fall back to autofill."
+        }
+    }
+
+    static let defaultValue: Self = .autofill
+
+    static func current(defaults: UserDefaults = .standard) -> Self {
+        guard let raw = defaults.string(forKey: AppStorageKeys.ollamaSuggestionBehavior),
+              let behavior = Self(rawValue: raw) else {
+            return defaultValue
+        }
+        return behavior
+    }
+}
+
+struct LoadedSuggestionContext: Sendable {
+    let entryID: UUID
+    let previousDraft: String
+    let previousMode: ComposeAssistantMode
+    let previousModeLocked: Bool
 }
 
 // MARK: - Input Intent Detection
@@ -247,7 +301,7 @@ final class ComposeAssistantState {
     var mode: ComposeAssistantMode {
         didSet {
             UserDefaults.standard.set(mode.rawValue, forKey: AppStorageKeys.composeAssistantMode)
-            if mode.isAgentMode, lastAgentMode != mode {
+            if mode.startsAgentSession, lastAgentMode != mode {
                 lastAgentMode = mode
             }
         }
@@ -271,6 +325,7 @@ final class ComposeAssistantState {
 
     var draftText: String = ""
     var interactions: [ComposeAssistantEntry] = []
+    var loadedSuggestionContext: LoadedSuggestionContext?
     /// Called whenever draftText changes — used by CTermWindowController to drive next-command prediction.
     var onDraftTextChanged: ((String) -> Void)?
 
@@ -281,12 +336,7 @@ final class ComposeAssistantState {
 
     init() {
         let raw = UserDefaults.standard.string(forKey: AppStorageKeys.composeAssistantMode) ?? ComposeAssistantMode.shell.rawValue
-        let resolvedMode: ComposeAssistantMode
-        if raw == ComposeAssistantMode.ollamaAgent.rawValue {
-            resolvedMode = .claudeAgent
-        } else {
-            resolvedMode = ComposeAssistantMode(rawValue: raw) ?? .shell
-        }
+        let resolvedMode = ComposeAssistantMode(rawValue: raw) ?? .shell
         self.mode = resolvedMode
         // Default unlocked (smart per-prompt). Users who previously lived with
         // a non-shell sticky mode get migrated to locked so their preference
@@ -297,8 +347,10 @@ final class ComposeAssistantState {
             self.isModeLocked = UserDefaults.standard.bool(forKey: AppStorageKeys.composeModeLocked)
         }
         let lastAgentRaw = UserDefaults.standard.string(forKey: AppStorageKeys.composeLastAgentMode)
-        if let lastAgentRaw, let parsed = ComposeAssistantMode(rawValue: lastAgentRaw), parsed.isAgentMode {
-            self.lastAgentMode = (parsed == .ollamaAgent) ? .claudeAgent : parsed
+        if let lastAgentRaw,
+           let parsed = ComposeAssistantMode(rawValue: lastAgentRaw),
+           parsed.startsAgentSession {
+            self.lastAgentMode = parsed
         } else {
             self.lastAgentMode = .claudeAgent
         }
@@ -319,6 +371,10 @@ final class ComposeAssistantState {
 
     var placeholderText: String { effectiveMode(for: draftText).placeholderText }
     var isBusy: Bool { interactions.contains(where: { $0.status == .pending }) }
+    var loadedSuggestionEntry: ComposeAssistantEntry? {
+        guard let loadedSuggestionContext else { return nil }
+        return entry(id: loadedSuggestionContext.entryID)
+    }
 
     /// Auto-detected intent for the current draft text (only meaningful in shell mode).
     var detectedIntent: InputIntent {
@@ -334,6 +390,9 @@ final class ComposeAssistantState {
     func setDraftText(_ text: String) {
         if draftText != text {
             draftText = text
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                clearLoadedSuggestionContext()
+            }
             onDraftTextChanged?(text)
         }
     }
@@ -441,10 +500,28 @@ final class ComposeAssistantState {
 
     func loadDraft(from id: UUID) -> Bool {
         guard let entry = entry(id: id), let command = entry.runnableCommand else { return false }
+        loadedSuggestionContext = LoadedSuggestionContext(
+            entryID: id,
+            previousDraft: draftText,
+            previousMode: mode,
+            previousModeLocked: isModeLocked
+        )
         draftText = command
         mode = .shell
         markInserted(id: id)
         return true
+    }
+
+    func revertLoadedSuggestion() {
+        guard let loadedSuggestionContext else { return }
+        draftText = loadedSuggestionContext.previousDraft
+        mode = loadedSuggestionContext.previousMode
+        isModeLocked = loadedSuggestionContext.previousModeLocked
+        clearLoadedSuggestionContext()
+    }
+
+    func clearLoadedSuggestionContext() {
+        loadedSuggestionContext = nil
     }
 
     func attachContext(_ snippet: String, to id: UUID) {
@@ -618,19 +695,32 @@ enum OllamaCommandService {
         return "OLLAMA_HOST=\(shellQuote(resolvedEndpoint)) ollama run \(shellQuote(resolvedModel))"
     }
 
-    static func generateCommand(for request: String, pwd: String?) async throws -> String {
+    static func generateCommand(
+        for request: String,
+        pwd: String?,
+        terminalObservation: String? = nil
+    ) async throws -> String {
         let context = await TerminalContextGatherer.gather(pwd: pwd)
-        let prompt = buildCommandPrompt(request: request, context: context)
+        let prompt = buildCommandPrompt(
+            request: request,
+            context: context,
+            terminalObservation: terminalObservation
+        )
         return try await sendPrompt(prompt, temperature: 0.15)
     }
 
     static func streamCommand(
         for request: String,
         pwd: String?,
+        terminalObservation: String? = nil,
         onPartial: @escaping @MainActor @Sendable (String) -> Void
     ) async throws -> String {
         let context = await TerminalContextGatherer.gather(pwd: pwd)
-        let prompt = buildCommandPrompt(request: request, context: context)
+        let prompt = buildCommandPrompt(
+            request: request,
+            context: context,
+            terminalObservation: terminalObservation
+        )
         return try await streamPrompt(prompt, temperature: 0.15, onPartial: onPartial)
     }
 
@@ -979,9 +1069,30 @@ enum OllamaCommandService {
         return (data, response)
     }
 
-    private static func buildCommandPrompt(request: String, context: TerminalContext) -> String {
+    private static func buildCommandPrompt(
+        request: String,
+        context: TerminalContext,
+        terminalObservation: String?
+    ) -> String {
         return """
-        You are CTerm, a terminal command assistant embedded in a macOS terminal app.
+        You are Ollama running inside CTerm, a macOS terminal app.
+
+        You are helping from CTerm's compose bar for the user's current terminal tab.
+        In this mode, your reply is shown as a suggested command or a short NOTE.
+
+        What CTerm gives you:
+        - terminal metadata such as working directory, OS, shell, and repo context
+        - optionally, a recent terminal error, command output snippet, or current viewport snippet from the same tab
+
+        What the user can do with your reply in CTerm:
+        - insert the suggested command into the compose bar
+        - run the suggested command in the current terminal tab
+        - ask follow-up explain or fix actions against recent terminal output
+
+        Limits:
+        - You do not execute commands yourself.
+        - You only know terminal state that CTerm includes in this prompt.
+        - If terminal observation is present below, treat it as live context from the current tab and use it directly.
 
         Return the single best shell command for the user's request.
 
@@ -990,10 +1101,14 @@ enum OllamaCommandService {
         - Do not use markdown fences, bullets, or explanation.
         - Prefer one-liners.
         - Preserve safety. Do not propose destructive commands unless the user's intent clearly requires it.
+        - If the user asks about terminal output and a terminal observation is included, use that observation instead of saying you cannot inspect terminal output.
         - If a command would be unsafe, ambiguous, or the request is not really a shell command task, respond with a brief plain-English sentence prefixed by NOTE:
 
         Context:
         \(context.contextBlock)
+
+        Current terminal observation:
+        \(terminalObservationBlock(terminalObservation))
 
         User request:
         \(request)
@@ -1003,7 +1118,9 @@ enum OllamaCommandService {
     private static func buildExplainPrompt(command: String?, output: String, context: TerminalContext) -> String {
         let commandText = command?.isEmpty == false ? command! : "(unknown command)"
         return """
-        You are CTerm, a terminal assistant embedded in a macOS terminal app.
+        You are Ollama running inside CTerm, a macOS terminal app.
+
+        The output below was captured from the user's current terminal tab.
 
         Explain what happened in the terminal output below.
 
@@ -1026,7 +1143,9 @@ enum OllamaCommandService {
     private static func buildFixPrompt(command: String?, output: String, context: TerminalContext) -> String {
         let commandText = command?.isEmpty == false ? command! : "(unknown command)"
         return """
-        You are CTerm, a terminal command assistant embedded in a macOS terminal app.
+        You are Ollama running inside CTerm, a macOS terminal app.
+
+        The output below was captured from the user's current terminal tab.
 
         The command below failed. Return the single best replacement shell command.
 
@@ -1129,6 +1248,13 @@ enum OllamaCommandService {
         guard trimmed.count > limit else { return trimmed }
         let start = trimmed.index(trimmed.endIndex, offsetBy: -limit)
         return String(trimmed[start...])
+    }
+
+    private static func terminalObservationBlock(_ terminalObservation: String?) -> String {
+        guard let terminalObservation else { return "(none provided)" }
+        let trimmed = terminalObservation.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "(none provided)" }
+        return trimmedContext(trimmed, limit: 2_000)
     }
 
     private static func cleanResponse(_ response: String) -> String {

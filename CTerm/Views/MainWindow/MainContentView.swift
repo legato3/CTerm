@@ -93,9 +93,9 @@ struct MainContentView: View {
                                 onTabSelected: actions.onTabSelected,
                                 onNewTab: actions.onNewTab,
                                 onCloseTab: actions.onCloseTab,
-                                onMoveTab: activeGroup != nil
-                                    ? { from, to in actions.onMoveTab?(activeGroup!.id, from, to) }
-                                    : nil,
+                onMoveTab: activeGroup.map { group in
+                    { from, to in actions.onMoveTab?(group.id, from, to) }
+                },
                                 onRouteShellError: actions.onRouteShellError,
                                 onDismissShellError: actions.onDismissShellError,
                                 onTabRenamed: actions.onTabRenamed,
@@ -614,7 +614,7 @@ private struct ComposeCommandBarView: View {
 
         let previousMode = assistant.mode
         let previousLock = assistant.isModeLocked
-        let forcedMode = assistant.lastAgentMode.isAgentMode ? assistant.lastAgentMode : .claudeAgent
+        let forcedMode = assistant.lastAgentMode.startsAgentSession ? assistant.lastAgentMode : .claudeAgent
 
         assistant.mode = forcedMode
         assistant.isModeLocked = true
@@ -737,7 +737,7 @@ private struct ComposeCommandBarView: View {
                 Button {
                     assistant.mode = mode
                     assistant.isModeLocked = true
-                    if mode.isAgentMode { assistant.lastAgentMode = mode }
+                    if mode.startsAgentSession { assistant.lastAgentMode = mode }
                 } label: {
                     Label("Lock to \(mode.displayName)", systemImage: modeIcon(mode))
                 }
@@ -780,7 +780,7 @@ private struct ComposeCommandBarView: View {
     }
 
     private var selectableComposeModes: [ComposeAssistantMode] {
-        ComposeAssistantMode.allCases.filter { $0 != .ollamaAgent }
+        ComposeAssistantMode.allCases
     }
 
     private func modeIcon(_ mode: ComposeAssistantMode) -> String {

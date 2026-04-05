@@ -14,7 +14,9 @@ class DownloadManager: NSObject, WKDownloadDelegate {
     private let downloadsDirectory: URL
 
     init(downloadsDirectory: URL? = nil) {
-        self.downloadsDirectory = downloadsDirectory ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
+        self.downloadsDirectory = downloadsDirectory
+            ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
         super.init()
     }
 

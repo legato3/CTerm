@@ -525,7 +525,7 @@ class SurfaceView: NSView {
         case "\r":
             // Pass C-Return through.
             guard event.modifierFlags.contains(.control) else { return false }
-            let finalEvent = NSEvent.keyEvent(
+            guard let finalEvent = NSEvent.keyEvent(
                 with: .keyDown,
                 location: event.locationInWindow,
                 modifierFlags: event.modifierFlags,
@@ -536,15 +536,15 @@ class SurfaceView: NSView {
                 charactersIgnoringModifiers: "\r",
                 isARepeat: event.isARepeat,
                 keyCode: event.keyCode
-            )
-            keyDown(with: finalEvent!)
+            ) else { return false }
+            keyDown(with: finalEvent)
             return true
 
         case "/":
             // Treat C-/ as C-_ to avoid the NSBeep.
             guard event.modifierFlags.contains(.control),
                   event.modifierFlags.isDisjoint(with: [.shift, .command, .option]) else { return false }
-            let finalEvent = NSEvent.keyEvent(
+            guard let finalEvent = NSEvent.keyEvent(
                 with: .keyDown,
                 location: event.locationInWindow,
                 modifierFlags: event.modifierFlags,
@@ -555,8 +555,8 @@ class SurfaceView: NSView {
                 charactersIgnoringModifiers: "_",
                 isARepeat: event.isARepeat,
                 keyCode: event.keyCode
-            )
-            keyDown(with: finalEvent!)
+            ) else { return false }
+            keyDown(with: finalEvent)
             return true
 
         default:
@@ -573,7 +573,7 @@ class SurfaceView: NSView {
             if let lastPerformKeyEvent, lastPerformKeyEvent == event.timestamp {
                 self.lastPerformKeyEvent = nil
                 let equivalent = event.characters ?? ""
-                let finalEvent = NSEvent.keyEvent(
+                guard let finalEvent = NSEvent.keyEvent(
                     with: .keyDown,
                     location: event.locationInWindow,
                     modifierFlags: event.modifierFlags,
@@ -584,8 +584,8 @@ class SurfaceView: NSView {
                     charactersIgnoringModifiers: equivalent,
                     isARepeat: event.isARepeat,
                     keyCode: event.keyCode
-                )
-                keyDown(with: finalEvent!)
+                ) else { return false }
+                keyDown(with: finalEvent)
                 return true
             }
 

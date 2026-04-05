@@ -98,23 +98,35 @@ class BrowserToolHandler {
         return nil
     }
 
-    private func resolveTab(_ arguments: [String: Any]?) -> (controller: BrowserTabController?, error: BrowserToolResult?) {
+    private func resolveTab(_ arguments: [String: Any]?) -> Result<BrowserTabController, BrowserToolResult> {
         let tabIDStr = arguments?["tab_id"] as? String
         let tabID = tabIDStr.flatMap { UUID(uuidString: $0) }
 
         guard let controller = broker.resolveTab(tabID) else {
             if let tabID {
-                return (nil, BrowserToolResult(
+                return .failure(BrowserToolResult(
                     text: BrowserAutomationError.tabNotFound(tabID).localizedDescription,
                     isError: true
                 ))
             }
-            return (nil, BrowserToolResult(
+            return .failure(BrowserToolResult(
                 text: BrowserAutomationError.noActiveBrowserTab.localizedDescription,
                 isError: true
             ))
         }
-        return (controller, nil)
+        return .success(controller)
+    }
+
+    /// Unwrap a resolved tab or return the error result immediately.
+    /// Usage: `let controller = try resolvedTab(arguments) else { return $0 }`
+    private func withTab(
+        _ arguments: [String: Any]?,
+        _ body: (BrowserTabController) async -> BrowserToolResult
+    ) async -> BrowserToolResult {
+        switch resolveTab(arguments) {
+        case .success(let controller): return await body(controller)
+        case .failure(let error): return error
+        }
     }
 
     private func runJS(_ controller: BrowserTabController, _ script: String) async -> BrowserToolResult {
@@ -164,54 +176,53 @@ class BrowserToolHandler {
               let url = URL(string: urlStr) else {
             return BrowserToolResult(text: "Missing or invalid 'url' parameter", isError: true)
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        controller.loadURL(url)
-        return BrowserToolResult(text: "Navigated to \(urlStr)", isError: false)
+        return await withTab(arguments) { controller in
+            controller.loadURL(url)
+            return BrowserToolResult(text: "Navigated to \(urlStr)", isError: false)
+        }
     }
 
     private func handleBack(_ arguments: [String: Any]?) async -> BrowserToolResult {
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        controller.goBack()
-        return BrowserToolResult(text: "Navigated back", isError: false)
+        return await withTab(arguments) { controller in
+            controller.goBack()
+            return BrowserToolResult(text: "Navigated back", isError: false)
+        }
     }
 
     private func handleForward(_ arguments: [String: Any]?) async -> BrowserToolResult {
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        controller.goForward()
-        return BrowserToolResult(text: "Navigated forward", isError: false)
+        return await withTab(arguments) { controller in
+            controller.goForward()
+            return BrowserToolResult(text: "Navigated forward", isError: false)
+        }
     }
 
     private func handleReload(_ arguments: [String: Any]?) async -> BrowserToolResult {
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        controller.reload()
-        return BrowserToolResult(text: "Reloaded", isError: false)
+        return await withTab(arguments) { controller in
+            controller.reload()
+            return BrowserToolResult(text: "Reloaded", isError: false)
+        }
     }
 
     private func handleSnapshot(_ arguments: [String: Any]?) async -> BrowserToolResult {
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        controller.incrementSnapshotGeneration()
-        let js = BrowserAutomation.snapshot()
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            controller.incrementSnapshotGeneration()
+            return await self.runJS(controller, BrowserAutomation.snapshot())
+        }
     }
 
     private func handleScreenshot(_ arguments: [String: Any]?) async -> BrowserToolResult {
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        do {
-            let data = try await controller.takeScreenshot()
-            let tmpPath = "/tmp/cterm-screenshot-\(UUID().uuidString).png"
-            try data.write(to: URL(fileURLWithPath: tmpPath))
-            return BrowserToolResult(text: "{\"path\":\"\(tmpPath)\"}", isError: false)
-        } catch {
-            return BrowserToolResult(
-                text: "Screenshot failed: \(error.localizedDescription)",
-                isError: true
-            )
+        return await withTab(arguments) { controller in
+            do {
+                let data = try await controller.takeScreenshot()
+                let tmpPath = "/tmp/cterm-screenshot-\(UUID().uuidString).png"
+                try data.write(to: URL(fileURLWithPath: tmpPath))
+                return BrowserToolResult(text: "{\"path\":\"\(tmpPath)\"}", isError: false)
+            } catch {
+                return BrowserToolResult(
+                    text: "Screenshot failed: \(error.localizedDescription)",
+                    isError: true
+                )
+            }
         }
     }
 
@@ -219,49 +230,45 @@ class BrowserToolHandler {
         guard let selector = arguments?["selector"] as? String else {
             return BrowserToolResult(text: "Missing 'selector' parameter", isError: true)
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        let js = BrowserAutomation.getText(selector: selector)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            await self.runJS(controller, BrowserAutomation.getText(selector: selector))
+        }
     }
 
     private func handleGetHTML(_ arguments: [String: Any]?) async -> BrowserToolResult {
         guard let selector = arguments?["selector"] as? String else {
             return BrowserToolResult(text: "Missing 'selector' parameter", isError: true)
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
         let maxLength = arguments?["max_length"] as? Int ?? 512000
-        let js = BrowserAutomation.getHTML(selector: selector, maxLength: maxLength)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            await self.runJS(controller, BrowserAutomation.getHTML(selector: selector, maxLength: maxLength))
+        }
     }
 
     private func handleEval(_ arguments: [String: Any]?) async -> BrowserToolResult {
         guard let code = arguments?["code"] as? String else {
             return BrowserToolResult(text: "Missing 'code' parameter", isError: true)
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        let currentURL = controller.browserState.url.absoluteString
-        if Self.isRestrictedForEval(url: currentURL) {
-            return BrowserToolResult(
-                text: BrowserAutomationError.restrictedPage(currentURL).localizedDescription,
-                isError: true
-            )
+        return await withTab(arguments) { controller in
+            let currentURL = controller.browserState.url.absoluteString
+            if Self.isRestrictedForEval(url: currentURL) {
+                return BrowserToolResult(
+                    text: BrowserAutomationError.restrictedPage(currentURL).localizedDescription,
+                    isError: true
+                )
+            }
+            return await self.runJS(controller, BrowserAutomation.eval(code: code))
         }
-        let js = BrowserAutomation.eval(code: code)
-        return await runJS(controller, js)
     }
 
     private func handleClick(_ arguments: [String: Any]?) async -> BrowserToolResult {
         guard let selector = arguments?["selector"] as? String else {
             return BrowserToolResult(text: "Missing 'selector' parameter", isError: true)
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        if let restricted = checkAuthRestriction(controller) { return restricted }
-        let js = BrowserAutomation.click(selector: selector)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            if let restricted = self.checkAuthRestriction(controller) { return restricted }
+            return await self.runJS(controller, BrowserAutomation.click(selector: selector))
+        }
     }
 
     private func handleFill(_ arguments: [String: Any]?) async -> BrowserToolResult {
@@ -269,33 +276,30 @@ class BrowserToolHandler {
               let value = arguments?["value"] as? String else {
             return BrowserToolResult(text: "Missing 'selector' or 'value' parameter", isError: true)
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        if let restricted = checkAuthRestriction(controller) { return restricted }
-        let js = BrowserAutomation.fill(selector: selector, value: value)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            if let restricted = self.checkAuthRestriction(controller) { return restricted }
+            return await self.runJS(controller, BrowserAutomation.fill(selector: selector, value: value))
+        }
     }
 
     private func handleType(_ arguments: [String: Any]?) async -> BrowserToolResult {
         guard let text = arguments?["text"] as? String else {
             return BrowserToolResult(text: "Missing 'text' parameter", isError: true)
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        if let restricted = checkAuthRestriction(controller) { return restricted }
-        let js = BrowserAutomation.type(text: text)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            if let restricted = self.checkAuthRestriction(controller) { return restricted }
+            return await self.runJS(controller, BrowserAutomation.type(text: text))
+        }
     }
 
     private func handlePress(_ arguments: [String: Any]?) async -> BrowserToolResult {
         guard let key = arguments?["key"] as? String else {
             return BrowserToolResult(text: "Missing 'key' parameter", isError: true)
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        if let restricted = checkAuthRestriction(controller) { return restricted }
-        let js = BrowserAutomation.press(key: key)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            if let restricted = self.checkAuthRestriction(controller) { return restricted }
+            return await self.runJS(controller, BrowserAutomation.press(key: key))
+        }
     }
 
     private func handleSelect(_ arguments: [String: Any]?) async -> BrowserToolResult {
@@ -303,33 +307,30 @@ class BrowserToolHandler {
               let value = arguments?["value"] as? String else {
             return BrowserToolResult(text: "Missing 'selector' or 'value' parameter", isError: true)
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        if let restricted = checkAuthRestriction(controller) { return restricted }
-        let js = BrowserAutomation.select(selector: selector, value: value)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            if let restricted = self.checkAuthRestriction(controller) { return restricted }
+            return await self.runJS(controller, BrowserAutomation.select(selector: selector, value: value))
+        }
     }
 
     private func handleCheck(_ arguments: [String: Any]?) async -> BrowserToolResult {
         guard let selector = arguments?["selector"] as? String else {
             return BrowserToolResult(text: "Missing 'selector' parameter", isError: true)
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        if let restricted = checkAuthRestriction(controller) { return restricted }
-        let js = BrowserAutomation.check(selector: selector)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            if let restricted = self.checkAuthRestriction(controller) { return restricted }
+            return await self.runJS(controller, BrowserAutomation.check(selector: selector))
+        }
     }
 
     private func handleUncheck(_ arguments: [String: Any]?) async -> BrowserToolResult {
         guard let selector = arguments?["selector"] as? String else {
             return BrowserToolResult(text: "Missing 'selector' parameter", isError: true)
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        if let restricted = checkAuthRestriction(controller) { return restricted }
-        let js = BrowserAutomation.uncheck(selector: selector)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            if let restricted = self.checkAuthRestriction(controller) { return restricted }
+            return await self.runJS(controller, BrowserAutomation.uncheck(selector: selector))
+        }
     }
 
     private func handleWait(_ arguments: [String: Any]?) async -> BrowserToolResult {
@@ -344,11 +345,9 @@ class BrowserToolHandler {
                 isError: true
             )
         }
-
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        let js = BrowserAutomation.wait(selector: selector, text: text, url: url, timeout: timeout)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            await self.runJS(controller, BrowserAutomation.wait(selector: selector, text: text, url: url, timeout: timeout))
+        }
     }
 
     private func handleGetAttribute(_ arguments: [String: Any]?) async -> BrowserToolResult {
@@ -358,47 +357,42 @@ class BrowserToolHandler {
         guard let attribute = arguments?["attribute"] as? String else {
             return BrowserToolResult(text: "Missing 'attribute' parameter", isError: true)
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        let js = BrowserAutomation.getAttribute(selector: selector, attribute: attribute)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            await self.runJS(controller, BrowserAutomation.getAttribute(selector: selector, attribute: attribute))
+        }
     }
 
     private func handleGetLinks(_ arguments: [String: Any]?) async -> BrowserToolResult {
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
         let maxItems = arguments?["max_items"] as? Int ?? 100
-        let js = BrowserAutomation.getLinks(maxItems: maxItems)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            await self.runJS(controller, BrowserAutomation.getLinks(maxItems: maxItems))
+        }
     }
 
     private func handleGetInputs(_ arguments: [String: Any]?) async -> BrowserToolResult {
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
         let maxItems = arguments?["max_items"] as? Int ?? 100
-        let js = BrowserAutomation.getInputs(maxItems: maxItems)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            await self.runJS(controller, BrowserAutomation.getInputs(maxItems: maxItems))
+        }
     }
 
     private func handleIsVisible(_ arguments: [String: Any]?) async -> BrowserToolResult {
         guard let selector = arguments?["selector"] as? String else {
             return BrowserToolResult(text: "Missing 'selector' parameter", isError: true)
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        let js = BrowserAutomation.isVisible(selector: selector)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            await self.runJS(controller, BrowserAutomation.isVisible(selector: selector))
+        }
     }
 
     private func handleHover(_ arguments: [String: Any]?) async -> BrowserToolResult {
         guard let selector = arguments?["selector"] as? String else {
             return BrowserToolResult(text: "Missing 'selector' parameter", isError: true)
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        if let restricted = checkAuthRestriction(controller) { return restricted }
-        let js = BrowserAutomation.hover(selector: selector)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            if let restricted = self.checkAuthRestriction(controller) { return restricted }
+            return await self.runJS(controller, BrowserAutomation.hover(selector: selector))
+        }
     }
 
     private func handleScroll(_ arguments: [String: Any]?) async -> BrowserToolResult {
@@ -418,11 +412,10 @@ class BrowserToolHandler {
         } else {
             amount = 500
         }
-        let resolved = resolveTab(arguments)
-        guard let controller = resolved.controller else { return resolved.error! }
-        if let restricted = checkAuthRestriction(controller) { return restricted }
         let selector = arguments?["selector"] as? String
-        let js = BrowserAutomation.scroll(direction: direction, amount: amount, selector: selector)
-        return await runJS(controller, js)
+        return await withTab(arguments) { controller in
+            if let restricted = self.checkAuthRestriction(controller) { return restricted }
+            return await self.runJS(controller, BrowserAutomation.scroll(direction: direction, amount: amount, selector: selector))
+        }
     }
 }

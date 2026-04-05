@@ -1050,7 +1050,7 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
             focusedController: focusedController,
             sendEnterKey: { [weak self] controller in self?.sendEnterKey(to: controller) }
         )
-        if sent, effectiveMode.isAgentMode {
+        if sent, effectiveMode.startsAgentSession {
             revealDedicatedAgentSidebar()
         }
         syncActiveAIState()
@@ -1278,8 +1278,51 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
     @objc private func handleSetTitleNotification(_ notification: Notification) {
         guard let event = GhosttySetTitleEvent.from(notification) else { return }
         guard belongsToThisWindow(event.surfaceView) else { return }
-        guard let tab = activeTab else { return }
+        guard let (tab, _) = findTab(for: event.surfaceView) else { return }
 
+        // Shell integration title feature: ghostty sets the title to the running
+        // command text during preexec, then resets it to the shell name on precmd.
+        // We use this to open a command block with the real command text — the same
+        // mechanism Warp uses to track discrete command units.
+        let surfaceID = event.surfaceView.surfaceController?.id
+        if ShellTitleParser.isRunningCommand(event.title) {
+            // preexec fired — a new command is starting.
+            // Skip if the compose bar already opened a block for this surface
+            // (happens when CTerm itself dispatched the command).
+            let alreadyTracked = tab.commandBlocks.contains {
+                $0.status == .running && $0.surfaceID == surfaceID
+            }
+            if !alreadyTracked {
+                tab.beginCommandBlock(
+                    command: ShellTitleParser.extractCommand(event.title),
+                    source: .shell,
+                    surfaceID: surfaceID
+                )
+            } else if let running = tab.commandBlocks.first(where: {
+                $0.status == .running && $0.surfaceID == surfaceID
+            }), running.command == nil || running.command?.isEmpty == true {
+                // Block exists but has no command text yet — fill it in.
+                if let idx = tab.commandBlocks.firstIndex(where: { $0.id == running.id }) {
+                    var updated = tab.commandBlocks[idx]
+                    updated = TerminalCommandBlock(
+                        id: updated.id,
+                        source: updated.source,
+                        surfaceID: updated.surfaceID,
+                        command: ShellTitleParser.extractCommand(event.title),
+                        startedAt: updated.startedAt,
+                        finishedAt: updated.finishedAt,
+                        status: updated.status,
+                        outputSnippet: updated.outputSnippet,
+                        errorSnippet: updated.errorSnippet,
+                        exitCode: updated.exitCode,
+                        durationNanoseconds: updated.durationNanoseconds
+                    )
+                    tab.commandBlocks[idx] = updated
+                }
+            }
+        }
+
+        // Update the visible tab title only for the focused pane.
         if let focusedID = tab.splitTree.focusedLeafID,
            let focusedView = tab.registry.view(for: focusedID),
            focusedView === event.surfaceView,
@@ -1433,11 +1476,19 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
         guard let event = GhosttyCommandFinishedEvent.from(notification),
               let (tab, _) = findTab(for: event.surfaceView) else { return }
 
+        // Capture output now — the viewport still shows the command output before
+        // the prompt redraws. This is the Warp-style "read output at D marker" approach.
+        let surface = event.surfaceView.surfaceController?.surface
+        let outputSnippet = viewportSnippet(for: event.surfaceView)
+
+        // Drive shell error detection directly from the exit code.
+        shellErrorMonitors[tab.id]?.handleCommandFinished(exitCode: event.exitCode, surface: surface)
+
         let commandBlockID = tab.finishCommandBlock(
             surfaceID: event.surfaceView.surfaceController?.id,
             exitCode: event.exitCode,
             durationNanoseconds: event.durationNanoseconds,
-            outputSnippet: viewportSnippet(for: event.surfaceView),
+            outputSnippet: outputSnippet,
             errorSnippet: tab.lastShellError?.snippet
         )
         composeController.handleCommandFinished(
@@ -1700,7 +1751,6 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
 
         guard shellErrorMonitors[tab.id] == nil else { return }
         let errorMonitor = ShellErrorMonitor(tab: tab)
-        errorMonitor.start()
         shellErrorMonitors[tab.id] = errorMonitor
 
         guard terminalIndexers[tab.id] == nil else { return }
@@ -1720,7 +1770,6 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
     private func cleanupTabResources(id tabID: UUID) {
         paneUsageMonitors[tabID]?.stop()
         paneUsageMonitors.removeValue(forKey: tabID)
-        shellErrorMonitors[tabID]?.stop()
         shellErrorMonitors.removeValue(forKey: tabID)
         terminalIndexers[tabID]?.stop()
         terminalIndexers.removeValue(forKey: tabID)

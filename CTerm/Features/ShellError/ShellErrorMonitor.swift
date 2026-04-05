@@ -1,8 +1,8 @@
 // ShellErrorMonitor.swift
 // CTerm
 //
-// Polls a tab's terminal surfaces for command failure signals.
-// Stores the captured error on Tab.lastShellError for badge display and routing.
+// Detects command failures from ghostty's COMMAND_FINISHED action.
+// Called directly from handleCommandFinishedNotification — no polling.
 
 import Foundation
 import GhosttyKit
@@ -15,23 +15,24 @@ struct ShellErrorEvent: Identifiable, Sendable {
     let tabID: UUID
     let tabTitle: String
     let snippet: String
+    let exitCode: Int
     let timestamp: Date
 
-    init(tabID: UUID, tabTitle: String, snippet: String) {
+    init(tabID: UUID, tabTitle: String, snippet: String, exitCode: Int) {
         self.id = UUID()
         self.tabID = tabID
         self.tabTitle = tabTitle
         self.snippet = snippet
+        self.exitCode = exitCode
         self.timestamp = Date()
     }
 }
 
 // Lines containing any of these strings are treated as error lines.
-// Ordered from most specific to least to minimize false positives.
 private let errorPatterns: [String] = [
     "error[E",          // Rust: error[E0308]
     "make: ***",        // Make build failure
-    "❌",               // Test runners, scripts
+    "❌",
     "Build failed",
     "Tests failed",
     "Test failed",
@@ -41,98 +42,74 @@ private let errorPatterns: [String] = [
     "Error:",           // Python, Node.js, Ruby, etc.
     "fatal:",           // git, gcc
     "Fatal:",
-    "FAIL ",            // Jest: FAIL src/foo.test.js, Go: FAIL ./...
+    "FAIL ",            // Jest, Go
     "Process exited with code [1-9]",
     "exit status [1-9]",
     "returned exit code [1-9]",
 ]
 
-// The last non-empty line must look like a shell prompt — confirms the command finished.
-private let promptSuffixes: [String] = [
-    "$ ", "% ", "❯ ", "➜ ", "> ", "λ ", "# "
-]
-
 @MainActor
 final class ShellErrorMonitor {
     private weak var tab: Tab?
-    private var pollTask: Task<Void, Never>?
-    private var lastCapturedAt: Date = .distantPast
-
     private static let cooldown: TimeInterval = 10.0
-    private static let pollInterval: UInt64 = 800_000_000 // 800 ms
+    private var lastCapturedAt: Date = .distantPast
 
     init(tab: Tab) {
         self.tab = tab
     }
 
-    func start() {
-        guard pollTask == nil else { return }
-        pollTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                self?.tick()
-                try? await Task.sleep(nanoseconds: Self.pollInterval)
-            }
-        }
-    }
-
-    func stop() {
-        pollTask?.cancel()
-        pollTask = nil
-    }
-
-    private func tick() {
-        guard let tab else { stop(); return }
-        // Don't recapture during cooldown or while an unrouted error is pending.
-        guard Date().timeIntervalSince(lastCapturedAt) >= Self.cooldown else { return }
+    // Called by CTermWindowController from handleCommandFinishedNotification.
+    // exitCode comes directly from ghostty — no heuristic prompt detection needed.
+    func handleCommandFinished(exitCode: Int?, surface: ghostty_surface_t?) {
+        guard let tab else { return }
+        guard let exitCode, exitCode != 0 else { return }
         guard tab.lastShellError == nil else { return }
+        guard Date().timeIntervalSince(lastCapturedAt) >= Self.cooldown else { return }
 
-        for surfaceID in tab.registry.allIDs {
-            guard let controller = tab.registry.controller(for: surfaceID),
-                  let surface = controller.surface,
-                  let text = GhosttyFFI.surfaceReadViewportText(surface) else { continue }
+        let snippet = extractErrorSnippet(surface: surface) ?? "Exit code \(exitCode)"
+        lastCapturedAt = Date()
 
-            let lines = text.components(separatedBy: "\n")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-            let tail = Array(lines.suffix(25))
-
-            if let snippet = extractError(from: tail) {
-                lastCapturedAt = Date()
-                let event = ShellErrorEvent(tabID: tab.id, tabTitle: tab.title, snippet: snippet)
-                tab.lastShellError = event
-                logger.info("ShellError: captured in \"\(tab.title)\": \(snippet.prefix(80))")
-                NotificationCenter.default.post(
-                    name: .shellErrorCaptured,
-                    object: nil,
-                    userInfo: ["snippet": snippet, "tabTitle": tab.title]
-                )
-                return
-            }
-        }
+        let event = ShellErrorEvent(
+            tabID: tab.id,
+            tabTitle: tab.title,
+            snippet: snippet,
+            exitCode: exitCode
+        )
+        tab.lastShellError = event
+        logger.info("ShellError: exit \(exitCode) in \"\(tab.title)\": \(snippet.prefix(80))")
+        NotificationCenter.default.post(
+            name: .shellErrorCaptured,
+            object: nil,
+            userInfo: ["snippet": snippet, "tabTitle": tab.title]
+        )
     }
 
-    // MARK: - Detection
+    // MARK: - Snippet extraction
 
-    private func extractError(from lines: [String]) -> String? {
-        guard lines.count >= 2 else { return nil }
+    private func extractErrorSnippet(surface: ghostty_surface_t?) -> String? {
+        guard let surface,
+              let text = GhosttyFFI.surfaceReadViewportText(surface) else { return nil }
 
-        // Last line must look like a shell prompt — the command has exited.
-        guard isPromptLine(lines.last!) else { return nil }
+        let lines = text.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let tail = Array(lines.suffix(25))
 
-        // Gather error lines from everything except the trailing prompt.
-        let body = lines.dropLast()
+        // Drop the trailing prompt line if present (last line ending with common prompt chars).
+        let body = tail.last.map { isPromptLine($0) } == true ? Array(tail.dropLast()) : tail
         let errorLines = body.filter { containsErrorPattern($0) }
         guard !errorLines.isEmpty else { return nil }
-
-        // Return the last few error lines as the snippet (cap at 8).
         return errorLines.suffix(8).joined(separator: "\n")
     }
 
     private func isPromptLine(_ line: String) -> Bool {
-        promptSuffixes.contains { line.hasSuffix($0) || line.contains($0) }
+        let promptSuffixes = ["$ ", "% ", "❯ ", "➜ ", "> ", "λ ", "# "]
+        return promptSuffixes.contains { line.hasSuffix($0) || line.contains($0) }
     }
 
     private func containsErrorPattern(_ line: String) -> Bool {
-        errorPatterns.contains { line.range(of: $0, options: [.caseInsensitive, .regularExpression]) != nil }
+        errorPatterns.contains {
+            line.range(of: $0, options: [.caseInsensitive, .regularExpression]) != nil
+        }
     }
 }

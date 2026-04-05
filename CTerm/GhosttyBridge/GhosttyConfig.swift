@@ -223,6 +223,8 @@ final class GhosttyConfigManager {
             font-codepoint-map = U+1F900-U+1F9FF=Apple Color Emoji
             font-codepoint-map = U+1FA70-U+1FAFF=Apple Color Emoji
             font-codepoint-map = U+FE00-U+FE0F=Apple Color Emoji
+            shell-integration = detect
+            shell-integration-features = cursor,sudo,title
             # --- End CTerm Runtime Override ---
             """
 

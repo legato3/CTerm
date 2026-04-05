@@ -34,6 +34,60 @@ struct ComposeAssistantStateTests {
         #expect(state.effectiveMode(for: "fix the failing tests") == .ollamaAgent)
     }
 
+    @Test("Persisted local agent mode survives reload")
+    func persistedLocalAgentModeSurvivesReload() {
+        defer { resetDefaults() }
+
+        let defaults = UserDefaults.standard
+        defaults.set(ComposeAssistantMode.ollamaAgent.rawValue, forKey: AppStorageKeys.composeAssistantMode)
+        defaults.set(ComposeAssistantMode.ollamaAgent.rawValue, forKey: AppStorageKeys.composeLastAgentMode)
+        defaults.set(true, forKey: AppStorageKeys.composeModeLocked)
+
+        let state = ComposeAssistantState()
+
+        #expect(state.mode == .ollamaAgent)
+        #expect(state.lastAgentMode == .ollamaAgent)
+        #expect(state.isModeLocked)
+    }
+
+    @Test("Ollama suggestion mode does not replace the preferred agent backend")
+    func ollamaCommandModeDoesNotReplacePreferredAgentBackend() {
+        defer { resetDefaults() }
+
+        let state = ComposeAssistantState()
+        state.mode = .ollamaAgent
+        #expect(state.lastAgentMode == .ollamaAgent)
+
+        state.mode = .ollamaCommand
+
+        #expect(state.lastAgentMode == .ollamaAgent)
+    }
+
+    @Test("Loading an Ollama suggestion primes shell mode for execution")
+    func loadDraftSwitchesToShellAndMarksInserted() {
+        defer { resetDefaults() }
+
+        let state = ComposeAssistantState()
+        state.mode = .ollamaCommand
+        state.isModeLocked = true
+
+        let entryID = state.addEntry(
+            kind: .commandSuggestion,
+            prompt: "show modified files",
+            response: "git status --short",
+            command: "git status --short",
+            status: .ready
+        )
+
+        let loaded = state.loadDraft(from: entryID)
+
+        #expect(loaded)
+        #expect(state.draftText == "git status --short")
+        #expect(state.mode == .shell)
+        #expect(state.isModeLocked)
+        #expect(state.entry(id: entryID)?.status == .inserted)
+    }
+
     private func resetDefaults() {
         let defaults = UserDefaults.standard
         for key in keys {

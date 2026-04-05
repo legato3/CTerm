@@ -31,6 +31,10 @@ final class IPCWindowController {
     /// Notification observer token for peerRegistered events. Using NSObjectProtocol boxed
     /// in a class wrapper so the block-based observer is removed when no longer needed.
     private var peerRegisteredObserver: NSObjectProtocol?
+    /// Test hook to stub runtime launch without a real terminal surface.
+    var launchRuntimeCommandOverride: ((Tab, String) -> Bool)?
+    /// Test hook to stub prompt delivery without a real terminal surface.
+    var deliverRolePromptOverride: ((Tab, String, AgentInputStyle) -> Bool)?
 
     init(mcpServer: CTermMCPServer, windowSession: WindowSession) {
         self.mcpServer = mcpServer
@@ -140,8 +144,8 @@ final class IPCWindowController {
         guard autoStart, createdTabs.count == roleNames.count else { return }
 
         if runtime.registersWithIPC {
-            // Build a role-name → (tab, prompt) map so we can inject prompts when
-            // the matching peer calls register_peer rather than after a hardcoded delay.
+            // Build a role-name → (tab, prompt) map so we can inject prompts after the
+            // runtime launches, with peerRegistered kept as a retry path if startup races.
             for (tab, roleName) in zip(createdTabs, roleNames) {
                 let prompt = AgentWorkflow.rolePrompt(
                     roleName: roleName,
@@ -171,17 +175,17 @@ final class IPCWindowController {
         }
 
         // Launch the selected runtime in each tab after a short shell-ready delay.
-        for (index, tab) in createdTabs.enumerated() {
+        for (index, (tab, roleName)) in zip(createdTabs, roleNames).enumerated() {
             let baseDelay = Double(index) * 0.15
             DispatchQueue.main.asyncAfter(deadline: .now() + baseDelay + 0.8) { [weak self] in
-                guard let self,
-                      let leafID = tab.splitTree.focusedLeafID,
-                      let controller = tab.registry.controller(for: leafID) else { return }
+                guard let self else { return }
                 guard !runtime.launchCommand.isEmpty else { return }
-                controller.sendText(runtime.launchCommand)
-                self.onSendEnterKey?(controller)
+                guard self.launchRuntime(command: runtime.launchCommand, in: tab) else { return }
 
-                guard !runtime.registersWithIPC else { return }
+                if runtime.registersWithIPC {
+                    self.schedulePendingRolePromptInjection(for: roleName, after: 2.0)
+                    return
+                }
 
                 let prompt = AgentWorkflow.rolePrompt(
                     roleName: tab.title,
@@ -193,12 +197,7 @@ final class IPCWindowController {
 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                     guard let self else { return }
-                    AgentTextRouter.submit(
-                        prompt,
-                        to: controller,
-                        inputStyle: runtime.inputStyle,
-                        sendEnterKey: { self.onSendEnterKey?($0) }
-                    )
+                    _ = self.deliverRolePrompt(prompt, to: tab, inputStyle: runtime.inputStyle)
                 }
             }
         }
@@ -226,49 +225,17 @@ final class IPCWindowController {
         guard let peerName else { return }
         let key = peerName.lowercased()
 
-        guard let entry = pendingRolePrompts.removeValue(forKey: key) else {
+        guard pendingRolePrompts[key] != nil else {
             // Either not a workflow agent, or already handled.
             return
         }
 
-        let tab = entry.tab
-        let prompt = entry.prompt
-
-        // Find the surface controller and inject the prompt.
-        guard let leafID = tab.splitTree.focusedLeafID,
-              let controller = tab.registry.controller(for: leafID) else {
-            // Tab surface not ready yet — fall back to a short delay.
-            logger.warning("IPCWindowController: peerRegistered for '\(peerName)' but tab surface not ready; using 2s fallback")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-                guard let leafID = tab.splitTree.focusedLeafID,
-                      let controller = tab.registry.controller(for: leafID) else { return }
-                controller.sendText(prompt)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    guard let self else { return }
-                    self.onSendEnterKey?(controller)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        self.onSendEnterKey?(controller)
-                    }
-                }
-            }
+        if injectPendingRolePrompt(named: peerName) {
             return
         }
 
-        logger.info("IPCWindowController: injecting role prompt for peer '\(peerName)'")
-        AgentTextRouter.submit(
-            prompt,
-            to: controller,
-            inputStyle: tab.preferredAgentInputStyle,
-            sendEnterKey: { [weak self] controller in self?.onSendEnterKey?(controller) }
-        )
-
-        // If all pending prompts have been consumed, remove the observer.
-        if pendingRolePrompts.isEmpty {
-            if let observer = peerRegisteredObserver {
-                NotificationCenter.default.removeObserver(observer)
-                peerRegisteredObserver = nil
-            }
-        }
+        logger.warning("IPCWindowController: peerRegistered for '\(peerName)' before prompt delivery; retrying in 1s")
+        schedulePendingRolePromptInjection(for: peerName, after: 1.0)
     }
 
     // MARK: - Review → Agent Dispatch
@@ -355,5 +322,67 @@ final class IPCWindowController {
             label(result.claudeCode, name: "Claude Code"),
             label(result.codex, name: "Codex")
         ].joined(separator: "\n")
+    }
+
+    @discardableResult
+    private func launchRuntime(command: String, in tab: Tab) -> Bool {
+        if let launchRuntimeCommandOverride {
+            return launchRuntimeCommandOverride(tab, command)
+        }
+
+        guard let leafID = tab.splitTree.focusedLeafID,
+              let controller = tab.registry.controller(for: leafID) else { return false }
+
+        controller.sendText(command)
+        onSendEnterKey?(controller)
+        return true
+    }
+
+    @discardableResult
+    private func deliverRolePrompt(
+        _ prompt: String,
+        to tab: Tab,
+        inputStyle: AgentInputStyle
+    ) -> Bool {
+        if let deliverRolePromptOverride {
+            return deliverRolePromptOverride(tab, prompt, inputStyle)
+        }
+
+        guard let leafID = tab.splitTree.focusedLeafID,
+              let controller = tab.registry.controller(for: leafID) else { return false }
+
+        AgentTextRouter.submit(
+            prompt,
+            to: controller,
+            inputStyle: inputStyle,
+            sendEnterKey: { [weak self] controller in self?.onSendEnterKey?(controller) }
+        )
+        return true
+    }
+
+    private func schedulePendingRolePromptInjection(for roleName: String, after delay: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            _ = self?.injectPendingRolePrompt(named: roleName)
+        }
+    }
+
+    @discardableResult
+    private func injectPendingRolePrompt(named roleName: String) -> Bool {
+        let key = roleName.lowercased()
+        guard let entry = pendingRolePrompts[key] else { return false }
+        guard deliverRolePrompt(entry.prompt, to: entry.tab, inputStyle: entry.tab.preferredAgentInputStyle) else {
+            return false
+        }
+
+        logger.info("IPCWindowController: injecting role prompt for '\(roleName)'")
+        pendingRolePrompts.removeValue(forKey: key)
+        cleanupPeerRegisteredObserverIfNeeded()
+        return true
+    }
+
+    private func cleanupPeerRegisteredObserverIfNeeded() {
+        guard pendingRolePrompts.isEmpty, let observer = peerRegisteredObserver else { return }
+        NotificationCenter.default.removeObserver(observer)
+        peerRegisteredObserver = nil
     }
 }

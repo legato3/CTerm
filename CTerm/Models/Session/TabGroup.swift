@@ -49,10 +49,9 @@ class TabGroup: Identifiable {
         if activeTabID == id {
             if tabs.isEmpty {
                 activeTabID = nil
-            } else if index < tabs.count {
-                activeTabID = tabs[index].id
             } else {
-                activeTabID = tabs[tabs.count - 1].id
+                // After removal, clamp to the last valid index
+                activeTabID = tabs[min(index, tabs.count - 1)].id
             }
         }
     }
