@@ -20,6 +20,8 @@ struct BlockNavigatorView: View {
     @State private var statusFilter: BlockStatusFilter = .all
     @State private var selectedBlockID: UUID?
     @State private var recentlyAttached: Set<UUID> = []
+    @State private var hoveredBlockID: UUID?
+    @State private var recentlyCopied: Set<UUID> = []
 
     private var allBlocks: [BlockWithTab] {
         var out: [BlockWithTab] = []
@@ -179,6 +181,7 @@ struct BlockNavigatorView: View {
     // MARK: - Block List
 
     private var blockList: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 if scope == .allTabs {
@@ -221,6 +224,18 @@ struct BlockNavigatorView: View {
             .padding(.bottom, 8)
         }
         .scrollIndicators(.never)
+        .focusable()
+        .onKeyPress(keys: [.upArrow, .downArrow]) { press in
+            guard press.modifiers.contains(.command) else { return .ignored }
+            let delta = press.key == .downArrow ? 1 : -1
+            if let newID = moveSelection(by: delta) {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo(newID, anchor: .center)
+                }
+            }
+            return .handled
+        }
+        } // ScrollViewReader
     }
 
     private func sectionHeader(title: String, count: Int) -> some View {
@@ -263,6 +278,10 @@ struct BlockNavigatorView: View {
 
                 Spacer(minLength: 4)
 
+                if hoveredBlockID == row.block.id {
+                    hoverActions(for: row)
+                        .transition(.opacity)
+                }
                 attachButton(for: row, isAttached: isAttached, justAttached: justAttached)
             }
 
@@ -284,6 +303,22 @@ struct BlockNavigatorView: View {
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
+                }
+                if let exitCode = row.block.exitCode {
+                    Text("·")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                    Text("exit \(exitCode)")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(exitCode == 0 ? Color.green.opacity(0.8) : Color.red.opacity(0.8))
+                }
+                if let dur = row.block.durationText {
+                    Text("·")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                    Text(dur)
+                        .font(.system(size: 9, design: .rounded))
+                        .foregroundStyle(.tertiary)
                 }
                 Spacer()
             }
@@ -315,6 +350,85 @@ struct BlockNavigatorView: View {
         .onTapGesture {
             selectedBlockID = (selectedBlockID == row.block.id) ? nil : row.block.id
         }
+        .onHover { inside in
+            hoveredBlockID = inside ? row.block.id : (hoveredBlockID == row.block.id ? nil : hoveredBlockID)
+        }
+        .id(row.block.id)
+    }
+
+    // MARK: - Hover Actions
+
+    @ViewBuilder
+    private func hoverActions(for row: BlockWithTab) -> some View {
+        let justCopied = recentlyCopied.contains(row.block.id)
+        HStack(spacing: 2) {
+            hoverButton(
+                symbol: justCopied ? "checkmark" : "doc.on.doc",
+                tint: justCopied ? .green : .secondary,
+                help: "Copy command"
+            ) {
+                copyToPasteboard(row.block.titleText, markID: row.block.id)
+            }
+            .disabled(row.block.command == nil)
+
+            hoverButton(
+                symbol: "text.alignleft",
+                tint: .secondary,
+                help: "Copy output"
+            ) {
+                if let snippet = row.block.primarySnippet {
+                    copyToPasteboard(snippet, markID: row.block.id)
+                }
+            }
+            .disabled(row.block.primarySnippet == nil)
+
+            hoverButton(
+                symbol: "arrow.clockwise",
+                tint: .accentColor,
+                help: "Rerun in current tab"
+            ) {
+                rerunInCurrentTab(row)
+            }
+            .disabled(currentTab == nil || row.block.command == nil)
+        }
+    }
+
+    private func hoverButton(
+        symbol: String,
+        tint: Color,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    private func copyToPasteboard(_ text: String, markID: UUID) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+        recentlyCopied.insert(markID)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            recentlyCopied.remove(markID)
+        }
+    }
+
+    private func rerunInCurrentTab(_ row: BlockWithTab) {
+        guard let tab = currentTab, let command = row.block.command else { return }
+        _ = TerminalControlBridge.shared.delegate?.runInPane(
+            tabID: tab.id,
+            paneID: nil,
+            text: command,
+            pressEnter: true
+        )
     }
 
     private func attachButton(
@@ -348,6 +462,20 @@ struct BlockNavigatorView: View {
     }
 
     // MARK: - Actions
+
+    /// Move `selectedBlockID` by `delta` within `displayedRows` (wraps).
+    /// Returns the new selected ID (for scroll-to), or nil if no rows.
+    private func moveSelection(by delta: Int) -> UUID? {
+        guard !displayedRows.isEmpty else { return nil }
+        let ids = displayedRows.map { $0.block.id }
+        if let current = selectedBlockID, let idx = ids.firstIndex(of: current) {
+            let next = (idx + delta + ids.count) % ids.count
+            selectedBlockID = ids[next]
+        } else {
+            selectedBlockID = delta >= 0 ? ids.first : ids.last
+        }
+        return selectedBlockID
+    }
 
     private func toggleAttach(_ row: BlockWithTab) {
         guard let tab = currentTab else { return }

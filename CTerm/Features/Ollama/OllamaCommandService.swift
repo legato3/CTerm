@@ -21,13 +21,13 @@ enum ComposeAssistantMode: String, CaseIterable, Identifiable, Sendable {
     var placeholderText: String {
         switch self {
         case .shell:
-            return "Type a shell command..."
+            return "Type a command  ·  / slash  ·  @ blocks  ·  # ask AI"
         case .ollamaCommand:
             return "Ask Ollama to suggest or check a terminal command..."
         case .ollamaAgent:
-            return "Describe the task for the local agent..."
+            return "Describe the task for the local agent...  ·  @ blocks  ·  / slash"
         case .claudeAgent:
-            return "Ask Agent (Claude Subscription) to build, fix, or explain something..."
+            return "Ask Agent to build, fix, or explain...  ·  @ blocks  ·  / slash"
         }
     }
 

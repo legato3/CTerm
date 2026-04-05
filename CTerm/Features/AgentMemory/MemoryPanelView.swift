@@ -67,9 +67,11 @@ struct MemoryPanelView: View {
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(filteredEntries) { entry in
-                            MemoryEntryRow(entry: entry) {
-                                deleteEntry(entry)
-                            }
+                            MemoryEntryRow(
+                                entry: entry,
+                                onDelete: { deleteEntry(entry) },
+                                onSave: { newValue in saveEntry(entry, newValue: newValue) }
+                            )
                         }
                     }
                     .padding(.horizontal, 8)
@@ -88,6 +90,22 @@ struct MemoryPanelView: View {
         AgentMemoryStore.shared.forget(projectKey: projectKey, key: entry.key)
         entries.removeAll { $0.id == entry.id }
     }
+
+    private func saveEntry(_ entry: MemoryEntry, newValue: String) {
+        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != entry.value else { return }
+        _ = AgentMemoryStore.shared.remember(
+            projectKey: projectKey,
+            key: entry.key,
+            value: trimmed,
+            ttlDays: nil,
+            category: entry.category,
+            importance: entry.importance,
+            confidence: entry.confidence,
+            source: .userProvided
+        )
+        refresh()
+    }
 }
 
 // MARK: - Entry Row
@@ -95,8 +113,12 @@ struct MemoryPanelView: View {
 private struct MemoryEntryRow: View {
     let entry: MemoryEntry
     let onDelete: () -> Void
+    let onSave: (String) -> Void
 
     @State private var isHovering = false
+    @State private var isEditing = false
+    @State private var draftValue: String = ""
+    @FocusState private var editorFocused: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -110,10 +132,21 @@ private struct MemoryEntryRow: View {
                 Text(entry.key)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .lineLimit(1)
-                Text(entry.value)
-                    .font(.system(size: 10, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
+                if isEditing {
+                    TextField("", text: $draftValue, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 10, design: .rounded))
+                        .lineLimit(1...4)
+                        .focused($editorFocused)
+                        .onSubmit { commit() }
+                        .onExitCommand { cancel() }
+                } else {
+                    Text(entry.value)
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .onTapGesture(count: 2) { beginEditing() }
+                }
                 HStack(spacing: 8) {
                     Text(entry.age)
                         .font(.system(size: 9, design: .rounded))
@@ -134,13 +167,40 @@ private struct MemoryEntryRow: View {
 
             Spacer()
 
-            if isHovering {
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.red.opacity(0.7))
+            if isEditing {
+                HStack(spacing: 4) {
+                    Button(action: { cancel() }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Cancel (Esc)")
+                    Button(action: { commit() }) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.green)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Save (Return)")
                 }
-                .buttonStyle(.plain)
+            } else if isHovering {
+                HStack(spacing: 4) {
+                    Button(action: beginEditing) {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Edit")
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.red.opacity(0.7))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Delete")
+                }
             }
         }
         .padding(.horizontal, 8)
@@ -150,6 +210,26 @@ private struct MemoryEntryRow: View {
                 .fill(isHovering ? Color.white.opacity(0.04) : Color.clear)
         )
         .onHover { isHovering = $0 }
+    }
+
+    private func beginEditing() {
+        draftValue = entry.value
+        isEditing = true
+        // Defer focus to after the TextField mounts.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            editorFocused = true
+        }
+    }
+
+    private func commit() {
+        onSave(draftValue)
+        isEditing = false
+    }
+
+    private func cancel() {
+        draftValue = entry.value
+        isEditing = false
     }
 
     private var categoryIcon: String {

@@ -374,10 +374,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let paletteItem = NSMenuItem(
             title: "Command Palette",
             action: #selector(CTermWindowController.toggleCommandPalette),
+            keyEquivalent: "k"
+        )
+        paletteItem.keyEquivalentModifierMask = [.command]
+        viewMenu.addItem(paletteItem)
+
+        // Hidden alternate: preserve legacy ⌘⇧P binding.
+        let paletteAltItem = NSMenuItem(
+            title: "Command Palette (Alt)",
+            action: #selector(CTermWindowController.toggleCommandPalette),
             keyEquivalent: "p"
         )
-        paletteItem.keyEquivalentModifierMask = [.command, .shift]
-        viewMenu.addItem(paletteItem)
+        paletteAltItem.keyEquivalentModifierMask = [.command, .shift]
+        paletteAltItem.isHidden = true
+        paletteAltItem.allowsKeyEquivalentWhenHidden = true
+        viewMenu.addItem(paletteAltItem)
 
         // Window menu
         let windowMenuItem = NSMenuItem()
