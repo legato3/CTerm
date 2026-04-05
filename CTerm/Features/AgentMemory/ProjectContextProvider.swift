@@ -4,26 +4,40 @@
 // Gathers live project context for ambient injection into new agent sessions.
 // All operations are synchronous and fast (<50ms typical) — safe to call from
 // background MCP handler threads.
+//
+// Context budgeting: total output is capped to avoid bloating agent prompts.
+// Memories are filtered by relevance, not dumped wholesale.
 
 import Foundation
 
 enum ProjectContextProvider {
 
+    // MARK: - Budget Constants
+
+    /// Max total characters for the formatted context block.
+    private static let totalBudget = 6000
+    /// Max characters allocated to CLAUDE.md content.
+    private static let claudeMdBudget = 2000
+    /// Max characters allocated to memories.
+    private static let memoryBudget = 1500
+    /// Max number of memories to include.
+    private static let maxMemories = 15
+
     // MARK: - Public API
 
     /// Build a context dictionary for the given working directory.
-    /// Includes: CLAUDE.md, git branch, recent commits, dirty files,
-    /// agent memories, failing tests, and active peers.
-    static func gather(workDir: String) -> [String: Any] {
+    /// Includes: CLAUDE.md (budgeted), git branch, recent commits, dirty files,
+    /// relevant agent memories (scored), failing tests, and active peers.
+    static func gather(workDir: String, intent: String? = nil) -> [String: Any] {
         let gitRoot = gitOutput(["-C", workDir, "rev-parse", "--show-toplevel"], in: workDir)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         let root = gitRoot ?? workDir
 
         var ctx: [String: Any] = ["cwd": workDir]
 
-        // CLAUDE.md — look at git root first, then cwd
+        // CLAUDE.md — look at git root first, then cwd. Budget-trimmed.
         if let md = readFile(atPath: "\(root)/CLAUDE.md") ?? readFile(atPath: "\(workDir)/CLAUDE.md") {
-            ctx["claude_md"] = md
+            ctx["claude_md"] = budgetClaudeMd(md)
         }
 
         // Git metadata
@@ -46,21 +60,45 @@ enum ProjectContextProvider {
         let dirty = Array(Set(staged + unstaged)).sorted()
         if !dirty.isEmpty { ctx["dirty_files"] = dirty }
 
-        // Agent memories for this project
+        // Agent memories — relevance-filtered, not a full dump
         let projectKey = AgentMemoryStore.key(for: workDir)
-        let memories = AgentMemoryStore.shared.listAll(projectKey: projectKey)
+        let memories: [MemoryEntry]
+        if let intent, !intent.isEmpty {
+            memories = AgentMemoryStore.shared.relevantMemories(
+                projectKey: projectKey,
+                intent: intent,
+                limit: Self.maxMemories
+            )
+        } else {
+            // No intent — return highest-scoring memories across all categories
+            memories = AgentMemoryStore.shared.relevantMemories(
+                projectKey: projectKey,
+                intent: "",
+                limit: Self.maxMemories
+            )
+        }
         if !memories.isEmpty {
-            ctx["memories"] = memories.map { ["key": $0.key, "value": $0.value] }
+            ctx["memories"] = budgetMemories(memories)
         }
 
-        // Failing tests (main-actor read). MCP handler runs on main; use assumeIsolated
-        // to avoid deadlocking with DispatchQueue.main.sync from the main thread itself.
+        // Memory stats for awareness
+        let stats = AgentMemoryStore.shared.stats(projectKey: projectKey)
+        if stats.totalCount > 0 {
+            ctx["memory_stats"] = [
+                "total": stats.totalCount,
+                "hint": stats.totalCount > Self.maxMemories
+                    ? "Showing top \(min(memories.count, Self.maxMemories)) of \(stats.totalCount) memories. Use recall() with a query to find specific facts."
+                    : "All memories shown."
+            ]
+        }
+
+        // Failing tests (main-actor read)
         let failureNames: [String] = MainActor.assumeIsolated {
             TestRunnerStore.shared.failures.map(\.name)
         }
         if !failureNames.isEmpty { ctx["failing_tests"] = failureNames }
 
-        // Active peers (main-actor read via IPCAgentState mirror).
+        // Active peers (main-actor read via IPCAgentState mirror)
         let peerPairs: [[String: String]] = MainActor.assumeIsolated {
             IPCAgentState.shared.peers.map { ["name": $0.name, "role": $0.role] }
         }
@@ -72,8 +110,9 @@ enum ProjectContextProvider {
     // MARK: - Formatted prompt block
 
     /// Returns a human-readable context block suitable for prepending to a prompt.
-    static func formattedBlock(for workDir: String) -> String {
-        let ctx = gather(workDir: workDir)
+    /// Respects the total budget to avoid bloating agent context windows.
+    static func formattedBlock(for workDir: String, intent: String? = nil) -> String {
+        let ctx = gather(workDir: workDir, intent: intent)
         var lines: [String] = ["<cterm_project_context>"]
 
         if let cwd = ctx["cwd"] as? String { lines.append("cwd: \(cwd)") }
@@ -90,11 +129,18 @@ enum ProjectContextProvider {
 
         if let memories = ctx["memories"] as? [[String: Any]], !memories.isEmpty {
             lines.append("memories:")
-            memories.forEach { m in
+            for m in memories {
                 if let k = m["key"] as? String, let v = m["value"] as? String {
-                    lines.append("  \(k): \(v)")
+                    let cat = (m["category"] as? String).map { " [\($0)]" } ?? ""
+                    let score = (m["score"] as? String).map { " (score: \($0))" } ?? ""
+                    lines.append("  \(k)\(cat)\(score): \(v)")
                 }
             }
+        }
+
+        if let stats = ctx["memory_stats"] as? [String: Any],
+           let hint = stats["hint"] as? String {
+            lines.append("memory_hint: \(hint)")
         }
 
         if let tests = ctx["failing_tests"] as? [String], !tests.isEmpty {
@@ -106,14 +152,84 @@ enum ProjectContextProvider {
         }
 
         if let md = ctx["claude_md"] as? String {
-            // Truncate CLAUDE.md to first 1500 chars to avoid bloating the context
-            let truncated = md.count > 1500 ? String(md.prefix(1500)) + "\n[...truncated]" : md
             lines.append("claude_md: |")
-            truncated.components(separatedBy: "\n").forEach { lines.append("  \($0)") }
+            md.components(separatedBy: "\n").forEach { lines.append("  \($0)") }
         }
 
         lines.append("</cterm_project_context>")
-        return lines.joined(separator: "\n")
+
+        let result = lines.joined(separator: "\n")
+
+        // Final safety trim if somehow over total budget
+        if result.count > Self.totalBudget {
+            return String(result.prefix(Self.totalBudget)) + "\n[...context trimmed to fit budget]"
+        }
+        return result
+    }
+
+    // MARK: - Budget Helpers
+
+    /// Trim CLAUDE.md intelligently: keep the first section (usually project overview),
+    /// then key sections like "Build", "Test", "Architecture". Drop the rest.
+    private static func budgetClaudeMd(_ content: String) -> String {
+        guard content.count > claudeMdBudget else { return content }
+
+        let lines = content.components(separatedBy: "\n")
+        var kept: [String] = []
+        var charCount = 0
+        var inImportantSection = true // first section is always important
+
+        let importantHeaders = ["build", "test", "architecture", "setup", "install", "run", "deploy", "convention"]
+
+        for line in lines {
+            // Detect markdown headers
+            if line.hasPrefix("#") {
+                let headerText = line.lowercased()
+                    .trimmingCharacters(in: .whitespaces)
+                    .replacingOccurrences(of: "#", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+                inImportantSection = importantHeaders.contains { headerText.contains($0) }
+            }
+
+            if inImportantSection {
+                let lineLen = line.count + 1
+                if charCount + lineLen > claudeMdBudget {
+                    kept.append("[...truncated]")
+                    break
+                }
+                kept.append(line)
+                charCount += lineLen
+            }
+        }
+
+        return kept.joined(separator: "\n")
+    }
+
+    /// Format memories for context injection, respecting the memory budget.
+    private static func budgetMemories(_ memories: [MemoryEntry]) -> [[String: Any]] {
+        var result: [[String: Any]] = []
+        var charCount = 0
+
+        for entry in memories {
+            let valueLen = entry.key.count + entry.value.count + 30 // overhead for dict keys
+            if charCount + valueLen > memoryBudget { break }
+
+            var item: [String: Any] = [
+                "key": entry.key,
+                "value": entry.value.count > 200 ? String(entry.value.prefix(200)) + "…" : entry.value,
+                "category": entry.category.rawValue,
+                "score": String(format: "%.2f", entry.relevanceScore),
+            ]
+            if let exp = entry.expiresAt {
+                let iso = ISO8601DateFormatter()
+                iso.formatOptions = [.withInternetDateTime]
+                item["expires_at"] = iso.string(from: exp)
+            }
+            result.append(item)
+            charCount += valueLen
+        }
+
+        return result
     }
 
     // MARK: - Helpers

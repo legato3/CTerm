@@ -161,10 +161,18 @@ private struct MemoryRowView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(entry.key)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(entry.key)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(entry.category.rawValue)
+                        .font(.system(size: 8, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                }
                 Text(entry.value)
                     .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(.secondary)
@@ -172,6 +180,9 @@ private struct MemoryRowView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 6) {
                     Text(entry.age)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                    Text("· score \(String(format: "%.2f", entry.relevanceScore))")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.tertiary)
                     if let exp = entry.expiresAt {

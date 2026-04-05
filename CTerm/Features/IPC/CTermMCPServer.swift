@@ -337,6 +337,9 @@ final class CTermMCPServer {
         case "list_memories":
             return handleListMemories(id: id, arguments: arguments)
 
+        case "compact_memories":
+            return handleCompactMemories(id: id, arguments: arguments)
+
         case "get_project_context":
             return handleGetProjectContext(id: id, arguments: arguments)
 
@@ -813,17 +816,30 @@ final class CTermMCPServer {
         let key = namespacedKey(rawKey, namespace: namespace)
         let projectKey = resolvedProjectKey(workDir: workDir)
 
+        // Parse category (defaults to projectFact)
+        let category: MemoryCategory = arguments?["category"]?.stringValue
+            .flatMap { MemoryCategory(rawValue: $0) } ?? .projectFact
+        let importance = (arguments?["importance"]?.rawValue as? Double) ?? category.baseImportance
+        let confidence = (arguments?["confidence"]?.rawValue as? Double) ?? 0.8
+
         let entry = AgentMemoryStore.shared.remember(
             projectKey: projectKey,
             key: key,
             value: value,
-            ttlDays: ttlDays
+            ttlDays: ttlDays ?? category.defaultTTLDays,
+            category: category,
+            importance: importance,
+            confidence: confidence,
+            source: .agentExplicit
         )
         NotificationCenter.default.post(name: .agentMemoryChanged, object: nil)
 
         let result: [String: Any] = [
             "stored": true,
             "key": entry.key,
+            "category": entry.category.rawValue,
+            "importance": entry.importance,
+            "relevance_score": entry.relevanceScore,
             "project_key": projectKey,
             "expires_at": entry.expiresAt.map { Self.iso8601.string(from: $0) } as Any,
         ]
@@ -838,16 +854,28 @@ final class CTermMCPServer {
         let query = arguments?["query"]?.stringValue ?? ""
         let workDir = arguments?["work_dir"]?.stringValue
         let namespace = arguments?["namespace"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+        let categoryFilter = arguments?["category"]?.stringValue.flatMap { MemoryCategory(rawValue: $0) }
         let projectKey = resolvedProjectKey(workDir: workDir)
 
-        var entries = AgentMemoryStore.shared.recall(projectKey: projectKey, query: query)
+        var entries = AgentMemoryStore.shared.recall(
+            projectKey: projectKey,
+            query: query,
+            category: categoryFilter
+        )
         // When a namespace is set, only return keys within that namespace prefix.
         if let ns = namespace {
             let prefix = ns + "/"
             entries = entries.filter { $0.key.hasPrefix(prefix) }
         }
         let list = entries.map { e -> [String: Any] in
-            var item: [String: Any] = ["key": e.key, "value": e.value, "age": e.age]
+            var item: [String: Any] = [
+                "key": e.key,
+                "value": e.value,
+                "age": e.age,
+                "category": e.category.rawValue,
+                "importance": e.importance,
+                "relevance_score": e.relevanceScore,
+            ]
             if let exp = e.expiresAt { item["expires_at"] = Self.iso8601.string(from: exp) }
             return item
         }
@@ -881,20 +909,50 @@ final class CTermMCPServer {
     private func handleListMemories(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
         let workDir = arguments?["work_dir"]?.stringValue
         let namespace = arguments?["namespace"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+        let categoryFilter = arguments?["category"]?.stringValue.flatMap { MemoryCategory(rawValue: $0) }
         let projectKey = resolvedProjectKey(workDir: workDir)
 
         var entries = AgentMemoryStore.shared.listAll(projectKey: projectKey)
-        // When a namespace is set, only return keys within that namespace prefix.
+        // Filter by namespace
         if let ns = namespace {
             let prefix = ns + "/"
             entries = entries.filter { $0.key.hasPrefix(prefix) }
         }
+        // Filter by category
+        if let cat = categoryFilter {
+            entries = entries.filter { $0.category == cat }
+        }
         let list = entries.map { e -> [String: Any] in
-            var item: [String: Any] = ["key": e.key, "value": e.value, "age": e.age, "updated_at": Self.iso8601.string(from: e.updatedAt)]
+            var item: [String: Any] = [
+                "key": e.key,
+                "value": e.value,
+                "age": e.age,
+                "category": e.category.rawValue,
+                "importance": e.importance,
+                "confidence": e.confidence,
+                "relevance_score": e.relevanceScore,
+                "access_count": e.accessCount,
+                "source": e.source.rawValue,
+                "updated_at": Self.iso8601.string(from: e.updatedAt),
+            ]
             if let exp = e.expiresAt { item["expires_at"] = Self.iso8601.string(from: exp) }
             return item
         }
-        let result: [String: Any] = ["project_key": projectKey, "count": list.count, "memories": list]
+
+        // Include stats
+        let stats = AgentMemoryStore.shared.stats(projectKey: projectKey)
+        let statDict: [String: Any] = [
+            "total": stats.totalCount,
+            "avg_relevance_score": stats.averageRelevanceScore,
+            "by_category": Dictionary(uniqueKeysWithValues: stats.byCategory.map { ($0.key.rawValue, $0.value) }),
+        ]
+
+        let result: [String: Any] = [
+            "project_key": projectKey,
+            "count": list.count,
+            "memories": list,
+            "stats": statDict,
+        ]
         guard let data = try? JSONSerialization.data(withJSONObject: result),
               let text = String(data: data, encoding: .utf8) else {
             return toolSuccess(id: id, text: "{\"count\":0,\"memories\":[]}")
@@ -905,6 +963,27 @@ final class CTermMCPServer {
     /// Derives the project key from a work_dir string (or falls back to the active tab's pwd).
     private func resolvedProjectKey(workDir: String?) -> String {
         AgentMemoryStore.key(for: workDir ?? resolvedWorkDir())
+    }
+
+    private func handleCompactMemories(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
+        let workDir = arguments?["work_dir"]?.stringValue
+        let projectKey = resolvedProjectKey(workDir: workDir)
+
+        let beforeStats = AgentMemoryStore.shared.stats(projectKey: projectKey)
+        AgentMemoryStore.shared.compact(projectKey: projectKey)
+        let afterStats = AgentMemoryStore.shared.stats(projectKey: projectKey)
+
+        let result: [String: Any] = [
+            "compacted": true,
+            "before_count": beforeStats.totalCount,
+            "after_count": afterStats.totalCount,
+            "pruned": beforeStats.totalCount - afterStats.totalCount,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: result),
+              let text = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{\"compacted\":true}")
+        }
+        return toolSuccess(id: id, text: text)
     }
 
     /// Applies an optional namespace prefix to a memory key.
@@ -1066,7 +1145,8 @@ final class CTermMCPServer {
 
     private func handleGetProjectContext(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
         let workDir = arguments?["work_dir"]?.stringValue ?? resolvedWorkDir()
-        let ctx = ProjectContextProvider.gather(workDir: workDir)
+        let intent = arguments?["intent"]?.stringValue
+        let ctx = ProjectContextProvider.gather(workDir: workDir, intent: intent)
         guard let data = try? JSONSerialization.data(withJSONObject: ctx),
               let text = String(data: data, encoding: .utf8) else {
             return toolSuccess(id: id, text: "{\"cwd\":\"\(workDir)\"}")

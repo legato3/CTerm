@@ -69,6 +69,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         startIPCIfNeeded()
         NSApp.servicesProvider = self
 
+        // Prune stale memories across all projects on launch
+        AgentMemoryStore.shared.pruneAll()
+
         let isUITesting = ProcessInfo.processInfo.arguments.contains("--uitesting")
         if isUITesting || !restoreSession() {
             if pendingURLs.isEmpty {
@@ -108,6 +111,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Extract durable facts from the session before quitting.
+        // Uses the active tab's pwd to derive the project key.
+        if let pwd = windowControllers.first?.activeTabPwd {
+            let projectKey = AgentMemoryStore.key(for: pwd)
+            SessionFactExtractor.extractFromCurrentSession(projectKey: projectKey)
+            AgentMemoryStore.shared.compact(projectKey: projectKey)
+        }
+
         // Last-window close path already persists synchronously in windowWillClose.
         // Avoid overwriting with an empty snapshot during app teardown.
         if windowControllers.isEmpty || appSession.windows.isEmpty {

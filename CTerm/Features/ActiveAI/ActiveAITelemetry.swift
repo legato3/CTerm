@@ -39,7 +39,8 @@ struct ActiveAITelemetryEntry: Codable, Sendable {
 
 enum ActiveAITelemetry {
     private static let maxLineLength = 500
-    private static var fileHandle: FileHandle?
+    // All reads/writes go through `queue` — externally synchronized.
+    nonisolated(unsafe) private static var fileHandle: FileHandle?
     private static let queue = DispatchQueue(label: "com.legato3.cterm.activeai-telemetry")
 
     /// Log a telemetry event. No-op if telemetry is disabled.

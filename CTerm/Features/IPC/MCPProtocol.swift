@@ -540,26 +540,41 @@ struct MCPRouter: Sendable {
             ),
             MCPTool(
                 name: "remember",
-                description: "Store a persistent project-scoped fact in CTerm's agent memory. Facts survive across sessions and are accessible to any agent in the same project (same git repo). Use this for architecture decisions, conventions, warnings, commands, or anything worth remembering between sessions.",
+                description: """
+                    Store a persistent project-scoped fact in CTerm's agent memory. Facts survive across sessions \
+                    and are accessible to any agent in the same project (same git repo). Use this for architecture \
+                    decisions, conventions, warnings, commands, or anything worth remembering between sessions. \
+                    Memories are scored by importance, recency, confidence, and access frequency — low-value \
+                    memories are automatically pruned. Be skeptical: only store durable, actionable facts. \
+                    Do NOT store: ephemeral command output, file contents, timestamps, greetings, or obvious info.
+                    """,
                 inputSchema: schema(
                     properties: [
-                        "key": prop("string", "Short identifier for this fact, e.g. 'auth-system', 'test-command', 'avoid'"),
-                        "value": prop("string", "The fact to remember. Can be multi-sentence."),
-                        "ttl_days": prop("integer", "Optional: delete this memory after N days. Omit for permanent storage."),
+                        "key": prop("string", "Short identifier for this fact, e.g. 'auth-system', 'test-command', 'avoid-force-unwrap'"),
+                        "value": prop("string", "The fact to remember. Can be multi-sentence but keep it concise."),
+                        "category": prop("string", "Memory type: projectFact, userPreference, recurringCommand, knownBroken, importantPath, buildConfig, handoff. Defaults to projectFact."),
+                        "importance": prop("number", "0.0–1.0 importance score. Higher = harder to prune. Defaults to the category's base importance."),
+                        "confidence": prop("number", "0.0–1.0 confidence that this fact is correct. Defaults to 0.8."),
+                        "ttl_days": prop("integer", "Optional: delete this memory after N days. Omit for permanent storage (or category default)."),
                         "work_dir": prop("string", "Working directory to scope the memory to. Defaults to the active tab's directory."),
-                        "namespace": prop("string", "Optional namespace prefix for key isolation. Use your peer name (e.g. 'orchestrator') to avoid key collisions with other agents. Keys are stored as '<namespace>/<key>' internally."),
+                        "namespace": prop("string", "Optional namespace prefix for key isolation. Use your peer name (e.g. 'orchestrator') to avoid key collisions with other agents."),
                     ],
                     required: ["key", "value"]
                 )
             ),
             MCPTool(
                 name: "recall",
-                description: "Search project-scoped agent memory for facts matching a query. Returns all memories whose key or value contains the query string. Call with an empty query to list all memories.",
+                description: """
+                    Search project-scoped agent memory for facts matching a query. Returns memories sorted by \
+                    relevance score (combining importance, recency, confidence, and access frequency). \
+                    Optionally filter by category. Call with an empty query to list all memories ranked by relevance.
+                    """,
                 inputSchema: schema(
                     properties: [
                         "query": prop("string", "Search string. Matches keys and values (case-insensitive). Empty string returns all."),
+                        "category": prop("string", "Optional category filter: projectFact, userPreference, recurringCommand, knownBroken, importantPath, buildConfig, handoff."),
                         "work_dir": prop("string", "Working directory to scope the search. Defaults to the active tab's directory."),
-                        "namespace": prop("string", "Optional namespace prefix for key isolation. Use your peer name (e.g. 'orchestrator') to avoid key collisions with other agents. Keys are stored as '<namespace>/<key>' internally."),
+                        "namespace": prop("string", "Optional namespace prefix for key isolation."),
                     ],
                     required: ["query"]
                 )
@@ -571,32 +586,51 @@ struct MCPRouter: Sendable {
                     properties: [
                         "key": prop("string", "The key of the memory to delete."),
                         "work_dir": prop("string", "Working directory to scope the deletion. Defaults to the active tab's directory."),
-                        "namespace": prop("string", "Optional namespace prefix for key isolation. Use your peer name (e.g. 'orchestrator') to avoid key collisions with other agents. Keys are stored as '<namespace>/<key>' internally."),
+                        "namespace": prop("string", "Optional namespace prefix for key isolation."),
                     ],
                     required: ["key"]
                 )
             ),
             MCPTool(
                 name: "list_memories",
-                description: "List all persistent agent memories for this project, sorted by most recently updated. Returns key, value, age, and optional expiry for each entry.",
+                description: """
+                    List all persistent agent memories for this project with full metadata: key, value, category, \
+                    importance, confidence, relevance score, access count, source, and age. Includes aggregate stats \
+                    (total count, average score, breakdown by category). Optionally filter by category.
+                    """,
                 inputSchema: schema(
                     properties: [
                         "work_dir": prop("string", "Working directory to scope the list. Defaults to the active tab's directory."),
-                        "namespace": prop("string", "Optional namespace prefix for key isolation. Use your peer name (e.g. 'orchestrator') to avoid key collisions with other agents. Keys are stored as '<namespace>/<key>' internally."),
+                        "namespace": prop("string", "Optional namespace prefix for key isolation."),
+                        "category": prop("string", "Optional category filter: projectFact, userPreference, recurringCommand, knownBroken, importantPath, buildConfig, handoff."),
+                    ]
+                )
+            ),
+            MCPTool(
+                name: "compact_memories",
+                description: """
+                    Trigger memory compaction: removes expired entries and prunes the lowest-scoring memories \
+                    to keep the store lean. Normally runs automatically when the store exceeds 200 entries, \
+                    but call this manually if you want to clean up after bulk operations.
+                    """,
+                inputSchema: schema(
+                    properties: [
+                        "work_dir": prop("string", "Working directory to scope the compaction. Defaults to the active tab's directory."),
                     ]
                 )
             ),
             MCPTool(
                 name: "get_project_context",
                 description: """
-                    Get live project context for the current working directory: CLAUDE.md content, \
-                    current git branch, last 5 commits, dirty files, agent memories, failing tests, \
-                    and active peers. Call this at the start of a session to orient yourself without \
-                    asking the user to re-explain the project.
+                    Get live project context for the current working directory: CLAUDE.md content (budget-trimmed), \
+                    current git branch, last 5 commits, dirty files, relevant agent memories (scored and filtered), \
+                    failing tests, and active peers. Pass an 'intent' to get memories most relevant to your current \
+                    task. Context is automatically budgeted to avoid bloating your prompt window.
                     """,
                 inputSchema: schema(
                     properties: [
                         "work_dir": prop("string", "Working directory to gather context for. Defaults to the active tab's directory."),
+                        "intent": prop("string", "Optional: describe what you're about to work on (e.g. 'fix auth token refresh'). Memories relevant to this intent are prioritized."),
                     ]
                 )
             ),
