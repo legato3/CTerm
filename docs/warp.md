@@ -1,3 +1,24 @@
+## Implementation status
+
+All 10 workstreams below are shipped. Commits:
+
+| # | Workstream | Commit |
+|---|---|---|
+| 1 | Unified AgentSession model | `af5cade` |
+| 2 | Risk-aware approvals + scoped grants + hard-stop guard | `20c72c3` |
+| 3 | Agent run panel as primary surface | `56713dc` |
+| 4 | Task-graph-lite planning (per-step kind + will-ask + inline approve) | `68ff4c3` |
+| 5 | Smart shell-adjacent agent entry (Return routes by intent) | `088bf05` |
+| 6 | Browser research as first-class tool (findings cards + save) | `9e977b0` |
+| 7 + 8 | Activity strip + trigger provenance | `9989da1` |
+| 9 + 10 | Structured completion + ambient memory surfacing | `32c2703` |
+
+See `CLAUDE.md` → **Agent subsystem** for the architecture that resulted.
+
+Original brainstorm below — kept for reference.
+
+---
+
 1. Make one agent session model rule everything
 
 Right now you have enough pieces to build the real thing, but I suspect state is still split across different subsystems. Warp feels cohesive because the user always sees one active job, one plan, one current step, one approval state, and one result stream.
