@@ -86,6 +86,11 @@ enum RiskScorer {
     static func categorize(_ lower: String) -> AgentActionCategory {
         let firstToken = lower.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
 
+        // Browser automation commands
+        if lower.hasPrefix("browse:") || lower.hasPrefix("browser:") || lower.hasPrefix("open http") {
+            return .browserAutomation
+        }
+
         if ["rm", "rmdir", "trash"].contains(firstToken) { return .deleteFiles }
 
         let gitMutating = ["git commit", "git push", "git merge", "git rebase",
@@ -136,6 +141,16 @@ enum RiskScorer {
             return [RiskFactor(kind: .gitMutation, weight: 40, reason: "Git mutation")]
         case .deleteFiles:
             return [RiskFactor(kind: .destructiveFlag, weight: 50, reason: "File deletion")]
+        case .browserAutomation:
+            // Read-only browser ops (snapshot, get_text) are low risk;
+            // interactive ops (click, fill, eval) are medium
+            let interactive = ["click", "fill", "type", "press", "check", "eval", "select"]
+            let isInteractive = interactive.contains { lower.contains($0) }
+            return [RiskFactor(
+                kind: .networkExposure,
+                weight: isInteractive ? 25 : 10,
+                reason: isInteractive ? "Interactive browser automation" : "Read-only browser automation"
+            )]
         }
     }
 

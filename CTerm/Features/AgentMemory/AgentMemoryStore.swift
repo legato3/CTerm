@@ -134,6 +134,7 @@ enum MemorySource: String, Codable, Sendable {
     case agentExplicit     // agent called remember() directly
     case autoExtracted     // extracted from session audit automatically
     case userProvided      // user explicitly told the agent to remember
+    case browserResearch   // extracted from browser research workflow
 }
 
 // MARK: - Store

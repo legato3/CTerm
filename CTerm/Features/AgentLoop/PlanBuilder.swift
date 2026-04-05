@@ -53,6 +53,9 @@ enum PlanBuilder {
 
         case .delegateToPeer:
             steps = buildDelegatePlan(session.userIntent)
+
+        case .browserResearch:
+            steps = await buildBrowserResearchPlan(session.userIntent, pwd: pwd)
         }
 
         session.planSteps = steps
@@ -175,5 +178,113 @@ enum PlanBuilder {
             AgentPlanStep(title: "Wait for peer response"),
             AgentPlanStep(title: "Review peer output"),
         ]
+    }
+
+    // MARK: - Browser Research Plans
+
+    private static func buildBrowserResearchPlan(_ input: String, pwd: String?) async -> [AgentPlanStep] {
+        // Try LLM-generated plan first
+        let llmSteps = await buildBrowserResearchPlanStreaming(input, pwd: pwd)
+        if !llmSteps.isEmpty { return llmSteps }
+
+        // Fallback: heuristic plan based on keywords
+        return buildBrowserResearchPlanFallback(input)
+    }
+
+    private static func buildBrowserResearchPlanStreaming(_ input: String, pwd: String?) async -> [AgentPlanStep] {
+        let prompt = """
+        Generate a short browser research plan (2-5 steps) for this task.
+        Each step must use browser automation commands.
+
+        Format each step as: "STEP: <title> | CMD: <browser command>"
+
+        Available browser commands:
+        - browse:<url>                    — open a URL
+        - browser:get_text {"selector":"<css>"}  — extract text from element
+        - browser:get_links {}            — get all links on page
+        - browser:snapshot {}             — get page structure
+        - browser:click {"selector":"<css>"}     — click an element
+        - browser:fill {"selector":"<css>","value":"<text>"} — fill a form field
+        - browser:navigate {"url":"<url>"}       — navigate to URL
+        - browser:wait {"selector":"<css>"}      — wait for element
+
+        Task: \(input.prefix(500))
+
+        Steps:
+        """
+
+        do {
+            let response = try await OllamaCommandService.generateCommand(for: prompt, pwd: pwd)
+            let steps = parseBrowserPlanResponse(response)
+            if !steps.isEmpty { return steps }
+        } catch {
+            logger.debug("PlanBuilder: browser research LLM plan failed: \(error.localizedDescription)")
+        }
+        return []
+    }
+
+    private static func buildBrowserResearchPlanFallback(_ input: String) -> [AgentPlanStep] {
+        let lower = input.lowercased()
+        var steps: [AgentPlanStep] = []
+
+        // Detect URL in input
+        if let url = extractURL(from: input) {
+            steps.append(AgentPlanStep(title: "Open target page", command: "browse:\(url)"))
+            steps.append(AgentPlanStep(title: "Capture page snapshot", command: "browser:snapshot {}"))
+            steps.append(AgentPlanStep(title: "Extract relevant content", command: "browser:get_text {\"selector\":\"main, article, .content, body\"}"))
+        } else if lower.contains("release notes") || lower.contains("changelog") {
+            steps.append(AgentPlanStep(title: "Search for release notes"))
+            steps.append(AgentPlanStep(title: "Open release page", command: "browse:https://github.com"))
+            steps.append(AgentPlanStep(title: "Extract release content", command: "browser:get_text {\"selector\":\".markdown-body, main, article\"}"))
+        } else if lower.contains("docs") || lower.contains("documentation") || lower.contains("api") {
+            steps.append(AgentPlanStep(title: "Open documentation site"))
+            steps.append(AgentPlanStep(title: "Navigate to relevant section"))
+            steps.append(AgentPlanStep(title: "Extract documentation", command: "browser:get_text {\"selector\":\"main, article, .content\"}"))
+        } else if lower.contains("dashboard") || lower.contains("web form") || lower.contains("inspect") {
+            steps.append(AgentPlanStep(title: "Open target page"))
+            steps.append(AgentPlanStep(title: "Capture page snapshot", command: "browser:snapshot {}"))
+            steps.append(AgentPlanStep(title: "Extract form inputs", command: "browser:get_inputs {}"))
+            steps.append(AgentPlanStep(title: "Extract visible content", command: "browser:get_text {\"selector\":\"body\"}"))
+        } else {
+            // Generic research
+            steps.append(AgentPlanStep(title: "Open research target"))
+            steps.append(AgentPlanStep(title: "Capture page structure", command: "browser:snapshot {}"))
+            steps.append(AgentPlanStep(title: "Extract findings", command: "browser:get_text {\"selector\":\"main, article, body\"}"))
+        }
+
+        // Always end with a summarize step
+        steps.append(AgentPlanStep(title: "Summarize findings"))
+        return steps
+    }
+
+    private static func parseBrowserPlanResponse(_ response: String) -> [AgentPlanStep] {
+        let lines = response.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var steps: [AgentPlanStep] = []
+        for line in lines {
+            if line.uppercased().hasPrefix("STEP:") {
+                let content = String(line.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
+                let parts = content.components(separatedBy: " | CMD:")
+                let title = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                let command = parts.count > 1
+                    ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+                    : nil
+                let cmd = (command?.isEmpty == true || command == "empty") ? nil : command
+                steps.append(AgentPlanStep(title: title, command: cmd))
+            }
+        }
+        return steps
+    }
+
+    private static func extractURL(from input: String) -> String? {
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        let range = NSRange(input.startIndex..., in: input)
+        if let match = detector?.firstMatch(in: input, range: range),
+           let url = match.url {
+            return url.absoluteString
+        }
+        return nil
     }
 }

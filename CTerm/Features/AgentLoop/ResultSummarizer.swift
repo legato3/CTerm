@@ -60,6 +60,21 @@ enum ResultSummarizer {
         // Intent
         parts.append("Goal: \(session.displayIntent.prefix(80))")
 
+        // Browser research specific summary
+        if session.classifiedIntent == .browserResearch {
+            let browserOutputs = session.artifacts
+                .filter { $0.kind == .commandOutput && $0.value.hasPrefix("Browser") }
+            let findingCount = session.artifacts
+                .filter { $0.value.hasPrefix("Browser finding:") || $0.value.hasPrefix("Research summary:") }
+                .count
+            if findingCount > 0 {
+                parts.append("\(findingCount) browser finding(s) captured")
+            }
+            if !browserOutputs.isEmpty {
+                parts.append("Browsed \(browserOutputs.count) page(s)")
+            }
+        }
+
         // Step results
         if total > 0 {
             var stepSummary = "\(succeeded)/\(total) steps succeeded"
@@ -111,6 +126,12 @@ enum ResultSummarizer {
                 actions.append("Review changes and commit")
             case .inspectRepo:
                 actions.append("Dig deeper into findings")
+            case .browserResearch:
+                actions.append("Apply findings to codebase")
+                let hasFindings = session.artifacts.contains { $0.value.hasPrefix("Research summary:") }
+                if hasFindings {
+                    actions.append("Research a related topic")
+                }
             default:
                 break
             }

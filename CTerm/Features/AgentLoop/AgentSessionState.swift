@@ -76,6 +76,7 @@ struct AgentArtifact: Identifiable, Sendable {
         case memoryWritten
         case peerMessage
         case diffGenerated
+        case browserFinding
     }
 
     init(kind: Kind, value: String) {

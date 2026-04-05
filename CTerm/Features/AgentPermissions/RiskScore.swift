@@ -110,6 +110,8 @@ struct RiskAssessment: Sendable {
             return "Restore from git or Time Machine"
         case .writeFiles:
             return "git checkout -- <file> to restore"
+        case .browserAutomation:
+            return nil // browser actions are inherently non-destructive to local state
         default:
             return nil
         }

@@ -23,46 +23,58 @@ enum AuditEventType: String, Codable, Sendable, CaseIterable {
     case taskCompleted      = "taskCompleted"
     case checkpointCreated  = "checkpointCreated"
     case agentPhaseChanged  = "agentPhaseChanged"
+    case browserStepStarted = "browserStepStarted"
+    case browserStepCompleted = "browserStepCompleted"
+    case browserFindingCaptured = "browserFindingCaptured"
 
     var displayName: String {
         switch self {
-        case .commandInjected:   return "Command"
-        case .errorRouted:       return "Error routed"
-        case .memoryWritten:     return "Memory written"
-        case .memoryDeleted:     return "Memory deleted"
-        case .testRunCompleted:  return "Test run"
-        case .peerConnected:     return "Peer connected"
-        case .taskCompleted:     return "Task completed"
-        case .checkpointCreated: return "Checkpoint"
-        case .agentPhaseChanged: return "Agent phase"
+        case .commandInjected:       return "Command"
+        case .errorRouted:           return "Error routed"
+        case .memoryWritten:         return "Memory written"
+        case .memoryDeleted:         return "Memory deleted"
+        case .testRunCompleted:      return "Test run"
+        case .peerConnected:         return "Peer connected"
+        case .taskCompleted:         return "Task completed"
+        case .checkpointCreated:     return "Checkpoint"
+        case .agentPhaseChanged:     return "Agent phase"
+        case .browserStepStarted:    return "Browser step"
+        case .browserStepCompleted:  return "Browser done"
+        case .browserFindingCaptured: return "Browser finding"
         }
     }
 
     var icon: String {
         switch self {
-        case .commandInjected:   return "terminal"
-        case .errorRouted:       return "exclamationmark.triangle.fill"
-        case .memoryWritten:     return "brain.head.profile"
-        case .memoryDeleted:     return "brain.head.profile"
-        case .testRunCompleted:  return "testtube.2"
-        case .peerConnected:     return "person.fill.badge.plus"
-        case .taskCompleted:     return "checkmark.circle.fill"
-        case .checkpointCreated: return "arrow.triangle.branch"
-        case .agentPhaseChanged: return "arrow.triangle.turn.up.right.diamond"
+        case .commandInjected:       return "terminal"
+        case .errorRouted:           return "exclamationmark.triangle.fill"
+        case .memoryWritten:         return "brain.head.profile"
+        case .memoryDeleted:         return "brain.head.profile"
+        case .testRunCompleted:      return "testtube.2"
+        case .peerConnected:         return "person.fill.badge.plus"
+        case .taskCompleted:         return "checkmark.circle.fill"
+        case .checkpointCreated:     return "arrow.triangle.branch"
+        case .agentPhaseChanged:     return "arrow.triangle.turn.up.right.diamond"
+        case .browserStepStarted:    return "globe"
+        case .browserStepCompleted:  return "globe.badge.chevron.backward"
+        case .browserFindingCaptured: return "doc.text.magnifyingglass"
         }
     }
 
     var color: String {   // SwiftUI color name
         switch self {
-        case .commandInjected:   return "blue"
-        case .errorRouted:       return "orange"
-        case .memoryWritten:     return "purple"
-        case .memoryDeleted:     return "purple"
-        case .testRunCompleted:  return "teal"
-        case .peerConnected:     return "green"
-        case .taskCompleted:     return "green"
-        case .checkpointCreated: return "yellow"
-        case .agentPhaseChanged: return "indigo"
+        case .commandInjected:       return "blue"
+        case .errorRouted:           return "orange"
+        case .memoryWritten:         return "purple"
+        case .memoryDeleted:         return "purple"
+        case .testRunCompleted:      return "teal"
+        case .peerConnected:         return "green"
+        case .taskCompleted:         return "green"
+        case .checkpointCreated:     return "yellow"
+        case .agentPhaseChanged:     return "indigo"
+        case .browserStepStarted:    return "blue"
+        case .browserStepCompleted:  return "teal"
+        case .browserFindingCaptured: return "cyan"
         }
     }
 
@@ -73,6 +85,7 @@ enum AuditEventType: String, Codable, Sendable, CaseIterable {
         case .errorRouted:                  return .errors
         case .memoryWritten, .memoryDeleted: return .memory
         case .testRunCompleted:             return .tests
+        case .browserStepStarted, .browserStepCompleted, .browserFindingCaptured: return .browser
         case .peerConnected, .taskCompleted, .checkpointCreated, .agentPhaseChanged: return .events
         }
     }
@@ -84,6 +97,7 @@ enum AuditFilter: String, CaseIterable {
     case errors   = "Errors"
     case memory   = "Memory"
     case tests    = "Tests"
+    case browser  = "Browser"
     case events   = "Events"
 }
 

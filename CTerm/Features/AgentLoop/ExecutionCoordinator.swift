@@ -16,10 +16,11 @@ private let logger = Logger(subsystem: "com.legato3.cterm", category: "Execution
 // MARK: - Execution Strategy
 
 enum ExecutionStrategy: String, Sendable {
-    case localShell       // dispatch command to terminal
-    case browserAction    // dispatch to BrowserToolHandler
-    case peerDelegation   // send via IPC to a peer agent
-    case informational    // no execution needed (explain, generate)
+    case localShell         // dispatch command to terminal
+    case browserAction      // dispatch to BrowserToolHandler
+    case browserResearch    // full browser research workflow with findings capture
+    case peerDelegation     // send via IPC to a peer agent
+    case informational      // no execution needed (explain, generate)
 }
 
 // MARK: - Coordinator
@@ -206,6 +207,9 @@ final class ExecutionCoordinator {
         case .browserAction:
             executeBrowserAction(step: step, index: nextIndex)
 
+        case .browserResearch:
+            executeBrowserResearch(startingAt: nextIndex)
+
         case .peerDelegation:
             executePeerDelegation(step: step, index: nextIndex)
 
@@ -234,10 +238,18 @@ final class ExecutionCoordinator {
 
         // Browser actions
         if lower.hasPrefix("browse:") || lower.hasPrefix("browser:") {
+            // If the session is classified as browserResearch and this is the first
+            // browser step, use the full research workflow to batch all browser steps
+            if session.classifiedIntent == .browserResearch {
+                return .browserResearch
+            }
             return .browserAction
         }
         // URL opening
         if lower.hasPrefix("open http") || lower.hasPrefix("open https") {
+            if session.classifiedIntent == .browserResearch {
+                return .browserResearch
+            }
             return .browserAction
         }
 
@@ -319,21 +331,160 @@ final class ExecutionCoordinator {
         guard let command = step.command else { return }
         session.planSteps[index].status = .running
 
+        // Audit: log browser step start
+        SessionAuditLogger.log(
+            type: .browserStepStarted,
+            detail: "Browser action: \(step.title)"
+        )
+
         executionTask = Task { @MainActor [weak self] in
             guard let self else { return }
+
+            // Check browser automation permissions
+            let permissions = AgentPermissionsStore.shared
+            let decision = permissions.decide(for: RiskAssessment(
+                score: self.browserRiskScore(for: command),
+                factors: [RiskFactor(kind: .networkExposure, weight: 15, reason: "Browser automation")],
+                command: command,
+                category: .browserAutomation
+            ))
+
+            switch decision {
+            case .blocked(let reason):
+                self.session.planSteps[index].status = .failed
+                self.session.planSteps[index].output = "Blocked: \(reason)"
+                SessionAuditLogger.log(
+                    type: .browserStepCompleted,
+                    detail: "Browser action BLOCKED: \(reason)"
+                )
+                self.executeNextStep()
+                return
+            case .requireApproval:
+                if step.status != .approved {
+                    self.session.planSteps[index].status = .pending
+                    return
+                }
+            case .autoApprove:
+                break
+            }
 
             let result = await self.dispatchBrowserCommand(command)
 
             if result.isError {
                 self.session.planSteps[index].status = .failed
                 self.session.planSteps[index].output = result.text
+                SessionAuditLogger.log(
+                    type: .browserStepCompleted,
+                    detail: "Browser action FAILED: \(result.text.prefix(200))"
+                )
                 logger.warning("ExecutionCoordinator: browser action failed: \(result.text.prefix(100))")
             } else {
                 self.session.planSteps[index].status = .succeeded
                 self.session.planSteps[index].output = String(result.text.prefix(1000))
                 self.session.addArtifact(AgentArtifact(kind: .commandOutput, value: "Browser: \(String(result.text.prefix(300)))"))
+                SessionAuditLogger.log(
+                    type: .browserStepCompleted,
+                    detail: "Browser action OK: \(step.title) (\(result.text.count) chars)"
+                )
             }
 
+            self.executeNextStep()
+        }
+    }
+
+    /// Risk score for browser commands. Read-only extractions are low risk;
+    /// form fills and clicks are medium; eval is high.
+    private func browserRiskScore(for command: String) -> Int {
+        let lower = command.lowercased()
+        if lower.contains("eval") { return 45 }
+        if lower.contains("click") || lower.contains("fill") || lower.contains("type")
+            || lower.contains("press") || lower.contains("check") || lower.contains("select") {
+            return 25
+        }
+        // Read-only: snapshot, get_text, get_links, get_html, navigate, open
+        return 10
+    }
+
+    // MARK: - Browser Research Workflow
+
+    /// The active browser research workflow, if any.
+    private(set) var browserResearchWorkflow: BrowserResearchWorkflow?
+
+    /// Execute all remaining browser steps as a cohesive research workflow.
+    /// Batches all browser-prefixed steps and runs them through BrowserResearchWorkflow.
+    private func executeBrowserResearch(startingAt index: Int) {
+        // Collect all remaining approved browser steps
+        let browserSteps = session.planSteps[index...].filter { step in
+            guard step.status == .approved || step.status == .pending else { return false }
+            guard let cmd = step.command?.lowercased() else { return true } // informational
+            return cmd.hasPrefix("browse:") || cmd.hasPrefix("browser:") || cmd.hasPrefix("open http") || cmd.isEmpty
+        }
+
+        guard let handler = BrowserServer.shared.toolHandler else {
+            session.planSteps[index].status = .failed
+            session.planSteps[index].output = "Browser automation not available"
+            executionTask = Task { @MainActor [weak self] in
+                self?.executeNextStep()
+            }
+            return
+        }
+
+        let workflow = BrowserResearchWorkflow(toolHandler: handler)
+        self.browserResearchWorkflow = workflow
+
+        executionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            // Auto-approve all browser steps for the research workflow
+            for i in self.session.planSteps.indices {
+                if self.session.planSteps[i].status == .pending,
+                   let cmd = self.session.planSteps[i].command?.lowercased(),
+                   cmd.hasPrefix("browse:") || cmd.hasPrefix("browser:") || cmd.hasPrefix("open http") {
+                    self.session.planSteps[i].status = .approved
+                }
+            }
+
+            let (findings, summary) = await workflow.execute(
+                goal: self.session.displayIntent,
+                steps: Array(browserSteps),
+                agentSession: self.session
+            )
+
+            // Sync step statuses from the workflow back to the session
+            if let researchSession = workflow.activeSession {
+                for entry in researchSession.logEntries {
+                    let sessionStepIndex = index + entry.stepIndex
+                    guard sessionStepIndex < self.session.planSteps.count else { continue }
+                    switch entry.status {
+                    case .succeeded:
+                        self.session.planSteps[sessionStepIndex].status = .succeeded
+                        self.session.planSteps[sessionStepIndex].output = entry.output
+                    case .failed:
+                        self.session.planSteps[sessionStepIndex].status = .failed
+                        self.session.planSteps[sessionStepIndex].output = entry.output
+                    case .skipped:
+                        self.session.planSteps[sessionStepIndex].status = .skipped
+                    case .running:
+                        break
+                    }
+                }
+            }
+
+            // Add findings summary as an artifact
+            if !findings.isEmpty {
+                self.session.addArtifact(AgentArtifact(
+                    kind: .commandOutput,
+                    value: "Research summary: \(summary.prefix(500))"
+                ))
+            }
+
+            // Remember the research fact
+            self.rememberFact(
+                key: "browser_research_result",
+                value: String(summary.prefix(300))
+            )
+
+            self.browserResearchWorkflow = nil
             self.executeNextStep()
         }
     }
