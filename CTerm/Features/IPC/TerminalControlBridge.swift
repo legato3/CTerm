@@ -131,8 +131,7 @@ final class TerminalControlBridge {
         let session = delegate.terminalWindowSession
         let allTabs = session.groups.flatMap(\.tabs)
 
-        let target = allTabs.first { $0.autoAcceptEnabled }
-            ?? allTabs.first(where: \.isAIAgentTab)
+        let target = allTabs.first(where: \.isAIAgentTab)
             ?? {
                 guard let active = session.activeGroup?.activeTab,
                       case .terminal = active.content else { return nil }

@@ -143,25 +143,6 @@ struct AgentLoopView: View {
 
                     Spacer()
 
-                    // Per-step approve/skip for perStep approval
-                    if session.approvalRequirement == .perStep && step.status == .pending {
-                        HStack(spacing: 4) {
-                            Button(action: { coordinator.approveStep(id: step.id) }) {
-                                Image(systemName: "checkmark.circle")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.green)
-
-                            Button(action: { coordinator.skipStep(id: step.id) }) {
-                                Image(systemName: "forward.circle")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.orange)
-                        }
-                    }
-
                     if let ms = step.durationMs {
                         Text("\(ms)ms")
                             .font(.caption2)

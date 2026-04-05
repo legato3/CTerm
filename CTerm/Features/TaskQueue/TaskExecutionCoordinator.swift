@@ -170,9 +170,9 @@ final class TaskExecutionCoordinator {
     }
 
     func approveStep(_ task: ManagedTask, stepID: UUID) {
+        // Per-step approval removed — approve the whole plan instead.
         guard let idx = task.planSteps.firstIndex(where: { $0.id == stepID }) else { return }
         task.planSteps[idx].status = .approved
-        agentCoordinator.approveStep(id: stepID)
     }
 
     func skipStep(_ task: ManagedTask, stepID: UUID) {

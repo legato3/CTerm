@@ -109,7 +109,6 @@ struct SidebarContentView: View {
     /// The primary agent button — larger, with auto-accept badge and thinking pulse.
     private var agentSessionRailButton: some View {
         let isSelected = sidebarMode == .agentSession
-        let isAutoAccept = actions.activeTabAutoAcceptEnabled
         let isThinking = actions.composeAssistantState?.isBusy == true
 
         return Button(action: {
@@ -129,23 +128,15 @@ struct SidebarContentView: View {
                     )
                     .foregroundStyle(isSelected ? Color.purple : Color.purple.opacity(0.6))
 
-                // Auto-accept badge (orange bolt)
-                if isAutoAccept {
-                    Image(systemName: "bolt.fill")
-                        .font(.system(size: 7, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 12, height: 12)
-                        .background(Circle().fill(Color.orange))
-                        .offset(x: 2, y: -2)
-                } else if isThinking {
-                    // Thinking pulse dot
+                // Thinking pulse dot
+                if isThinking {
                     ThinkingDot()
                         .offset(x: 2, y: -2)
                 }
             }
         }
         .buttonStyle(.plain)
-        .help("Agent" + (isAutoAccept ? " (Auto-accept ON)" : ""))
+        .help("Agent")
     }
 
     private var railDivider: some View {
@@ -389,11 +380,6 @@ private struct TabRowItemView: View {
                         }
                         .onDisappear { claudePulse = false }
                         .help("Claude Code is running in this tab")
-                }
-                if tab.autoAcceptEnabled {
-                    Text("⚡")
-                        .font(.system(size: 9))
-                        .help("Auto-accept active")
                 }
                 Text(displayText)
                     .lineLimit(1)

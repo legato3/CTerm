@@ -7,7 +7,6 @@
 import SwiftUI
 
 struct DelegationDashboardView: View {
-    @State private var dashboard = DelegationDashboardState.shared
     @State private var agentState = IPCAgentState.shared
 
     var body: some View {
@@ -15,7 +14,7 @@ struct DelegationDashboardView: View {
             header
             if !agentState.isRunning {
                 offlineMessage
-            } else if dashboard.contracts.isEmpty {
+            } else if agentState.delegationContracts.isEmpty {
                 emptyMessage
             } else {
                 ScrollView {
@@ -23,7 +22,7 @@ struct DelegationDashboardView: View {
                         summaryBar
                         peerRolesSection
                         activeDelegationsSection
-                        if dashboard.failedCount > 0 {
+                        if failedCount > 0 {
                             failedSection
                         }
                     }
@@ -45,8 +44,8 @@ struct DelegationDashboardView: View {
             Text("Delegations")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
             Spacer()
-            if dashboard.activeCount > 0 {
-                Text("\(dashboard.activeCount) active")
+            if agentState.activeDelegationCount > 0 {
+                Text("\(agentState.activeDelegationCount) active")
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
@@ -57,11 +56,28 @@ struct DelegationDashboardView: View {
 
     // MARK: - Summary
 
+    private var activeCount: Int {
+        agentState.delegationContracts.filter { !$0.status.isTerminal }.count
+    }
+    private var completedCount: Int {
+        agentState.delegationContracts.filter { $0.status == .completed }.count
+    }
+    private var failedCount: Int {
+        agentState.delegationContracts.filter { $0.status == .failed || $0.status == .timedOut || $0.status == .peerLost }.count
+    }
+    private var peerAssignments: [String: [DelegationContract]] {
+        var assignments: [String: [DelegationContract]] = [:]
+        for c in agentState.delegationContracts where !c.status.isTerminal {
+            assignments[c.targetPeerName, default: []].append(c)
+        }
+        return assignments
+    }
+
     private var summaryBar: some View {
         HStack(spacing: 12) {
-            summaryPill(count: dashboard.activeCount, label: "Active", color: .blue)
-            summaryPill(count: dashboard.completedCount, label: "Done", color: .green)
-            summaryPill(count: dashboard.failedCount, label: "Failed", color: .red)
+            summaryPill(count: activeCount, label: "Active", color: .blue)
+            summaryPill(count: completedCount, label: "Done", color: .green)
+            summaryPill(count: failedCount, label: "Failed", color: .red)
         }
     }
 
@@ -93,7 +109,7 @@ struct DelegationDashboardView: View {
                 ForEach(externalPeers, id: \.id) { peer in
                     PeerRoleRow(
                         peer: peer,
-                        assignments: dashboard.peerAssignments[peer.name] ?? []
+                        assignments: peerAssignments[peer.name] ?? []
                     )
                 }
             }
@@ -103,7 +119,7 @@ struct DelegationDashboardView: View {
     // MARK: - Active Delegations
 
     private var activeDelegationsSection: some View {
-        let active = dashboard.contracts.filter { !$0.status.isTerminal }
+        let active = agentState.delegationContracts.filter { !$0.status.isTerminal }
         return VStack(alignment: .leading, spacing: 6) {
             if !active.isEmpty {
                 Text("Active Tasks")
@@ -119,7 +135,7 @@ struct DelegationDashboardView: View {
     // MARK: - Failed
 
     private var failedSection: some View {
-        let failed = dashboard.contracts.filter {
+        let failed = agentState.delegationContracts.filter {
             $0.status == .failed || $0.status == .timedOut || $0.status == .peerLost
         }
         return VStack(alignment: .leading, spacing: 6) {

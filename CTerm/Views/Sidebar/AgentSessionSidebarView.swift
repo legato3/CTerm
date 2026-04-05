@@ -112,37 +112,11 @@ struct AgentSessionSidebarView: View {
                 }
 
                 Spacer()
-
-                // Auto-accept toggle — Warp's most prominent agent control
-                autoAcceptToggle
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(modeTint.opacity(0.04))
-    }
-
-    // MARK: - Auto-Accept Toggle
-
-    private var autoAcceptToggle: some View {
-        let isOn = actions.activeTabAutoAcceptEnabled
-        return Button(action: { actions.onToggleAutoAccept?() }) {
-            HStack(spacing: 4) {
-                Image(systemName: isOn ? "bolt.fill" : "bolt")
-                    .font(.system(size: 10, weight: .semibold))
-                Text("Auto")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-            }
-            .foregroundStyle(isOn ? .white : .secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                Capsule().fill(isOn ? Color.orange : Color.white.opacity(0.08))
-            )
-        }
-        .buttonStyle(.plain)
-        .help(isOn ? "Auto-accept ON — Claude confirmations are accepted automatically" : "Auto-accept OFF — tap to enable")
-        .animation(.easeInOut(duration: 0.15), value: isOn)
     }
 
     // MARK: - Tab Picker
@@ -234,22 +208,6 @@ struct AgentSessionSidebarView: View {
                 .font(.system(size: 11, design: .rounded))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-
-            // Quick action buttons
-            HStack(spacing: 6) {
-                Button(action: { actions.onToggleAutoAccept?() }) {
-                    Label(
-                        actions.activeTabAutoAcceptEnabled ? "Disable Auto" : "Enable Auto",
-                        systemImage: actions.activeTabAutoAcceptEnabled ? "bolt.slash" : "bolt.fill"
-                    )
-                    .font(.system(size: 11, design: .rounded))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(actions.activeTabAutoAcceptEnabled ? .secondary : .orange)
-
-                Spacer()
-            }
         }
         .padding(12)
         .background(Color.purple.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))

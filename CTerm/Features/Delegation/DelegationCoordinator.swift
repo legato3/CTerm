@@ -82,7 +82,7 @@ actor DelegationCoordinator {
 
         let snapshot = Array(contracts.values)
         await MainActor.run {
-            DelegationDashboardState.shared.refresh(snapshot)
+            IPCAgentState.shared.refreshDelegations(snapshot)
         }
 
         return contract
@@ -143,7 +143,7 @@ actor DelegationCoordinator {
 
         let reportSnapshot = Array(contracts.values)
         await MainActor.run {
-            DelegationDashboardState.shared.refresh(reportSnapshot)
+            IPCAgentState.shared.refreshDelegations(reportSnapshot)
         }
 
         return (result.isValid, result.isValid ? nil : contract.lastError)
@@ -160,7 +160,7 @@ actor DelegationCoordinator {
 
         let acceptSnapshot = Array(contracts.values)
         await MainActor.run {
-            DelegationDashboardState.shared.refresh(acceptSnapshot)
+            IPCAgentState.shared.refreshDelegations(acceptSnapshot)
         }
         return true
     }
@@ -175,7 +175,7 @@ actor DelegationCoordinator {
 
         let runSnapshot = Array(contracts.values)
         await MainActor.run {
-            DelegationDashboardState.shared.refresh(runSnapshot)
+            IPCAgentState.shared.refreshDelegations(runSnapshot)
         }
     }
 
@@ -188,7 +188,7 @@ actor DelegationCoordinator {
 
         let cancelSnapshot = Array(contracts.values)
         await MainActor.run {
-            DelegationDashboardState.shared.refresh(cancelSnapshot)
+            IPCAgentState.shared.refreshDelegations(cancelSnapshot)
         }
     }
 
@@ -294,7 +294,7 @@ actor DelegationCoordinator {
         if changed {
             let snapshot = Array(contracts.values)
             await MainActor.run {
-                DelegationDashboardState.shared.refresh(snapshot)
+                IPCAgentState.shared.refreshDelegations(snapshot)
             }
         }
     }

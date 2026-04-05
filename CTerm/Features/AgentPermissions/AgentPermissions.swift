@@ -1,53 +1,43 @@
 // AgentPermissions.swift
 // CTerm
 //
-// Warp-style per-action autonomy levels for agent tool execution.
-// Persisted to UserDefaults. Read by ComposeOverlayController and AutoAcceptMonitor.
+// Two-mode agent permissions: "Ask me" (default) or "Trust this session."
+// No profiles, no per-category matrix, no batching. Simple and controllable.
 
 import Foundation
 import Observation
 
-// MARK: - Autonomy Level
+// MARK: - Agent Trust Mode
 
-enum AgentAutonomyLevel: String, Codable, CaseIterable, Sendable {
-    /// Agent decides when to ask — runs safe ops silently, asks for risky ones.
-    case agentDecides = "agentDecides"
-    /// Always prompt the user before executing this action type.
-    case alwaysAsk = "alwaysAsk"
-    /// Always execute without prompting.
-    case alwaysAllow = "alwaysAllow"
-    /// Never allow this action type.
-    case never = "never"
+enum AgentTrustMode: String, Codable, Sendable {
+    /// Default: agent asks before any non-read-only action.
+    case askMe = "askMe"
+    /// User trusts the agent for this session. Only critical-risk actions ask.
+    case trustSession = "trustSession"
 
     var displayName: String {
         switch self {
-        case .agentDecides: return "Let agent decide"
-        case .alwaysAsk:    return "Always ask"
-        case .alwaysAllow:  return "Always allow"
-        case .never:        return "Never"
+        case .askMe:        return "Ask me"
+        case .trustSession: return "Trust this session"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .askMe:        return "Agent asks before running commands, writing files, or making changes."
+        case .trustSession: return "Agent runs freely. Only destructive or irreversible actions ask."
         }
     }
 
     var icon: String {
         switch self {
-        case .agentDecides: return "cpu"
-        case .alwaysAsk:    return "questionmark.circle"
-        case .alwaysAllow:  return "checkmark.circle.fill"
-        case .never:        return "xmark.circle.fill"
-        }
-    }
-
-    var tintName: String {
-        switch self {
-        case .agentDecides: return "blue"
-        case .alwaysAsk:    return "orange"
-        case .alwaysAllow:  return "green"
-        case .never:        return "red"
+        case .askMe:        return "lock.shield"
+        case .trustSession: return "checkmark.shield"
         }
     }
 }
 
-// MARK: - Action Category
+// MARK: - Action Category (kept for RiskScorer compatibility)
 
 enum AgentActionCategory: String, Codable, CaseIterable, Sendable {
     case readFiles      = "readFiles"
@@ -70,18 +60,6 @@ enum AgentActionCategory: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    var description: String {
-        switch self {
-        case .readFiles:           return "cat, ls, grep, find, head, tail, etc."
-        case .writeFiles:          return "Write, create, or modify source files"
-        case .runCommands:         return "Execute arbitrary shell commands"
-        case .networkAccess:       return "curl, wget, npm install, etc."
-        case .gitOperations:       return "git commit, push, branch, merge, etc."
-        case .deleteFiles:         return "rm, rmdir, trash, etc."
-        case .browserAutomation:   return "Navigate, click, fill forms, extract text"
-        }
-    }
-
     var icon: String {
         switch self {
         case .readFiles:           return "doc.text"
@@ -93,69 +71,6 @@ enum AgentActionCategory: String, Codable, CaseIterable, Sendable {
         case .browserAutomation:   return "globe"
         }
     }
-
-    /// Default autonomy level for this category.
-    var defaultLevel: AgentAutonomyLevel {
-        switch self {
-        case .readFiles:           return .alwaysAllow
-        case .writeFiles:          return .agentDecides
-        case .runCommands:         return .agentDecides
-        case .networkAccess:       return .alwaysAsk
-        case .gitOperations:       return .alwaysAsk
-        case .deleteFiles:         return .alwaysAsk
-        case .browserAutomation:   return .agentDecides
-        }
-    }
-}
-
-// MARK: - Profile
-
-struct AgentPermissionProfile: Codable, Identifiable, Sendable {
-    let id: UUID
-    var name: String
-    var levels: [String: AgentAutonomyLevel]  // keyed by AgentActionCategory.rawValue
-
-    init(name: String, levels: [AgentActionCategory: AgentAutonomyLevel] = [:]) {
-        self.id = UUID()
-        self.name = name
-        var dict: [String: AgentAutonomyLevel] = [:]
-        for cat in AgentActionCategory.allCases {
-            dict[cat.rawValue] = levels[cat] ?? cat.defaultLevel
-        }
-        self.levels = dict
-    }
-
-    func level(for category: AgentActionCategory) -> AgentAutonomyLevel {
-        levels[category.rawValue] ?? category.defaultLevel
-    }
-
-    mutating func setLevel(_ level: AgentAutonomyLevel, for category: AgentActionCategory) {
-        levels[category.rawValue] = level
-    }
-
-    // MARK: - Built-in profiles
-
-    static let balanced = AgentPermissionProfile(name: "Balanced", levels: [:])
-
-    static let yolo = AgentPermissionProfile(name: "YOLO", levels: [
-        .readFiles:         .alwaysAllow,
-        .writeFiles:        .alwaysAllow,
-        .runCommands:       .alwaysAllow,
-        .networkAccess:     .alwaysAllow,
-        .gitOperations:     .alwaysAllow,
-        .deleteFiles:       .alwaysAsk,
-        .browserAutomation: .alwaysAllow,
-    ])
-
-    static let cautious = AgentPermissionProfile(name: "Cautious", levels: [
-        .readFiles:         .alwaysAllow,
-        .writeFiles:        .alwaysAsk,
-        .runCommands:       .alwaysAsk,
-        .networkAccess:     .never,
-        .gitOperations:     .alwaysAsk,
-        .deleteFiles:       .never,
-        .browserAutomation: .alwaysAsk,
-    ])
 }
 
 // MARK: - Store
@@ -165,115 +80,61 @@ struct AgentPermissionProfile: Codable, Identifiable, Sendable {
 final class AgentPermissionsStore {
     static let shared = AgentPermissionsStore()
 
-    var profiles: [AgentPermissionProfile] = []
-    var activeProfileID: UUID
-
-    private let defaultsKey = "cterm.agentPermissions"
-    private let activeProfileKey = "cterm.agentPermissions.activeProfile"
+    /// Current trust mode for this session.
+    var trustMode: AgentTrustMode = .askMe {
+        didSet {
+            UserDefaults.standard.set(trustMode.rawValue, forKey: "cterm.agentTrustMode")
+        }
+    }
 
     private init() {
-        let builtins: [AgentPermissionProfile] = [.balanced, .yolo, .cautious]
-        self.profiles = builtins
-        // Load active profile ID, default to balanced
-        if let raw = UserDefaults.standard.string(forKey: activeProfileKey),
-           let id = UUID(uuidString: raw) {
-            self.activeProfileID = id
-        } else {
-            self.activeProfileID = builtins[0].id
+        if let raw = UserDefaults.standard.string(forKey: "cterm.agentTrustMode"),
+           let mode = AgentTrustMode(rawValue: raw) {
+            self.trustMode = mode
         }
-        loadCustomProfiles()
-    }
-
-    var activeProfile: AgentPermissionProfile {
-        profiles.first(where: { $0.id == activeProfileID }) ?? .balanced
-    }
-
-    func level(for category: AgentActionCategory) -> AgentAutonomyLevel {
-        activeProfile.level(for: category)
-    }
-
-    /// Risk threshold for auto-approval when autonomy is `.agentDecides`.
-    /// Actions scoring below this threshold are auto-approved.
-    var autoApproveThreshold: Int {
-        get { UserDefaults.standard.integer(forKey: "cterm.agentPermissions.autoApproveThreshold").clamped(to: 0...100, default: 20) }
-        set { UserDefaults.standard.set(newValue, forKey: "cterm.agentPermissions.autoApproveThreshold") }
     }
 
     /// Decide whether an action should proceed based on its risk assessment.
-    /// Returns `.autoApprove`, `.requireApproval`, or `.blocked`.
     func decide(for assessment: RiskAssessment) -> ApprovalDecision {
-        let autonomy = level(for: assessment.category)
-
-        switch autonomy {
-        case .alwaysAllow:
+        // Read-only is always auto-approved regardless of mode
+        if assessment.category == .readFiles {
             return .autoApprove
-        case .never:
-            return .blocked(reason: "\(assessment.category.displayName) is disabled in the current profile")
-        case .alwaysAsk:
-            return .requireApproval
-        case .agentDecides:
-            // Use risk score to decide
-            if assessment.score < autoApproveThreshold {
+        }
+
+        switch trustMode {
+        case .askMe:
+            // Only auto-approve low-risk (score < 20)
+            if assessment.score < 20 {
                 return .autoApprove
             }
             return .requireApproval
+
+        case .trustSession:
+            // Auto-approve everything except critical-risk (score >= 80)
+            if assessment.score >= 80 {
+                return .requireApproval
+            }
+            return .autoApprove
         }
     }
 
-    /// Returns true if the agent should proceed without asking for this category.
+    /// Quick check: should this category auto-allow?
     func shouldAutoAllow(_ category: AgentActionCategory) -> Bool {
-        switch level(for: category) {
-        case .alwaysAllow: return true
-        case .agentDecides: return true   // agent's own safe-command logic applies
-        case .alwaysAsk, .never: return false
-        }
+        if category == .readFiles { return true }
+        return trustMode == .trustSession
     }
 
-    /// Returns true if this action is blocked entirely.
+    /// Is this category blocked entirely?
     func isBlocked(_ category: AgentActionCategory) -> Bool {
-        level(for: category) == .never
+        false // nothing is hard-blocked in the two-mode system
     }
 
-    func setActiveProfile(_ id: UUID) {
-        activeProfileID = id
-        UserDefaults.standard.set(id.uuidString, forKey: activeProfileKey)
-    }
-
-    func addProfile(_ profile: AgentPermissionProfile) {
-        profiles.append(profile)
-        saveCustomProfiles()
-    }
-
-    func updateProfile(_ profile: AgentPermissionProfile) {
-        guard let idx = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
-        profiles[idx] = profile
-        saveCustomProfiles()
-    }
-
-    func deleteProfile(id: UUID) {
-        // Don't delete built-ins
-        let builtinIDs = Set([AgentPermissionProfile.balanced.id, AgentPermissionProfile.yolo.id, AgentPermissionProfile.cautious.id])
-        guard !builtinIDs.contains(id) else { return }
-        profiles.removeAll { $0.id == id }
-        if activeProfileID == id { activeProfileID = AgentPermissionProfile.balanced.id }
-        saveCustomProfiles()
-    }
-
-    // MARK: - Persistence (custom profiles only)
-
-    private func saveCustomProfiles() {
-        let builtinIDs = Set([AgentPermissionProfile.balanced.id, AgentPermissionProfile.yolo.id, AgentPermissionProfile.cautious.id])
-        let custom = profiles.filter { !builtinIDs.contains($0.id) }
-        if let data = try? JSONEncoder().encode(custom) {
-            UserDefaults.standard.set(data, forKey: defaultsKey)
+    /// Risk threshold for auto-approval.
+    var autoApproveThreshold: Int {
+        switch trustMode {
+        case .askMe:        return 20
+        case .trustSession: return 80
         }
-    }
-
-    private func loadCustomProfiles() {
-        guard let data = UserDefaults.standard.data(forKey: defaultsKey),
-              let custom = try? JSONDecoder().decode([AgentPermissionProfile].self, from: data)
-        else { return }
-        profiles.append(contentsOf: custom)
     }
 }
 
@@ -283,12 +144,4 @@ enum ApprovalDecision: Sendable {
     case autoApprove
     case requireApproval
     case blocked(reason: String)
-}
-
-// MARK: - Int Clamping
-
-private extension Int {
-    func clamped(to range: ClosedRange<Int>, default fallback: Int) -> Int {
-        self == 0 && !range.contains(0) ? fallback : Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
-    }
 }

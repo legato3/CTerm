@@ -51,7 +51,7 @@ enum IntentCategory: String, Sendable, CaseIterable {
         case .explain, .generateCommand, .inspectRepo:
             return .none
         case .executeCommand:
-            return .perStep
+            return .planLevel
         case .fixError, .runWorkflow:
             return .planLevel
         case .delegateToPeer:

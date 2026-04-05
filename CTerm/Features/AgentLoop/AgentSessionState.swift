@@ -1,11 +1,9 @@
 // AgentSessionState.swift
 // CTerm
 //
-// Explicit state machine for the agent loop pipeline:
-// intent → plan → execute → observe → summarize → suggest next step.
-//
-// Tracks the full lifecycle of a single user request through the agent system.
-// Observable so views can bind directly; all mutations on @MainActor.
+// State machine for the agent loop pipeline.
+// Internal phases are granular for logic; the user-visible state is collapsed
+// to three states: Thinking, Running, Done.
 
 import Foundation
 import Observation
@@ -17,25 +15,26 @@ private let logger = Logger(subsystem: "com.legato3.cterm", category: "AgentSess
 
 enum AgentPhase: String, Sendable {
     case idle
-    case classifying      // IntentRouter is determining intent type
-    case planning         // PlanBuilder is generating steps
-    case awaitingApproval // plan ready, waiting for user to approve
-    case executing        // ExecutionCoordinator is running steps
-    case observing        // waiting for command output / observation
-    case summarizing      // ResultSummarizer is producing summary
+    case classifying
+    case planning
+    case awaitingApproval
+    case executing
+    case observing
+    case summarizing
     case completed
     case failed
 
+    /// User-visible label — collapsed to 3 states.
     var label: String {
         switch self {
         case .idle:             return "Idle"
-        case .classifying:      return "Classifying…"
-        case .planning:         return "Planning…"
+        case .classifying,
+             .planning:         return "Thinking"
         case .awaitingApproval: return "Awaiting Approval"
-        case .executing:        return "Executing"
-        case .observing:        return "Observing…"
-        case .summarizing:      return "Summarizing…"
-        case .completed:        return "Completed"
+        case .executing,
+             .observing,
+             .summarizing:      return "Running"
+        case .completed:        return "Done"
         case .failed:           return "Failed"
         }
     }
@@ -57,9 +56,8 @@ enum AgentPhase: String, Sendable {
 // MARK: - Approval Requirement
 
 enum ApprovalRequirement: String, Sendable {
-    case none           // auto-approved (safe read-only ops)
-    case perStep        // each step needs individual approval
-    case planLevel      // approve the whole plan at once
+    case none       // auto-approved (safe read-only ops)
+    case planLevel  // approve the whole plan at once
 }
 
 // MARK: - Artifact
@@ -177,5 +175,16 @@ final class AgentSessionState: Identifiable {
 
     var elapsedSeconds: TimeInterval {
         Date().timeIntervalSince(startedAt)
+    }
+
+    /// Compact status string for the always-visible progress strip.
+    var progressLabel: String {
+        guard !planSteps.isEmpty else { return phase.label }
+        let done = planSteps.filter { $0.status.isTerminal }.count
+        let running = planSteps.first(where: { $0.status == .running })
+        if let running {
+            return "Step \(done + 1)/\(planSteps.count): \(running.title.prefix(40))"
+        }
+        return "\(done)/\(planSteps.count) steps"
     }
 }

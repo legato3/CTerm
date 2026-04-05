@@ -280,13 +280,6 @@ final class ExecutionCoordinator {
             session.planSteps[index].output = "Blocked: \(reason)"
             logger.warning("ExecutionCoordinator: blocked (\(assessment.tier.rawValue)): \(command.prefix(60))")
 
-            // Propose a safer alternative
-            if let alternative = DenialHandler.proposeSaferAlternative(command: command, assessment: assessment) {
-                if let saferCommand = alternative.saferCommand {
-                    session.planSteps[index].output = "Blocked: \(reason)\nSuggested alternative: \(saferCommand)\n\(alternative.explanation)"
-                }
-            }
-
             executionTask = Task { @MainActor [weak self] in
                 self?.executeNextStep()
             }
@@ -294,7 +287,6 @@ final class ExecutionCoordinator {
 
         case .requireApproval:
             // Step should already be in .approved state from the approval flow.
-            // If it somehow got here without approval, mark it pending.
             if step.status != .approved {
                 session.planSteps[index].status = .pending
                 logger.info("ExecutionCoordinator: step requires approval (risk \(assessment.score)): \(command.prefix(60))")
@@ -302,13 +294,7 @@ final class ExecutionCoordinator {
             }
 
         case .autoApprove:
-            // Record in approval memory for this session
-            ApprovalMemory.shared.remember(
-                command: command,
-                tier: assessment.tier,
-                scope: .session,
-                projectKey: pwd.map { AgentMemoryStore.key(for: $0) }
-            )
+            break
         }
 
         session.planSteps[index].status = .running

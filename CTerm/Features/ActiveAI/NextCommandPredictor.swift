@@ -68,7 +68,6 @@ final class NextCommandPredictor {
         // User typed something that diverges from the current suggestion → cancel immediately
         if suggestion != nil {
             suggestion = nil
-            ActiveAITelemetry.log(event: .predictionDismissed, command: trimmed)
         }
 
         lastInputText = trimmed
@@ -81,15 +80,11 @@ final class NextCommandPredictor {
     func accept() -> String? {
         guard let s = suggestion else { return nil }
         suggestion = nil
-        ActiveAITelemetry.log(event: .predictionAccepted, suggestionText: s)
         return s
     }
 
     /// Dismiss the current suggestion without accepting.
     func dismiss() {
-        if let s = suggestion {
-            ActiveAITelemetry.log(event: .predictionDismissed, suggestionText: s)
-        }
         cancelAndClear()
     }
 
@@ -125,12 +120,6 @@ final class NextCommandPredictor {
             if let localMatch = self.localHistoryCompletion(prefix: text, history: history) {
                 guard !Task.isCancelled, self.generation == gen else { return }
                 self.suggestion = localMatch
-                ActiveAITelemetry.log(
-                    event: .predictionShown,
-                    command: text,
-                    suggestionText: localMatch,
-                    confidence: 0.8
-                )
                 logger.debug("NextCommand: local match '\(localMatch.prefix(60))'")
                 return
             }
@@ -215,26 +204,9 @@ final class NextCommandPredictor {
             )
 
             guard score.isAboveGhostTextThreshold else {
-                ActiveAITelemetry.log(
-                    event: .predictionSuppressed,
-                    command: prefix,
-                    suggestionText: trimmed,
-                    confidence: score.value,
-                    confidenceReason: score.reason
-                )
                 logger.debug("NextCommand: suppressed (conf=\(score.value, format: .fixed(precision: 2)), \(score.reason)): \(trimmed.prefix(60))")
                 return nil
             }
-
-            ActiveAITelemetry.log(
-                event: .predictionShown,
-                command: prefix,
-                suggestionText: trimmed,
-                confidence: score.value,
-                confidenceReason: score.reason,
-                workflowPhase: predContext.workflowPhase.rawValue,
-                projectType: context.projectType
-            )
 
             return trimmed
         } catch {

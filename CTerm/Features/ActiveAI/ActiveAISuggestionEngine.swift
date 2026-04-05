@@ -1,12 +1,10 @@
 // ActiveAISuggestionEngine.swift
 // CTerm
 //
-// Warp-style "Active AI" — proactively generates contextual prompt suggestions
-// after a command block finishes, based on its output and the current project context.
-// Suggestions appear as clickable chips above the input bar.
-//
-// v2: Confidence-gated, ranked, deduplicated. Suppresses generic junk.
-//     Incorporates failure streaks, memory, and workflow phase.
+// Unified suggestion coordinator. Single output channel: the chip bar.
+// Merges what was previously three separate surfaces (suggestion chips,
+// ghost text predictions, ambient suggestions) into one ranked list.
+// Max 2 chips visible at a time. No telemetry logging.
 
 import Foundation
 import OSLog
@@ -48,7 +46,7 @@ struct ActiveAISuggestion: Identifiable, Sendable {
 @MainActor
 final class ActiveAISuggestionEngine {
 
-    /// Current suggestions for the active tab. Replaced on each new block.
+    /// Current suggestions. Single output channel — max 2 visible.
     private(set) var suggestions: [ActiveAISuggestion] = []
     /// True while generating suggestions.
     private(set) var isGenerating = false
@@ -60,6 +58,9 @@ final class ActiveAISuggestionEngine {
 
     /// Recent command blocks for context (set by the window controller).
     var recentBlocks: [TerminalCommandBlock] = []
+
+    /// Max visible chips — reduced from 3 to 2 for less noise.
+    static let maxVisibleChips = 2
 
     // MARK: - Lifecycle
 
@@ -79,7 +80,7 @@ final class ActiveAISuggestionEngine {
                     kind: .continueAgent,
                     confidence: 0.7
                 )
-                self.suggestions.append(chip)
+                self.injectSuggestion(chip)
             }
         }
 
@@ -90,25 +91,11 @@ final class ActiveAISuggestionEngine {
             queue: .main
         ) { [weak self] note in
             let nextActions = note.userInfo?["nextActions"] as? [String] ?? []
-            let summary = note.userInfo?["summary"] as? String ?? ""
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let hasContinueChip = self.suggestions.contains { s in
-                    if case .continueAgent = s.kind { return true }
-                    return false
-                }
-                guard self.suggestions.isEmpty || !hasContinueChip else { return }
-                if !summary.isEmpty {
-                    self.suggestions.append(ActiveAISuggestion(
-                        prompt: summary,
-                        icon: "checkmark.circle.fill",
-                        kind: .continueAgent,
-                        confidence: 0.65
-                    ))
-                }
                 for action in nextActions.prefix(2) {
                     guard !ConfidenceScorer.isGenericSuggestion(action) else { continue }
-                    self.suggestions.append(ActiveAISuggestion(
+                    self.injectSuggestion(ActiveAISuggestion(
                         prompt: action,
                         icon: "arrow.right.circle",
                         kind: .nextStep,
@@ -138,14 +125,11 @@ final class ActiveAISuggestionEngine {
         guard block.id != lastBlockID else { return }
         lastBlockID = block.id
 
-        // Skip trivial commands entirely — no chips for `ls`, `pwd`, etc.
         if ConfidenceScorer.isTrivialCommand(block.titleText) {
             suggestions = []
-            ActiveAITelemetry.log(event: .suggestionSuppressed, command: block.titleText)
             return
         }
 
-        // Build static candidates, then filter and rank
         let candidates = staticSuggestions(for: block)
         let hasMemory = hasRelevantMemory(pwd: pwd)
         suggestions = SuggestionFilter.filterAndRank(
@@ -155,21 +139,15 @@ final class ActiveAISuggestionEngine {
             hasRelevantMemory: hasMemory
         )
 
-        // Log shown suggestions for telemetry
-        for suggestion in suggestions {
-            ActiveAITelemetry.log(
-                event: .suggestionShown,
-                command: block.titleText,
-                suggestionText: suggestion.prompt,
-                confidence: suggestion.confidence
-            )
+        // Cap to our reduced limit
+        if suggestions.count > Self.maxVisibleChips {
+            suggestions = Array(suggestions.prefix(Self.maxVisibleChips))
         }
 
-        // Then enrich with an LLM-generated "next step" suggestion
         generateNextStepSuggestion(for: block, pwd: pwd)
     }
 
-    /// Clear suggestions (e.g. when user starts typing or sends a prompt).
+    /// Clear all suggestions.
     func clear() {
         generationTask?.cancel()
         generationTask = nil
@@ -177,13 +155,14 @@ final class ActiveAISuggestionEngine {
         isGenerating = false
     }
 
-    /// Inject a suggestion from the agent loop pipeline.
+    /// Inject a suggestion from the agent loop or other source.
     func injectSuggestion(_ suggestion: ActiveAISuggestion) {
         guard !SuggestionFilter.isDuplicate(suggestion, existingSuggestions: suggestions) else { return }
         suggestions.append(suggestion)
-        // Re-cap to max visible
-        if suggestions.count > SuggestionFilter.maxVisibleChips {
-            suggestions = Array(suggestions.suffix(SuggestionFilter.maxVisibleChips))
+        if suggestions.count > Self.maxVisibleChips {
+            suggestions = Array(suggestions
+                .sorted { $0.confidence > $1.confidence }
+                .prefix(Self.maxVisibleChips))
         }
     }
 
@@ -196,10 +175,8 @@ final class ActiveAISuggestionEngine {
             let hasActionable = block.errorSnippet.map { ConfidenceScorer.containsActionableError($0) } ?? false
             let fixConfidence: Double = hasActionable ? 0.75 : 0.5
 
-            // Build a specific fix prompt that references the actual error
             let fixPrompt: String
             if let snippet = block.errorSnippet, ConfidenceScorer.containsKnownErrorPattern(snippet) {
-                // Extract the first meaningful error line
                 let errorLine = snippet.components(separatedBy: "\n")
                     .first(where: { line in
                         let l = line.lowercased()
@@ -217,19 +194,7 @@ final class ActiveAISuggestionEngine {
                 blockID: block.id,
                 confidence: fixConfidence
             ))
-
-            // Only offer "explain" for failures with substantial output
-            if let snippet = block.primarySnippet, snippet.count > 50 {
-                chips.append(ActiveAISuggestion(
-                    prompt: "Explain why \(block.titleText) failed",
-                    icon: "questionmark.circle",
-                    kind: .explain,
-                    blockID: block.id,
-                    confidence: 0.45
-                ))
-            }
         } else if block.status == .succeeded {
-            // Only offer explain for commands with substantial, non-trivial output
             if let snippet = block.outputSnippet, snippet.count > 200 {
                 chips.append(ActiveAISuggestion(
                     prompt: "Explain the output of: \(block.titleText)",
@@ -267,19 +232,10 @@ final class ActiveAISuggestionEngine {
                 guard !Task.isCancelled else { return }
                 let trimmed = suggestion.trimmingCharacters(in: .whitespacesAndNewlines)
 
-                // Gate: check if the LLM suggestion is worth showing
                 guard SuggestionFilter.isLLMSuggestionWorthShowing(
                     trimmed, block: block, existingSuggestions: self.suggestions
-                ) else {
-                    ActiveAITelemetry.log(
-                        event: .suggestionSuppressed,
-                        command: block.titleText,
-                        suggestionText: trimmed
-                    )
-                    return
-                }
+                ) else { return }
 
-                // Score the LLM suggestion
                 let hasMemory = self.hasRelevantMemory(pwd: pwd)
                 let score = ConfidenceScorer.scoreSuggestion(
                     block: block,
@@ -287,43 +243,15 @@ final class ActiveAISuggestionEngine {
                     recentCommands: self.recentBlocks,
                     hasRelevantMemory: hasMemory
                 )
-                guard score.isAboveLLMThreshold else {
-                    ActiveAITelemetry.log(
-                        event: .suggestionSuppressed,
-                        command: block.titleText,
-                        suggestionText: trimmed,
-                        confidence: score.value,
-                        confidenceReason: score.reason
-                    )
-                    return
-                }
+                guard score.isAboveLLMThreshold else { return }
 
-                let chip = ActiveAISuggestion(
+                self.injectSuggestion(ActiveAISuggestion(
                     prompt: trimmed,
                     icon: "arrow.right.circle",
                     kind: .nextStep,
                     blockID: block.id,
                     confidence: score.value
-                )
-                self.suggestions.append(chip)
-
-                // Re-cap
-                if self.suggestions.count > SuggestionFilter.maxVisibleChips {
-                    self.suggestions = Array(self.suggestions
-                        .sorted { $0.confidence > $1.confidence }
-                        .prefix(SuggestionFilter.maxVisibleChips))
-                }
-
-                ActiveAITelemetry.log(
-                    event: .suggestionShown,
-                    command: block.titleText,
-                    suggestionText: trimmed,
-                    confidence: score.value,
-                    confidenceReason: score.reason,
-                    workflowPhase: predContext.workflowPhase.rawValue
-                )
-
-                logger.debug("ActiveAI: generated next-step (conf=\(score.value, format: .fixed(precision: 2))): \(trimmed.prefix(60))")
+                ))
             } catch {
                 logger.debug("ActiveAI: suggestion generation failed: \(error.localizedDescription)")
             }
@@ -347,9 +275,6 @@ final class ActiveAISuggestionEngine {
 
         Context:
         \(context.enrichedContextBlock)
-
-        Recent commands:
-        \(context.historyBlock)
 
         Last command: \(block.titleText) [\(status)]\(snippet)
 

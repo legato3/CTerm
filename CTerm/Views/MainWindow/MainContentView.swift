@@ -201,13 +201,10 @@ struct MainContentView: View {
                                             onStopAgent: actions.onStopOllamaAgent,
                                             activeAISuggestions: actions.activeAISuggestions,
                                             nextCommandSuggestion: actions.nextCommandSuggestion,
-                                            suggestedDiffStatus: actions.suggestedDiffStatus,
                                             attachedBlockIDs: actions.attachedBlockIDs,
                                             onAcceptSuggestion: { actions.onAcceptActiveAISuggestion?($0) },
                                             onDismissSuggestions: { actions.onDismissActiveAISuggestions?() },
                                             onAcceptNextCommand: { actions.onAcceptNextCommand?() },
-                                            onAcceptDiff: { actions.onAcceptSuggestedDiff?($0) },
-                                            onDismissDiff: { actions.onDismissSuggestedDiff?() },
                                             onAttachBlock: { actions.onAttachBlock?($0) },
                                             onDetachBlock: { actions.onDetachBlock?($0) }
                                         )
@@ -379,13 +376,10 @@ private struct ComposeCommandBarView: View {
     // Active AI
     var activeAISuggestions: [ActiveAISuggestion] = []
     var nextCommandSuggestion: String? = nil
-    var suggestedDiffStatus: SuggestedDiffStatus = .idle
     var attachedBlockIDs: Set<UUID> = []
     var onAcceptSuggestion: ((ActiveAISuggestion) -> Void)? = nil
     var onDismissSuggestions: (() -> Void)? = nil
     var onAcceptNextCommand: (() -> String?)? = nil
-    var onAcceptDiff: ((SuggestedDiff) -> Void)? = nil
-    var onDismissDiff: (() -> Void)? = nil
     var onAttachBlock: ((UUID) -> Void)? = nil
     var onDetachBlock: ((UUID) -> Void)? = nil
 
@@ -416,27 +410,6 @@ private struct ComposeCommandBarView: View {
 
     private var warpInputBar: some View {
         VStack(spacing: 0) {
-            // Suggested Code Diff panel (highest priority — shown above everything)
-            if case .ready(let diff) = suggestedDiffStatus {
-                SuggestedDiffPanel(
-                    diff: diff,
-                    onAccept: { onAcceptDiff?(diff) },
-                    onDismiss: { onDismissDiff?() }
-                )
-            } else if case .generating = suggestedDiffStatus {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.mini)
-                    Text("Generating fix…")
-                        .font(.system(size: 10, design: .rounded))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Cancel") { onDismissDiff?() }
-                        .buttonStyle(.plain).font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(Color.orange.opacity(0.06))
-            }
-
             // Active AI suggestion chips
             if !activeAISuggestions.isEmpty {
                 ActiveAISuggestionBar(
@@ -1157,81 +1130,6 @@ private struct AttachedBlocksBar: View {
 }
 
 // MARK: - Suggested Diff Panel
-
-private struct SuggestedDiffPanel: View {
-    let diff: SuggestedDiff
-    let onAccept: () -> Void
-    let onDismiss: () -> Void
-
-    @State private var isExpanded = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack(spacing: 8) {
-                Image(systemName: "wand.and.stars")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.orange)
-                Text("Suggested Fix")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.orange)
-                if let path = diff.filePath {
-                    Text((path as NSString).lastPathComponent)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer()
-                Button(isExpanded ? "Collapse" : "View diff") {
-                    withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 10, design: .rounded))
-                .foregroundStyle(.secondary)
-                Button("Dismiss", action: onDismiss)
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10, design: .rounded))
-                    .foregroundStyle(.secondary)
-                Button("Apply") { onAccept() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.mini)
-                    .tint(.orange)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-
-            if isExpanded {
-                Divider().opacity(0.3)
-                if !diff.explanation.isEmpty {
-                    Text(diff.explanation)
-                        .font(.system(size: 10, design: .rounded))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.top, 6)
-                }
-                if diff.isValidPatch {
-                    ScrollView {
-                        Text(diff.patchText)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.primary)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
-                    }
-                    .frame(maxHeight: 180)
-                    .background(Color.black.opacity(0.15), in: RoundedRectangle(cornerRadius: 6))
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
-                }
-            }
-        }
-        .background(Color.orange.opacity(0.06))
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.orange.opacity(0.15)).frame(height: 1)
-        }
-    }
-}
 
 // MARK: - Drag and Drop
 

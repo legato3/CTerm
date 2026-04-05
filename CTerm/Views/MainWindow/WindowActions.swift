@@ -64,23 +64,14 @@ final class WindowActions {
     var onAcceptActiveAISuggestion: ((ActiveAISuggestion) -> Void)?
     /// Dismiss all Active AI suggestions.
     var onDismissActiveAISuggestions: (() -> Void)?
-    /// Accept the suggested code diff.
-    var onAcceptSuggestedDiff: ((SuggestedDiff) -> Void)?
-    /// Dismiss the suggested code diff.
-    var onDismissSuggestedDiff: (() -> Void)?
     /// Accept the next-command ghost-text suggestion.
     var onAcceptNextCommand: (() -> String?)?
     /// Attach a command block to the current agent prompt.
     var onAttachBlock: ((UUID) -> Void)?
     /// Detach a previously attached block.
     var onDetachBlock: ((UUID) -> Void)?
-    /// Toggle auto-accept mode on the active tab.
-    var onToggleAutoAccept: (() -> Void)?
     // Active AI state (read by views)
     var activeAISuggestions: [ActiveAISuggestion] = []
     var nextCommandSuggestion: String? = nil
-    var suggestedDiffStatus: SuggestedDiffStatus = .idle
     var attachedBlockIDs: Set<UUID> = []
-    /// Whether auto-accept is enabled on the currently active tab.
-    var activeTabAutoAcceptEnabled: Bool = false
 }

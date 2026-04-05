@@ -30,7 +30,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.register(defaults: [
             AppStorageKeys.activeAIEnabled: true,
             AppStorageKeys.nextCommandEnabled: true,
-            AppStorageKeys.suggestedDiffsEnabled: true,
         ])
 
         // Add CLI to PATH for terminals launched within CTerm
@@ -111,11 +110,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Extract durable facts from the session before quitting.
-        // Uses the active tab's pwd to derive the project key.
+        // Compact memory on quit.
         if let pwd = windowControllers.first?.activeTabPwd {
             let projectKey = AgentMemoryStore.key(for: pwd)
-            SessionFactExtractor.extractFromCurrentSession(projectKey: projectKey)
             AgentMemoryStore.shared.compact(projectKey: projectKey)
         }
 

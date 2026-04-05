@@ -28,8 +28,6 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
     private let tabController: TabLifecycleController
     private let ipcController: IPCWindowController
 
-    // Auto-accept monitors keyed by tab ID.
-    private var autoAcceptMonitors: [UUID: AutoAcceptMonitor] = [:]
     // Token-budget HUD monitors keyed by tab ID (always running, not user-toggled).
     private var paneUsageMonitors: [UUID: PaneUsageMonitor] = [:]
     // Shell error monitors keyed by tab ID (always running, not user-toggled).
@@ -39,7 +37,6 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
     // Active AI engines (shared, updated on tab switch).
     private let activeAIEngine = ActiveAISuggestionEngine()
     private let nextCommandPredictor = NextCommandPredictor()
-    private let suggestedDiffEngine = SuggestedDiffEngine()
 
     // O(1) surface-to-tab reverse lookup. Rebuilt lazily after any structural change.
     private var surfaceToTab: [UUID: (tab: Tab, group: TabGroup)] = [:]
@@ -758,13 +755,6 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
             self?.activeAIEngine.clear()
             self?.syncActiveAIState()
         }
-        windowActions.onAcceptSuggestedDiff = { [weak self] diff in
-            self?.applySuggestedDiff(diff)
-        }
-        windowActions.onDismissSuggestedDiff = { [weak self] in
-            self?.suggestedDiffEngine.dismiss()
-            self?.syncActiveAIState()
-        }
         windowActions.onAcceptNextCommand = { [weak self] in
             let accepted = self?.nextCommandPredictor.accept()
             self?.syncActiveAIState()
@@ -777,11 +767,6 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
         windowActions.onDetachBlock = { [weak self] blockID in
             self?.activeTab?.detachBlock(blockID)
             self?.syncActiveAIState()
-        }
-        windowActions.onToggleAutoAccept = { [weak self] in
-            guard let self else { return }
-            self.toggleAutoAccept()
-            windowActions.activeTabAutoAcceptEnabled = self.activeTab?.autoAcceptEnabled ?? false
         }
     }
 
@@ -990,16 +975,8 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func toggleAutoAccept() {
-        guard let tab = activeTab else { return }
-        tab.autoAcceptEnabled.toggle()
-        if tab.autoAcceptEnabled {
-            let monitor = AutoAcceptMonitor(tab: tab)
-            autoAcceptMonitors[tab.id] = monitor
-            monitor.start()
-        } else {
-            autoAcceptMonitors[tab.id]?.stop()
-            autoAcceptMonitors.removeValue(forKey: tab.id)
-        }
+        // Auto-accept has been removed — it injected keystrokes without
+        // per-action consent, violating the "controllable" UX principle.
     }
 
     // MARK: - Shell Error Routing
@@ -1012,7 +989,7 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
 
         // Prefer an auto-accept tab (Claude is actively running there).
         // Fall back to any other non-source tab.
-        let target = allTabs.first { $0.id != tabID && $0.autoAcceptEnabled }
+        let target = allTabs.first { $0.id != tabID }
                   ?? allTabs.first { $0.id != tabID }
 
         let message = """
@@ -1135,9 +1112,7 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
     private func syncActiveAIState() {
         windowActions.activeAISuggestions = activeAIEngine.suggestions
         windowActions.nextCommandSuggestion = nextCommandPredictor.suggestion
-        windowActions.suggestedDiffStatus = suggestedDiffEngine.status
         windowActions.attachedBlockIDs = activeTab?.attachedBlockIDs ?? []
-        windowActions.activeTabAutoAcceptEnabled = activeTab?.autoAcceptEnabled ?? false
     }
 
     private func acceptActiveAISuggestion(_ suggestion: ActiveAISuggestion) {
@@ -1168,36 +1143,6 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
     private func revealDedicatedAgentSidebar() {
         windowSession.showSidebar = true
         windowSession.sidebarMode = .agentSession
-    }
-
-    private func applySuggestedDiff(_ diff: SuggestedDiff) {
-        guard diff.isValidPatch, let filePath = diff.filePath else {
-            // No patch — route explanation to agent
-            let message = "Apply this fix: \(diff.explanation)"
-            TerminalControlBridge.shared.routeToNearestAgentPaneOrActive(text: message)
-            suggestedDiffEngine.markApplied()
-            syncActiveAIState()
-            return
-        }
-
-        // Write patch to a temp file and apply with `patch`
-        let tmpURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cterm_diff_\(UUID().uuidString).patch")
-        do {
-            try diff.patchText.write(to: tmpURL, atomically: true, encoding: .utf8)
-            let pwd = activeTab?.pwd ?? FileManager.default.currentDirectoryPath
-            let command = "patch -p1 < \(tmpURL.path)"
-            TerminalControlBridge.shared.delegate?.runInPane(
-                tabID: activeTab?.id,
-                paneID: nil,
-                text: command,
-                pressEnter: true
-            )
-            suggestedDiffEngine.markApplied()
-        } catch {
-            logger.error("SuggestedDiff: failed to write patch: \(error)")
-        }
-        syncActiveAIState()
     }
 
     private func focusedSurfaceController() -> GhosttySurfaceController? {
@@ -1500,11 +1445,6 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
         if tab.id == activeTab?.id, let block = tab.commandBlock(id: commandBlockID) {
             activeAIEngine.recentBlocks = tab.commandBlocks
             activeAIEngine.onBlockFinished(block, pwd: tab.pwd)
-            if block.status == .failed {
-                suggestedDiffEngine.onBlockFailed(block, pwd: tab.pwd)
-            } else {
-                suggestedDiffEngine.reset()
-            }
             syncActiveAIState()
         }
 
@@ -1774,8 +1714,6 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func cleanupTabResources(id tabID: UUID) {
-        autoAcceptMonitors[tabID]?.stop()
-        autoAcceptMonitors.removeValue(forKey: tabID)
         paneUsageMonitors[tabID]?.stop()
         paneUsageMonitors.removeValue(forKey: tabID)
         shellErrorMonitors[tabID]?.stop()

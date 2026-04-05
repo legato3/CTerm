@@ -1,13 +1,8 @@
 // AgentLoopCoordinator.swift
 // CTerm
 //
-// Top-level coordinator for the agent pipeline:
-// intent → classify → plan → approve → execute → observe → summarize → suggest.
-//
-// Owns the AgentSessionState and orchestrates the pipeline stages.
-// Wires output back into ActiveAISuggestionEngine as clickable chips.
-// Supports streaming plan preview, observation→replan feedback, and cost budget.
-// One coordinator per active agent session (typically one per tab).
+// Top-level coordinator for the agent pipeline.
+// Simplified: approve the plan or don't. No batching, no denial negotiation.
 
 import Foundation
 import OSLog
@@ -40,69 +35,54 @@ final class AgentLoopCoordinator {
 
     // MARK: - Pipeline Entry Point
 
-    /// Start the full agent pipeline for a user request.
     func startSession(
         intent: String,
         tabID: UUID? = nil,
         pwd: String?,
         activeTab: Tab? = nil
     ) async {
-        // Cancel any existing session
         if let existing = activeSession, !existing.phase.isTerminal {
             existing.transitionTo(.completed)
             archiveSession(existing)
         }
 
-        // Build enriched prompt with context (now includes cross-session handoff)
         let enrichedIntent = AgentPromptContextBuilder.buildPrompt(goal: intent, activeTab: activeTab)
-
         let session = AgentSessionState(userIntent: enrichedIntent, tabID: tabID)
         activeSession = session
         streamingPreview = nil
 
         logger.info("AgentLoop: starting session for: \(session.displayIntent.prefix(80))")
 
-        // Phase 1: Classify intent
+        // Classify
         session.transitionTo(.classifying)
         let (category, confidence) = IntentRouter.classify(enrichedIntent)
-
-        // Use LLM classification if keyword confidence is low
         if confidence < 0.4 {
-            let llmCategory = await IntentRouter.classifyWithLLM(intent, pwd: pwd)
-            session.classifiedIntent = llmCategory
+            session.classifiedIntent = await IntentRouter.classifyWithLLM(intent, pwd: pwd)
         } else {
             session.classifiedIntent = category
         }
-
         guard !session.phase.isTerminal else { return }
 
-        // Wire streaming preview callback
+        // Build plan
         PlanBuilder.onStreamingPreview = { [weak self] text in
             self?.streamingPreview = text
         }
-
-        // Phase 2: Build plan (with streaming preview for LLM-generated plans)
         await PlanBuilder.buildPlan(for: session, pwd: pwd)
-
-        // Clear streaming preview once plan is ready
         streamingPreview = nil
         PlanBuilder.onStreamingPreview = nil
 
         guard !session.phase.isTerminal else { return }
 
-        // If awaiting approval, stop here — user will call approveAndExecute()
         if session.phase == .awaitingApproval {
             logger.info("AgentLoop: plan ready, awaiting approval (\(session.planSteps.count) steps)")
             return
         }
 
-        // Phase 3+: Execute (auto-approved intents proceed immediately)
         await executeSession(pwd: pwd)
     }
 
-    // MARK: - Approval
+    // MARK: - Approval (simple: approve all or stop)
 
-    /// Approve all pending steps and begin execution.
     func approveAndExecute(pwd: String?) async {
         guard let session = activeSession,
               session.phase == .awaitingApproval else { return }
@@ -111,7 +91,6 @@ final class AgentLoopCoordinator {
             session.planSteps[i].status = .approved
         }
 
-        // Post approval notification for TriggerEngine
         NotificationCenter.default.post(
             name: .agentPlanApproved,
             object: nil,
@@ -122,74 +101,6 @@ final class AgentLoopCoordinator {
         )
 
         await executeSession(pwd: pwd)
-    }
-
-    /// Batch-approve steps using risk-aware batching.
-    /// Auto-approves low-risk steps and returns batches for user review.
-    func batchApproveSteps(pwd: String?, gitBranch: String? = nil) -> [ApprovalBatch] {
-        guard let session = activeSession,
-              session.phase == .awaitingApproval else { return [] }
-
-        let projectKey = pwd.map { AgentMemoryStore.key(for: $0) }
-        let (autoApproved, batches) = ApprovalBatcher.batch(
-            steps: session.planSteps,
-            pwd: pwd,
-            gitBranch: gitBranch,
-            memory: ApprovalMemory.shared
-        )
-
-        // Auto-approve low-risk steps immediately
-        for stepID in autoApproved {
-            if let idx = session.planSteps.firstIndex(where: { $0.id == stepID }) {
-                session.planSteps[idx].status = .approved
-            }
-        }
-
-        return batches
-    }
-
-    /// Approve a specific batch and optionally remember the decision.
-    func approveBatch(_ batch: ApprovalBatch, rememberScope: ApprovalScope?, pwd: String?) {
-        guard let session = activeSession else { return }
-
-        for stepID in batch.stepIDs {
-            if let idx = session.planSteps.firstIndex(where: { $0.id == stepID }) {
-                session.planSteps[idx].status = .approved
-            }
-        }
-
-        // Remember if requested
-        if let scope = rememberScope {
-            let projectKey = pwd.map { AgentMemoryStore.key(for: $0) }
-            ApprovalMemory.shared.rememberBatch(batch, scope: scope, projectKey: projectKey)
-        }
-    }
-
-    /// Deny a batch and propose safer alternatives.
-    func denyBatch(_ batch: ApprovalBatch) -> [DenialAlternative] {
-        guard let session = activeSession else { return [] }
-
-        var alternatives: [DenialAlternative] = []
-        for item in batch.items {
-            if let idx = session.planSteps.firstIndex(where: { $0.id == item.stepID }) {
-                session.planSteps[idx].status = .skipped
-            }
-            if let alt = DenialHandler.proposeSaferAlternative(
-                command: item.command,
-                assessment: item.assessment
-            ) {
-                alternatives.append(alt)
-            }
-        }
-        return alternatives
-    }
-
-    /// Approve a single step by ID.
-    func approveStep(id: UUID) {
-        guard let session = activeSession else { return }
-        if let idx = session.planSteps.firstIndex(where: { $0.id == id }) {
-            session.planSteps[idx].status = .approved
-        }
     }
 
     /// Skip a step by ID.
@@ -213,7 +124,6 @@ final class AgentLoopCoordinator {
 
     // MARK: - Command Finished (from terminal)
 
-    /// Called when a command block finishes in the terminal.
     func handleCommandFinished(exitCode: Int, output: String?) {
         executionCoordinator?.handleCommandFinished(exitCode: exitCode, output: output)
     }
@@ -231,7 +141,6 @@ final class AgentLoopCoordinator {
         )
         self.executionCoordinator = coordinator
 
-        // Wire completion callback
         coordinator.onAllStepsCompleted = { [weak self] in
             guard let self else { return }
             Task { @MainActor in
@@ -239,19 +148,15 @@ final class AgentLoopCoordinator {
             }
         }
 
-        // Wire observation callback
-        coordinator.onObservation = { [weak self] stepIndex, output in
+        coordinator.onObservation = { [weak self] _, _ in
             guard let self, let session = self.activeSession else { return }
-            // Track file changes from output
             let changedFiles = FileChangeStore.shared.recentPaths(limit: 5)
             for file in changedFiles {
                 session.addArtifact(AgentArtifact(kind: .fileChanged, value: file))
             }
         }
 
-        // Wire replan callback — uses LLM to generate replacement steps on failure
-        coordinator.onReplanNeeded = { [weak self] failedStep, output in
-            guard self != nil else { return nil }
+        coordinator.onReplanNeeded = { failedStep, output in
             return await Self.generateReplanSteps(failedStep: failedStep, output: output, pwd: pwd)
         }
 
@@ -311,14 +216,8 @@ final class AgentLoopCoordinator {
 
     private func summarizeAndSuggest(pwd: String?) async {
         guard let session = activeSession else { return }
-
-        // Phase 5: Summarize
         await ResultSummarizer.summarize(session, pwd: pwd)
-
-        // Phase 6: Wire suggestions into ActiveAI chips
         wireSuggestionsToActiveAI(session)
-
-        // Archive and clear
         archiveSession(session)
     }
 
@@ -327,7 +226,6 @@ final class AgentLoopCoordinator {
     private func wireSuggestionsToActiveAI(_ session: AgentSessionState) {
         suggestionEngine.clear()
 
-        // Add completion chip
         let completionChip = ActiveAISuggestion(
             prompt: session.summary ?? "Session completed",
             icon: session.planSteps.contains(where: { $0.status == .failed })
@@ -337,17 +235,13 @@ final class AgentLoopCoordinator {
         )
         suggestionEngine.injectSuggestion(completionChip)
 
-        // Add next-action chips
         for action in session.nextActions {
-            let chip = ActiveAISuggestion(
+            suggestionEngine.injectSuggestion(ActiveAISuggestion(
                 prompt: action,
                 icon: "arrow.right.circle",
                 kind: .nextStep
-            )
-            suggestionEngine.injectSuggestion(chip)
+            ))
         }
-
-        logger.info("AgentLoop: wired \(session.nextActions.count + 1) suggestion(s) to ActiveAI")
     }
 
     // MARK: - History

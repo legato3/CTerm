@@ -1,20 +1,17 @@
 // IPCAgentState.swift
 // CTerm
 //
-// Observable singleton that continuously polls the IPC store and maintains a
-// persistent message log + unread count — independent of which sidebar tab is active.
+// Observable singleton for peer agent visibility.
+// Merges what was previously IPCAgentState + DelegationDashboardState into
+// a single view of "other agents and their work."
 
 import Foundation
 
 // MARK: - AgentStatus
 
-/// Inferred liveness of a registered peer based on heartbeat recency.
 enum AgentStatus: Sendable {
-    /// Heartbeat within the last 30 seconds — agent is actively running.
     case active
-    /// Heartbeat 30 seconds–5 minutes ago — agent has gone quiet.
     case idle
-    /// Heartbeat more than 5 minutes ago — near TTL expiry, likely disconnected.
     case disconnected
 
     static func infer(from peer: Peer) -> AgentStatus {
@@ -47,7 +44,7 @@ enum AgentStatus: Sendable {
 final class IPCAgentState {
     static let shared = IPCAgentState()
 
-    // MARK: - State (read by views)
+    // MARK: - Peer State
 
     private(set) var peers: [Peer] = []
     private(set) var activityLog: [Message] = []
@@ -55,13 +52,28 @@ final class IPCAgentState {
     private(set) var port: Int = 0
     var unreadCount: Int = 0
 
-    /// Set true while the Agents sidebar tab is visible; resets unread count automatically.
     var isAgentsTabActive: Bool = false {
         didSet { if isAgentsTabActive { unreadCount = 0 } }
     }
 
-    /// Role names from the most recently launched workflow; used by "Rejoin Session".
     var lastWorkflow: [String]? = nil
+
+    /// Number of active (non-disconnected) peers — shown as badge in tab bar.
+    var activePeerCount: Int {
+        peers.filter { AgentStatus.infer(from: $0) != .disconnected }.count
+    }
+
+    // MARK: - Delegation (merged from DelegationDashboardState)
+
+    private(set) var delegationContracts: [DelegationContract] = []
+
+    var activeDelegationCount: Int {
+        delegationContracts.filter { !$0.status.isTerminal }.count
+    }
+
+    func refreshDelegations(_ snapshot: [DelegationContract]) {
+        delegationContracts = snapshot.sorted { $0.createdAt > $1.createdAt }
+    }
 
     // MARK: - Private
 
@@ -108,7 +120,6 @@ final class IPCAgentState {
 
     // MARK: - Log Management
 
-    /// Appends messages not yet seen. Returns the count of newly added messages.
     @discardableResult
     func append(_ messages: [Message]) -> Int {
         let new = messages.filter { !seenMessageIDs.contains($0.id) }

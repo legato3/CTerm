@@ -761,33 +761,17 @@ final class ComposeOverlayController {
     }
 
     /// Returns `true` if the command is safe to auto-run without user approval.
-    /// Delegates to RiskScorer for consistent risk evaluation across the codebase.
-    /// Also checks ApprovalMemory for previously approved patterns.
+    /// Delegates to RiskScorer + AgentPermissionsStore trust mode.
     private func isSafeAutoRunCommand(_ command: String) -> Bool {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty else { return false }
 
         let permissions = AgentPermissionsStore.shared
-
-        // Check permission profile — if runCommands is alwaysAllow, skip risk check
-        if permissions.level(for: .runCommands) == .alwaysAllow { return true }
-        // If runCommands is never or alwaysAsk, always require approval
-        if permissions.isBlocked(.runCommands) { return false }
-        if permissions.level(for: .runCommands) == .alwaysAsk { return false }
-
-        // agentDecides: use RiskScorer
         let pwd = agentTargetController.flatMap { _ in
             TerminalControlBridge.shared.delegate?.activeTabPwd
         }
         let gitBranch = TerminalControlBridge.shared.delegate?.activeTabGitBranch
 
-        // Check approval memory first (fast path)
-        let projectKey = pwd.map { AgentMemoryStore.key(for: $0) }
-        if ApprovalMemory.shared.isRemembered(command: command, projectKey: projectKey) {
-            return true
-        }
-
-        // Risk-score the command
         return RiskScorer.isAutoApprovable(
             command: command,
             pwd: pwd,

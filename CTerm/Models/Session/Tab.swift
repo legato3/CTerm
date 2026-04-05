@@ -105,10 +105,6 @@ class Tab: Identifiable {
     var agentRuntime: AgentRuntimePreset? = nil
     /// Controls how CTerm should submit prompts into this agent tab.
     var agentInputStyle: AgentInputStyle? = nil
-    /// When `true`, Claude Code confirmation prompts are automatically accepted.
-    var autoAcceptEnabled: Bool = false
-    /// Session log of auto-accepted events for this tab.
-    var autoAcceptLog: [AutoAcceptEvent] = []
     /// Most recent shell error detected in this tab. Cleared after routing or dismissal.
     var lastShellError: ShellErrorEvent? = nil
     /// Recent command blocks used by the Warp-style command bar.
@@ -139,7 +135,7 @@ class Tab: Identifiable {
 
     var isAIAgentTab: Bool {
         guard case .terminal = content else { return false }
-        return agentRuntime != nil || autoAcceptEnabled || AgentRuntimeConfiguration.isLikelyAgentTitle(title)
+        return agentRuntime != nil || AgentRuntimeConfiguration.isLikelyAgentTitle(title)
     }
 
     var preferredAgentInputStyle: AgentInputStyle {

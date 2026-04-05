@@ -415,12 +415,6 @@ private struct TabItemButton: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if tab.autoAcceptEnabled {
-                Text("⚡")
-                    .font(.system(size: 10))
-                    .help("Auto-accept mode active — Claude confirmations are auto-approved")
-            }
-
             if let error = tab.lastShellError {
                 Button(action: { onRouteShellError?() }) {
                     Text("⚠")
