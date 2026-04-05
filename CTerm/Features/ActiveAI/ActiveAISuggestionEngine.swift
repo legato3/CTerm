@@ -44,7 +44,7 @@ struct ActiveAISuggestion: Identifiable, Sendable {
 
 @Observable
 @MainActor
-final class ActiveAISuggestionEngine {
+final class ActiveAISuggestionEngine: AgentSessionObserver {
 
     /// Current suggestions. Single output channel — max 2 visible.
     private(set) var suggestions: [ActiveAISuggestion] = []
@@ -114,6 +114,27 @@ final class ActiveAISuggestionEngine {
         if let observer = sessionObserver {
             NotificationCenter.default.removeObserver(observer)
             sessionObserver = nil
+        }
+    }
+
+    // MARK: - AgentSessionObserver
+
+    /// Attach to an AgentSession so we receive phase/completion callbacks directly
+    /// instead of going through NotificationCenter. Callers: AgentLoopCoordinator,
+    /// future inline/queued/delegated session drivers.
+    func attach(to session: AgentSession) {
+        session.addObserver(self)
+    }
+
+    func session(_ session: AgentSession, didComplete result: AgentResult) {
+        for action in result.nextActions.prefix(2) {
+            guard !ConfidenceScorer.isGenericSuggestion(action.prompt) else { continue }
+            injectSuggestion(ActiveAISuggestion(
+                prompt: action.prompt,
+                icon: "arrow.right.circle",
+                kind: .nextStep,
+                confidence: action.confidence
+            ))
         }
     }
 

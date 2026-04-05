@@ -143,7 +143,7 @@ final class BrowserResearchWorkflow {
     func execute(
         goal: String,
         steps: [AgentPlanStep],
-        agentSession: AgentSessionState
+        agentSession: AgentSession
     ) async -> (findings: [BrowserFinding], summary: String) {
         let session = BrowserResearchSession(goal: goal)
         activeSession = session

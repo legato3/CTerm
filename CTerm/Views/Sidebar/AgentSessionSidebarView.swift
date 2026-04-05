@@ -6,7 +6,7 @@ import SwiftUI
 /// conversation history, plan steps, and quick actions.
 struct AgentSessionSidebarView: View {
     @Bindable var assistant: ComposeAssistantState
-    let agentSession: OllamaAgentSession?
+    let agentSession: AgentSession?
     let pwd: String?
 
     @Environment(WindowActions.self) private var actions
@@ -332,7 +332,7 @@ struct AgentSessionSidebarView: View {
 // MARK: - AgentSessionSidebarCard
 
 private struct AgentSessionSidebarCard: View {
-    let session: OllamaAgentSession
+    let session: AgentSession
     let onApprove: () -> Void
     let onStop: () -> Void
 

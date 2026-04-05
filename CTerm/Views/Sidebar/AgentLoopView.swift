@@ -48,7 +48,7 @@ struct AgentLoopView: View {
     // MARK: - Active Session
 
     @ViewBuilder
-    private func activeSessionSection(_ session: AgentSessionState) -> some View {
+    private func activeSessionSection(_ session: AgentSession) -> some View {
         // Phase badge + intent
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -77,13 +77,13 @@ struct AgentLoopView: View {
         }
 
         // Progress bar
-        if !session.planSteps.isEmpty {
+        if !(session.plan?.steps ?? []).isEmpty {
             ProgressView(value: session.progress)
-                .tint(session.planSteps.contains(where: { $0.status == .failed }) ? .orange : .blue)
+                .tint((session.plan?.steps ?? []).contains(where: { $0.status == .failed }) ? .orange : .blue)
         }
 
         // Plan steps
-        if !session.planSteps.isEmpty {
+        if !(session.plan?.steps ?? []).isEmpty {
             planStepsSection(session)
         }
 
@@ -110,13 +110,13 @@ struct AgentLoopView: View {
 
     // MARK: - Plan Steps
 
-    private func planStepsSection(_ session: AgentSessionState) -> some View {
+    private func planStepsSection(_ session: AgentSession) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Plan")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            ForEach(Array(session.planSteps.enumerated()), id: \.element.id) { index, step in
+            ForEach(Array((session.plan?.steps ?? []).enumerated()), id: \.element.id) { index, step in
                 HStack(spacing: 6) {
                     Image(systemName: step.status.icon)
                         .font(.caption)
@@ -156,7 +156,7 @@ struct AgentLoopView: View {
 
     // MARK: - Approval Buttons
 
-    private func approvalButtons(_ session: AgentSessionState) -> some View {
+    private func approvalButtons(_ session: AgentSession) -> some View {
         HStack(spacing: 8) {
             Button("Approve All") {
                 Task {
@@ -283,14 +283,13 @@ struct AgentLoopView: View {
     private func phaseColor(_ phase: AgentPhase) -> Color {
         switch phase {
         case .idle:             return .secondary
-        case .classifying:      return .purple
-        case .planning:         return .blue
+        case .thinking:         return .blue
         case .awaitingApproval: return .orange
-        case .executing:        return .blue
-        case .observing:        return .teal
+        case .running:          return .teal
         case .summarizing:      return .indigo
         case .completed:        return .green
         case .failed:           return .red
+        case .cancelled:        return .secondary
         }
     }
 

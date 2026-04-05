@@ -457,7 +457,7 @@ final class ComposeOverlayController {
         let sessionID = session.id
         let tabID = activeTab.id
         let goal = session.goal
-        let backend = session.backend
+        let backend = session.backend.planningBackend ?? .ollama
         let pwd = activeTab.pwd
         let recentCommandContext = agentRecentCommandContext(for: activeTab)
         let priorAgentContext = agentPriorContext(for: session)
@@ -829,7 +829,7 @@ final class ComposeOverlayController {
             .joined(separator: "\n\n")
     }
 
-    private func agentPriorContext(for session: OllamaAgentSession) -> String {
+    private func agentPriorContext(for session: AgentSession) -> String {
         session.steps
             .prefix(10)
             .reversed()

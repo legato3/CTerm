@@ -31,6 +31,12 @@ final class AgentPlanStore {
         return plan
     }
 
+    /// Point the store at an existing plan (used when the plan was created by
+    /// another subsystem, e.g. owned by an AgentSession).
+    func adoptPlan(_ plan: AgentPlan) {
+        activePlan = plan
+    }
+
     func setPlanReady() {
         guard let plan = activePlan, plan.status == .planning else { return }
         plan.status = plan.steps.isEmpty ? .failed : .ready

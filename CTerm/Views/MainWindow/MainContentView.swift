@@ -355,7 +355,7 @@ final class DiffGlassHostView: NSView {
 private struct ComposeCommandBarView: View {
     @Bindable var assistant: ComposeAssistantState
     let commandBlocks: [TerminalCommandBlock]
-    let agentSession: OllamaAgentSession?
+    let agentSession: AgentSession?
     let shellError: ShellErrorEvent?
     let ollamaModel: String
     let ollamaEndpoint: String

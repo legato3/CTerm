@@ -93,7 +93,7 @@ final class TaskExecutionCoordinator {
         task.transitionTo(.paused)
         if task.id == activeTask?.id {
             // Pause the agent session
-            agentCoordinator.activeSession?.transitionTo(.completed)
+            agentCoordinator.activeSession?.transition(to: .completed)
         }
     }
 
@@ -287,16 +287,14 @@ final class TaskExecutionCoordinator {
 
         // Map agent phase → task phase
         switch session.phase {
-        case .classifying, .planning:
+        case .thinking:
             if task.phase != .planning { task.transitionTo(.planning) }
         case .awaitingApproval:
             task.transitionTo(.awaitingApproval)
-        case .executing:
+        case .running:
             if task.phase == .awaitingApproval || task.phase == .planning {
                 task.transitionTo(.executing)
             }
-        case .observing:
-            task.transitionTo(.observing)
         case .summarizing:
             task.transitionTo(.summarizing)
         case .completed:
@@ -305,6 +303,8 @@ final class TaskExecutionCoordinator {
             task.transitionTo(.completed)
         case .failed:
             task.fail(message: session.errorMessage ?? "Agent session failed")
+        case .cancelled:
+            task.fail(message: "Agent session cancelled")
         case .idle:
             break
         }

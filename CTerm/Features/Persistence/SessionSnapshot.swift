@@ -6,19 +6,23 @@
 import Foundation
 
 struct SessionSnapshot: Codable, Equatable {
-    static let currentSchemaVersion = 4
+    static let currentSchemaVersion = 5
 
     let schemaVersion: Int
     let windows: [WindowSnapshot]
     /// Named workspace tag. `nil` for the auto-save slot; set when saving as a named workspace.
     var workspaceName: String?
+    /// Active agent sessions at snapshot time. Restored into AgentSessionRegistry on launch.
+    var agentSessions: [AgentSessionSnapshot]?
 
     init(schemaVersion: Int = Self.currentSchemaVersion,
          windows: [WindowSnapshot] = [],
-         workspaceName: String? = nil) {
+         workspaceName: String? = nil,
+         agentSessions: [AgentSessionSnapshot]? = nil) {
         self.schemaVersion = schemaVersion
         self.windows = windows
         self.workspaceName = workspaceName
+        self.agentSessions = agentSessions
     }
 }
 
@@ -29,7 +33,13 @@ extension SessionSnapshot {
         if current.schemaVersion < 2 { current = migrateV1ToV2(current) }
         if current.schemaVersion < 3 { current = migrateV2ToV3(current) }
         if current.schemaVersion < 4 { current = migrateV3ToV4(current) }
-        return SessionSnapshot(schemaVersion: currentSchemaVersion, windows: current.windows)
+        if current.schemaVersion < 5 { current = migrateV4ToV5(current) }
+        return SessionSnapshot(
+            schemaVersion: currentSchemaVersion,
+            windows: current.windows,
+            workspaceName: current.workspaceName,
+            agentSessions: current.agentSessions
+        )
     }
 
     // v1 → v2: no structural changes; optional field defaults handled by Decodable.
@@ -45,6 +55,11 @@ extension SessionSnapshot {
     // v3 → v4: no structural changes; optional field defaults handled by Decodable.
     private static func migrateV3ToV4(_ s: SessionSnapshot) -> SessionSnapshot {
         SessionSnapshot(schemaVersion: 4, windows: s.windows)
+    }
+
+    // v4 → v5: adds optional `agentSessions` at the top level (defaulted to nil by Decodable).
+    private static func migrateV4ToV5(_ s: SessionSnapshot) -> SessionSnapshot {
+        SessionSnapshot(schemaVersion: 5, windows: s.windows, workspaceName: s.workspaceName, agentSessions: nil)
     }
 }
 
@@ -158,9 +173,12 @@ struct TabSnapshot: Codable, Equatable {
 // MARK: - Conversion to/from Runtime Models
 
 extension AppSession {
+    @MainActor
     func snapshot() -> SessionSnapshot {
-        SessionSnapshot(
-            windows: windows.map { $0.snapshot() }
+        let active = AgentSessionRegistry.shared.all.map { $0.persistenceSnapshot() }
+        return SessionSnapshot(
+            windows: windows.map { $0.snapshot() },
+            agentSessions: active.isEmpty ? nil : active
         )
     }
 }

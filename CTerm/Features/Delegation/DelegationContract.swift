@@ -71,6 +71,8 @@ struct DelegationContract: Identifiable, Sendable, Codable {
     var completedAt: Date?
     var retryCount: Int
     var lastError: String?
+    /// Id of the unified AgentSession tracking this contract's lifecycle.
+    var sessionID: UUID?
 
     init(
         ownerPeerID: UUID,

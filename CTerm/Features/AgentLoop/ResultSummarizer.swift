@@ -16,8 +16,8 @@ enum ResultSummarizer {
     // MARK: - Public API
 
     /// Summarize a completed session. Mutates the session with summary and next actions.
-    static func summarize(_ session: AgentSessionState, pwd: String?) async {
-        session.transitionTo(.summarizing)
+    static func summarize(_ session: AgentSession, pwd: String?) async {
+        session.transition(to: .summarizing)
 
         let summary = buildSummary(session)
         session.summary = summary
@@ -29,7 +29,7 @@ enum ResultSummarizer {
         // Persist handoff to memory for cross-session continuity
         persistHandoff(session, pwd: pwd)
 
-        session.transitionTo(.completed)
+        session.transition(to: .completed)
 
         // Post notification for ActiveAI to pick up
         NotificationCenter.default.post(
@@ -49,11 +49,11 @@ enum ResultSummarizer {
 
     // MARK: - Summary Construction
 
-    private static func buildSummary(_ session: AgentSessionState) -> String {
-        let total = session.planSteps.count
-        let succeeded = session.planSteps.filter { $0.status == .succeeded }.count
-        let failed = session.planSteps.filter { $0.status == .failed }.count
-        let skipped = session.planSteps.filter { $0.status == .skipped }.count
+    private static func buildSummary(_ session: AgentSession) -> String {
+        let total = (session.plan?.steps ?? []).count
+        let succeeded = (session.plan?.steps ?? []).filter { $0.status == .succeeded }.count
+        let failed = (session.plan?.steps ?? []).filter { $0.status == .failed }.count
+        let skipped = (session.plan?.steps ?? []).filter { $0.status == .skipped }.count
 
         var parts: [String] = []
 
@@ -102,14 +102,14 @@ enum ResultSummarizer {
 
     // MARK: - Next Action Generation
 
-    private static func generateNextActions(_ session: AgentSessionState, pwd: String?) async -> [String] {
+    private static func generateNextActions(_ session: AgentSession, pwd: String?) async -> [String] {
         var actions: [String] = []
 
         // Static suggestions based on outcome
-        let hasFailed = session.planSteps.contains { $0.status == .failed }
+        let hasFailed = (session.plan?.steps ?? []).contains { $0.status == .failed }
 
         if hasFailed {
-            let failedStep = session.planSteps.first { $0.status == .failed }
+            let failedStep = (session.plan?.steps ?? []).first { $0.status == .failed }
             if let step = failedStep {
                 actions.append("Fix: \(step.title.prefix(50))")
             }
@@ -145,8 +145,8 @@ enum ResultSummarizer {
         return Array(actions.prefix(3)) // Cap at 3 suggestions
     }
 
-    private static func generateLLMNextAction(_ session: AgentSessionState, pwd: String?) async -> String? {
-        let lastOutput = session.planSteps.last(where: { $0.output != nil })?.output ?? ""
+    private static func generateLLMNextAction(_ session: AgentSession, pwd: String?) async -> String? {
+        let lastOutput = (session.plan?.steps ?? []).last(where: { $0.output != nil })?.output ?? ""
         let prompt = """
         Based on this completed task, suggest the single most useful next action as a short prompt (max 12 words).
         The prompt will be sent to an AI coding agent.
@@ -170,7 +170,7 @@ enum ResultSummarizer {
 
     // MARK: - Handoff Persistence
 
-    private static func persistHandoff(_ session: AgentSessionState, pwd: String?) {
+    private static func persistHandoff(_ session: AgentSession, pwd: String?) {
         guard let pwd else { return }
         let projectKey = AgentMemoryStore.key(for: pwd)
 
@@ -178,8 +178,8 @@ enum ResultSummarizer {
         AgentMemoryStore.shared.saveHandoff(
             projectKey: projectKey,
             goal: session.displayIntent,
-            stepsCompleted: session.planSteps.filter { $0.status == .succeeded }.count,
-            totalSteps: session.planSteps.count,
+            stepsCompleted: (session.plan?.steps ?? []).filter { $0.status == .succeeded }.count,
+            totalSteps: (session.plan?.steps ?? []).count,
             filesChanged: session.artifacts.filter { $0.kind == .fileChanged }.map(\.value),
             outcome: session.phase.label
         )

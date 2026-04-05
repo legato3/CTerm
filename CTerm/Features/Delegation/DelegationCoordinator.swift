@@ -21,6 +21,24 @@ actor DelegationCoordinator {
 
     private init() {}
 
+    /// Sync the AgentSession phase to match the contract status.
+    private func syncSessionPhase(for contract: DelegationContract) async {
+        guard let sid = contract.sessionID else { return }
+        let status = contract.status
+        await MainActor.run {
+            guard let session = AgentSessionRegistry.shared.session(id: sid) else { return }
+            switch status {
+            case .pending, .accepted: session.transition(to: .running)
+            case .running:            session.transition(to: .running)
+            case .completed:          session.transition(to: .completed)
+            case .failed:             session.transition(to: .failed)
+            case .timedOut:           session.transition(to: .failed)
+            case .peerLost:           session.transition(to: .failed)
+            case .cancelled:          session.transition(to: .cancelled)
+            }
+        }
+    }
+
     // MARK: - Contract Lifecycle
 
     /// Create a new delegation contract. Sends the task prompt to the target peer
@@ -77,6 +95,27 @@ actor DelegationCoordinator {
             logger.warning("Delegation \(contract.id): target peer '\(targetPeerName)' not found")
         }
 
+        // Register a local AgentSession projection so this delegation shows up
+        // in the unified active-sessions list.
+        let contractID = contract.id
+        let peerNameCopy = targetPeerName
+        let promptCopy = prompt
+        let sessionID = await MainActor.run { () -> UUID in
+            let session = AgentSessionRouter.shared.start(
+                AgentSessionRequest(
+                    intent: promptCopy,
+                    kind: .delegated,
+                    backend: .peer(name: peerNameCopy),
+                    tabID: nil
+                )
+            )
+            // Delegation begins immediately waiting on the peer.
+            session.transition(to: .running)
+            _ = contractID  // silence unused
+            return session.id
+        }
+        contract.sessionID = sessionID
+
         contracts[contract.id] = contract
         ensureMonitoring()
 
@@ -113,6 +152,7 @@ actor DelegationCoordinator {
             contract.status = .completed
             contract.completedAt = Date()
             contracts[taskID] = contract
+            await syncSessionPhase(for: contract)
             logger.info("Delegation \(taskID): completed by '\(peerName)'")
 
             // Notify the owner peer via message
@@ -139,6 +179,7 @@ actor DelegationCoordinator {
                 await notifyOwner(contract: contract, message: "Delegation failed: malformed result from \(peerName).")
             }
             contracts[taskID] = contract
+            await syncSessionPhase(for: contract)
         }
 
         let reportSnapshot = Array(contracts.values)
@@ -157,6 +198,7 @@ actor DelegationCoordinator {
         contract.status = .accepted
         contract.acceptedAt = Date()
         contracts[taskID] = contract
+        await syncSessionPhase(for: contract)
 
         let acceptSnapshot = Array(contracts.values)
         await MainActor.run {
@@ -172,6 +214,7 @@ actor DelegationCoordinator {
         contract.status = .running
         contract.startedAt = Date()
         contracts[taskID] = contract
+        await syncSessionPhase(for: contract)
 
         let runSnapshot = Array(contracts.values)
         await MainActor.run {
@@ -185,6 +228,7 @@ actor DelegationCoordinator {
         contract.status = .cancelled
         contract.completedAt = Date()
         contracts[taskID] = contract
+        await syncSessionPhase(for: contract)
 
         let cancelSnapshot = Array(contracts.values)
         await MainActor.run {
@@ -263,6 +307,7 @@ actor DelegationCoordinator {
                     await notifyOwner(contract: contract, message: "Delegation timed out for '\(contract.targetPeerName)'.")
                 }
                 contracts[id] = contract
+                await syncSessionPhase(for: contract)
                 changed = true
                 continue
             }
@@ -281,6 +326,7 @@ actor DelegationCoordinator {
                     await notifyOwner(contract: contract, message: "Peer '\(contract.targetPeerName)' disappeared. Delegation failed.")
                 }
                 contracts[id] = contract
+                await syncSessionPhase(for: contract)
                 changed = true
             }
         }

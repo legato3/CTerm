@@ -15,10 +15,10 @@ private let logger = Logger(subsystem: "com.legato3.cterm", category: "AgentLoop
 final class AgentLoopCoordinator {
 
     /// The active session being coordinated. Nil when idle.
-    private(set) var activeSession: AgentSessionState?
+    private(set) var activeSession: AgentSession?
 
     /// History of completed sessions (most recent first). Capped at 20.
-    private(set) var sessionHistory: [AgentSessionState] = []
+    private(set) var sessionHistory: [AgentSession] = []
 
     /// Streaming plan preview text (updated during LLM plan generation).
     private(set) var streamingPreview: String?
@@ -42,19 +42,30 @@ final class AgentLoopCoordinator {
         activeTab: Tab? = nil
     ) async {
         if let existing = activeSession, !existing.phase.isTerminal {
-            existing.transitionTo(.completed)
+            existing.transition(to: .completed)
             archiveSession(existing)
         }
 
         let enrichedIntent = AgentPromptContextBuilder.buildPrompt(goal: intent, activeTab: activeTab)
-        let session = AgentSessionState(userIntent: enrichedIntent, tabID: tabID)
+        let session = AgentSessionRouter.shared.start(
+            AgentSessionRequest(
+                intent: intent,
+                kind: .multiStep,
+                backend: .ollama,
+                tabID: tabID,
+                preEnrichedPrompt: enrichedIntent
+            ),
+            activeTab: activeTab
+        )
+        // multiStep sessions expose a plan for explicit step tracking.
+        session.plan = AgentPlan(goal: enrichedIntent, backend: .ollama)
         activeSession = session
         streamingPreview = nil
 
         logger.info("AgentLoop: starting session for: \(session.displayIntent.prefix(80))")
 
         // Classify
-        session.transitionTo(.classifying)
+        session.transition(to: .thinking)
         let (category, confidence) = IntentRouter.classify(enrichedIntent)
         if confidence < 0.4 {
             session.classifiedIntent = await IntentRouter.classifyWithLLM(intent, pwd: pwd)
@@ -74,7 +85,7 @@ final class AgentLoopCoordinator {
         guard !session.phase.isTerminal else { return }
 
         if session.phase == .awaitingApproval {
-            logger.info("AgentLoop: plan ready, awaiting approval (\(session.planSteps.count) steps)")
+            logger.info("AgentLoop: plan ready, awaiting approval (\(session.plan?.steps.count ?? 0) steps)")
             return
         }
 
@@ -85,10 +96,11 @@ final class AgentLoopCoordinator {
 
     func approveAndExecute(pwd: String?) async {
         guard let session = activeSession,
-              session.phase == .awaitingApproval else { return }
+              session.phase == .awaitingApproval,
+              let plan = session.plan else { return }
 
-        for i in session.planSteps.indices where session.planSteps[i].status == .pending {
-            session.planSteps[i].status = .approved
+        for i in plan.steps.indices where plan.steps[i].status == .pending {
+            plan.steps[i].status = .approved
         }
 
         NotificationCenter.default.post(
@@ -96,7 +108,7 @@ final class AgentLoopCoordinator {
             object: nil,
             userInfo: [
                 "goal": session.displayIntent,
-                "totalSteps": session.planSteps.count,
+                "totalSteps": plan.steps.count,
             ]
         )
 
@@ -105,9 +117,9 @@ final class AgentLoopCoordinator {
 
     /// Skip a step by ID.
     func skipStep(id: UUID) {
-        guard let session = activeSession else { return }
-        if let idx = session.planSteps.firstIndex(where: { $0.id == id }) {
-            session.planSteps[idx].status = .skipped
+        guard let plan = activeSession?.plan else { return }
+        if let idx = plan.steps.firstIndex(where: { $0.id == id }) {
+            plan.steps[idx].status = .skipped
         }
     }
 
@@ -116,7 +128,7 @@ final class AgentLoopCoordinator {
     func stopSession() {
         guard let session = activeSession else { return }
         executionCoordinator?.stop()
-        session.transitionTo(.completed)
+        session.transition(to: .completed)
         session.summary = "Stopped by user."
         archiveSession(session)
         activeSession = nil
@@ -133,13 +145,15 @@ final class AgentLoopCoordinator {
     private func executeSession(pwd: String?) async {
         guard let session = activeSession else { return }
 
-        let executor = AgentPlanExecutor(planStore: planStore)
         let coordinator = ExecutionCoordinator(
             session: session,
-            planStore: planStore,
-            executor: executor
+            planStore: planStore
         )
         self.executionCoordinator = coordinator
+
+        // Attach the suggestion engine as an observer so completion events flow
+        // through the unified observer protocol instead of NotificationCenter.
+        suggestionEngine.attach(to: session)
 
         coordinator.onAllStepsCompleted = { [weak self] in
             guard let self else { return }
@@ -223,12 +237,13 @@ final class AgentLoopCoordinator {
 
     // MARK: - ActiveAI Integration
 
-    private func wireSuggestionsToActiveAI(_ session: AgentSessionState) {
+    private func wireSuggestionsToActiveAI(_ session: AgentSession) {
         suggestionEngine.clear()
 
+        let anyFailed = session.plan?.steps.contains(where: { $0.status == .failed }) ?? false
         let completionChip = ActiveAISuggestion(
             prompt: session.summary ?? "Session completed",
-            icon: session.planSteps.contains(where: { $0.status == .failed })
+            icon: anyFailed
                 ? "exclamationmark.triangle.fill"
                 : "checkmark.circle.fill",
             kind: .continueAgent
@@ -246,7 +261,7 @@ final class AgentLoopCoordinator {
 
     // MARK: - History
 
-    private func archiveSession(_ session: AgentSessionState) {
+    private func archiveSession(_ session: AgentSession) {
         sessionHistory.insert(session, at: 0)
         if sessionHistory.count > 20 {
             sessionHistory = Array(sessionHistory.prefix(20))

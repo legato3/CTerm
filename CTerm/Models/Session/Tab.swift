@@ -109,8 +109,9 @@ class Tab: Identifiable {
     var lastShellError: ShellErrorEvent? = nil
     /// Recent command blocks used by the Warp-style command bar.
     var commandBlocks: [TerminalCommandBlock] = []
-    /// Per-tab Ollama agent session attached to the Warp-style command bar.
-    var ollamaAgentSession: OllamaAgentSession? = nil
+    /// Active inline AgentSession driven from the compose bar. Mirrors an entry
+    /// in AgentSessionRegistry so the UI can bind to a stable per-tab slot.
+    var ollamaAgentSession: AgentSession? = nil
     /// Block IDs explicitly attached to the next agent prompt (Warp-style block attachment).
     var attachedBlockIDs: Set<UUID> = []
     let registry: SurfaceRegistry

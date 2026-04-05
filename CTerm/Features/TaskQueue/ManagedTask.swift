@@ -46,7 +46,7 @@ final class ManagedTask: Identifiable {
     // MARK: - Execution Tracking
 
     /// The agent session driving this task (set when execution starts).
-    var agentSession: AgentSessionState?
+    var agentSession: AgentSession?
 
     /// Plan steps (mirrored from agent session for direct binding).
     var planSteps: [AgentPlanStep] = []

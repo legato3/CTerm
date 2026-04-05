@@ -28,10 +28,10 @@ enum ExecutionStrategy: String, Sendable {
 @MainActor
 final class ExecutionCoordinator {
 
-    private let session: AgentSessionState
+    private let session: AgentSession
     private let planStore: AgentPlanStore
-    private let executor: AgentPlanExecutor
     private var executionTask: Task<Void, Never>?
+    private var currentStepStartTime: Date?
 
     /// Callback when all steps are done (triggers summarization).
     var onAllStepsCompleted: (() -> Void)?
@@ -43,23 +43,25 @@ final class ExecutionCoordinator {
     /// Returns replacement steps for the remaining plan, or nil to continue as-is.
     var onReplanNeeded: ((_ failedStep: AgentPlanStep, _ output: String) async -> [AgentPlanStep]?)?
 
-    init(session: AgentSessionState, planStore: AgentPlanStore, executor: AgentPlanExecutor) {
+    init(session: AgentSession, planStore: AgentPlanStore) {
         self.session = session
         self.planStore = planStore
-        self.executor = executor
     }
 
     // MARK: - Execution
 
     func start() {
         guard !session.phase.isTerminal else { return }
-        session.transitionTo(.executing)
+        session.transition(to: .running)
 
-        // Sync session steps into the plan store
-        _ = planStore.createPlan(goal: session.userIntent, backend: .ollama)
-        for step in session.planSteps {
-            planStore.addStep(step)
+        // Ensure the session has a plan; if not (shouldn't happen for multiStep), bail.
+        if session.plan == nil {
+            let plan = planStore.createPlan(goal: session.userIntent, backend: .ollama)
+            session.plan = plan
+        } else if let plan = session.plan {
+            planStore.adoptPlan(plan)
         }
+
         if session.approvalRequirement == .none {
             planStore.approveAllPending()
         }
@@ -72,14 +74,14 @@ final class ExecutionCoordinator {
         executionTask?.cancel()
         executionTask = nil
         planStore.stopPlan()
-        session.transitionTo(.completed)
+        session.transition(to: .completed)
     }
 
     /// Called when a command block finishes in the terminal.
     func handleCommandFinished(exitCode: Int, output: String?) {
-        guard let stepIndex = session.currentStepIndex ?? currentRunningStepIndex() else { return }
+        guard let stepIndex = currentRunningStepIndex() else { return }
 
-        session.transitionTo(.observing)
+        session.transition(to: .running)
 
         // Record observation
         let observation = output ?? "(no output)"
@@ -99,22 +101,16 @@ final class ExecutionCoordinator {
             )
         }
 
-        // Update step status
-        if exitCode == 0 {
-            if stepIndex < session.planSteps.count {
-                session.planSteps[stepIndex].status = .succeeded
-                session.planSteps[stepIndex].output = String(observation.prefix(1000))
-            }
-        } else {
-            if stepIndex < session.planSteps.count {
-                session.planSteps[stepIndex].status = .failed
-                session.planSteps[stepIndex].output = String(observation.prefix(1000))
-            }
-        }
+        // Update step status (absorbed from the retired AgentPlanExecutor)
+        guard let plan = session.plan, stepIndex < plan.steps.count else { return }
+        let stepID = plan.steps[stepIndex].id
+        let durationMs = currentStepStartTime.map { Int(Date().timeIntervalSince($0) * 1000) }
+        currentStepStartTime = nil
 
-        // Forward to plan executor for its own bookkeeping
-        if let blockID = session.planSteps[safe: stepIndex]?.id {
-            executor.handleCommandFinished(blockID: blockID, exitCode: exitCode, output: output)
+        if exitCode == 0 {
+            planStore.markStepSucceeded(id: stepID, output: String(observation.prefix(1000)), durationMs: durationMs)
+        } else {
+            planStore.markStepFailed(id: stepID, output: String(observation.prefix(1000)))
         }
 
         // If step failed, attempt replan before continuing
@@ -135,13 +131,14 @@ final class ExecutionCoordinator {
     // MARK: - Replan
 
     private func attemptReplan(failedIndex: Int, output: String) async {
-        guard let step = session.planSteps[safe: failedIndex] else {
+        guard let plan = session.plan, failedIndex < plan.steps.count else {
             executeNextStep()
             return
         }
+        let step = plan.steps[failedIndex]
 
         // Only replan if there are remaining non-terminal steps
-        let remainingPending = session.planSteps.filter { !$0.status.isTerminal }
+        let remainingPending = plan.steps.filter { !$0.status.isTerminal }
         guard !remainingPending.isEmpty else {
             executeNextStep()
             return
@@ -152,19 +149,14 @@ final class ExecutionCoordinator {
                 logger.info("ExecutionCoordinator: replanned \(newSteps.count) replacement step(s)")
 
                 // Replace remaining pending/approved steps with new ones
-                var updated = session.planSteps.filter { $0.status.isTerminal }
+                var updated = plan.steps.filter { $0.status.isTerminal }
                 updated.append(contentsOf: newSteps)
-                session.planSteps = updated
-
-                // Sync to plan store
-                for newStep in newSteps {
-                    planStore.addStep(newStep)
-                }
+                plan.steps = updated
 
                 // Auto-approve safe steps in the new plan
                 if session.approvalRequirement == .none {
-                    for i in session.planSteps.indices where session.planSteps[i].status == .pending {
-                        session.planSteps[i].status = .approved
+                    for i in plan.steps.indices where plan.steps[i].status == .pending {
+                        plan.steps[i].status = .approved
                     }
                 }
             }
@@ -184,21 +176,26 @@ final class ExecutionCoordinator {
             return
         }
 
+        guard let plan = session.plan else { return }
+
+        // Auto-approve any safe pending steps (absorbed from AgentPlanExecutor).
+        autoApprovePendingSafeSteps(plan: plan)
+
         // Find next approved step
-        guard let nextIndex = session.planSteps.firstIndex(where: { $0.status == .approved }) else {
+        guard let nextIndex = plan.steps.firstIndex(where: { $0.status == .approved }) else {
             // Check if all done
-            let allTerminal = session.planSteps.allSatisfy { $0.status.isTerminal }
-            if allTerminal && !session.planSteps.isEmpty {
+            let allTerminal = plan.steps.allSatisfy { $0.status.isTerminal }
+            if allTerminal && !plan.steps.isEmpty {
                 onAllStepsCompleted?()
             }
             return
         }
 
-        session.currentStepIndex = nextIndex
-        let step = session.planSteps[nextIndex]
+        session.currentStepID = plan.steps[nextIndex].id
+        let step = plan.steps[nextIndex]
         let strategy = chooseStrategy(for: step)
 
-        logger.info("ExecutionCoordinator: executing step \(nextIndex + 1)/\(self.session.planSteps.count) via \(strategy.rawValue)")
+        logger.info("ExecutionCoordinator: executing step \(nextIndex + 1)/\(plan.steps.count) via \(strategy.rawValue)")
 
         switch strategy {
         case .localShell:
@@ -215,9 +212,31 @@ final class ExecutionCoordinator {
 
         case .informational:
             // Mark as succeeded immediately — no execution needed
-            session.planSteps[nextIndex].status = .succeeded
+            plan.steps[nextIndex].status = .succeeded
             executionTask = Task { @MainActor [weak self] in
                 self?.executeNextStep()
+            }
+        }
+    }
+
+    /// Absorbed from the retired AgentPlanExecutor. Auto-approves pending steps
+    /// that the risk scorer tags as safe (reads/observational commands).
+    private func autoApprovePendingSafeSteps(plan: AgentPlan) {
+        let permissions = AgentPermissionsStore.shared
+        guard permissions.shouldAutoAllow(.runCommands) else { return }
+
+        let pwd = TerminalControlBridge.shared.delegate?.activeTabPwd
+        let gitBranch = TerminalControlBridge.shared.delegate?.activeTabGitBranch
+
+        for i in plan.steps.indices where plan.steps[i].status == .pending {
+            if let command = plan.steps[i].command {
+                let assessment = RiskScorer.assess(command: command, pwd: pwd, gitBranch: gitBranch)
+                if case .autoApprove = permissions.decide(for: assessment) {
+                    plan.steps[i].status = .approved
+                }
+            } else {
+                // Informational steps are always safe
+                plan.steps[i].status = .approved
             }
         }
     }
@@ -259,7 +278,7 @@ final class ExecutionCoordinator {
     // MARK: - Local Shell Execution
 
     private func executeLocalShell(step: AgentPlanStep, index: Int) {
-        guard let command = step.command else { return }
+        guard let plan = session.plan, let command = step.command else { return }
 
         let permissions = AgentPermissionsStore.shared
         let pwd = TerminalControlBridge.shared.delegate?.activeTabPwd
@@ -276,8 +295,8 @@ final class ExecutionCoordinator {
 
         switch decision {
         case .blocked(let reason):
-            session.planSteps[index].status = .failed
-            session.planSteps[index].output = "Blocked: \(reason)"
+            plan.steps[index].status = .failed
+            plan.steps[index].output = "Blocked: \(reason)"
             logger.warning("ExecutionCoordinator: blocked (\(assessment.tier.rawValue)): \(command.prefix(60))")
 
             executionTask = Task { @MainActor [weak self] in
@@ -288,7 +307,7 @@ final class ExecutionCoordinator {
         case .requireApproval:
             // Step should already be in .approved state from the approval flow.
             if step.status != .approved {
-                session.planSteps[index].status = .pending
+                plan.steps[index].status = .pending
                 logger.info("ExecutionCoordinator: step requires approval (risk \(assessment.score)): \(command.prefix(60))")
                 return
             }
@@ -297,14 +316,15 @@ final class ExecutionCoordinator {
             break
         }
 
-        session.planSteps[index].status = .running
-        session.transitionTo(.executing)
+        plan.steps[index].status = .running
+        currentStepStartTime = Date()
+        session.transition(to: .running)
 
         // Dispatch to terminal via TerminalControlBridge
         let dispatched = TerminalControlBridge.shared.routeToNearestAgentPaneOrActive(text: command)
         if !dispatched {
-            session.planSteps[index].status = .failed
-            session.planSteps[index].output = "No terminal pane available"
+            plan.steps[index].status = .failed
+            plan.steps[index].output = "No terminal pane available"
             executionTask = Task { @MainActor [weak self] in
                 self?.executeNextStep()
             }
@@ -318,8 +338,8 @@ final class ExecutionCoordinator {
     // MARK: - Browser Execution
 
     private func executeBrowserAction(step: AgentPlanStep, index: Int) {
-        guard let command = step.command else { return }
-        session.planSteps[index].status = .running
+        guard let plan = session.plan, let command = step.command else { return }
+        plan.steps[index].status = .running
 
         // Audit: log browser step start
         SessionAuditLogger.log(
@@ -341,8 +361,8 @@ final class ExecutionCoordinator {
 
             switch decision {
             case .blocked(let reason):
-                self.session.planSteps[index].status = .failed
-                self.session.planSteps[index].output = "Blocked: \(reason)"
+                plan.steps[index].status = .failed
+                plan.steps[index].output = "Blocked: \(reason)"
                 SessionAuditLogger.log(
                     type: .browserStepCompleted,
                     detail: "Browser action BLOCKED: \(reason)"
@@ -351,7 +371,7 @@ final class ExecutionCoordinator {
                 return
             case .requireApproval:
                 if step.status != .approved {
-                    self.session.planSteps[index].status = .pending
+                    plan.steps[index].status = .pending
                     return
                 }
             case .autoApprove:
@@ -361,16 +381,16 @@ final class ExecutionCoordinator {
             let result = await self.dispatchBrowserCommand(command)
 
             if result.isError {
-                self.session.planSteps[index].status = .failed
-                self.session.planSteps[index].output = result.text
+                plan.steps[index].status = .failed
+                plan.steps[index].output = result.text
                 SessionAuditLogger.log(
                     type: .browserStepCompleted,
                     detail: "Browser action FAILED: \(result.text.prefix(200))"
                 )
                 logger.warning("ExecutionCoordinator: browser action failed: \(result.text.prefix(100))")
             } else {
-                self.session.planSteps[index].status = .succeeded
-                self.session.planSteps[index].output = String(result.text.prefix(1000))
+                plan.steps[index].status = .succeeded
+                plan.steps[index].output = String(result.text.prefix(1000))
                 self.session.addArtifact(AgentArtifact(kind: .commandOutput, value: "Browser: \(String(result.text.prefix(300)))"))
                 SessionAuditLogger.log(
                     type: .browserStepCompleted,
@@ -403,16 +423,18 @@ final class ExecutionCoordinator {
     /// Execute all remaining browser steps as a cohesive research workflow.
     /// Batches all browser-prefixed steps and runs them through BrowserResearchWorkflow.
     private func executeBrowserResearch(startingAt index: Int) {
+        guard let plan = session.plan else { return }
+
         // Collect all remaining approved browser steps
-        let browserSteps = session.planSteps[index...].filter { step in
+        let browserSteps = plan.steps[index...].filter { step in
             guard step.status == .approved || step.status == .pending else { return false }
             guard let cmd = step.command?.lowercased() else { return true } // informational
             return cmd.hasPrefix("browse:") || cmd.hasPrefix("browser:") || cmd.hasPrefix("open http") || cmd.isEmpty
         }
 
         guard let handler = BrowserServer.shared.toolHandler else {
-            session.planSteps[index].status = .failed
-            session.planSteps[index].output = "Browser automation not available"
+            plan.steps[index].status = .failed
+            plan.steps[index].output = "Browser automation not available"
             executionTask = Task { @MainActor [weak self] in
                 self?.executeNextStep()
             }
@@ -426,11 +448,11 @@ final class ExecutionCoordinator {
             guard let self else { return }
 
             // Auto-approve all browser steps for the research workflow
-            for i in self.session.planSteps.indices {
-                if self.session.planSteps[i].status == .pending,
-                   let cmd = self.session.planSteps[i].command?.lowercased(),
+            for i in plan.steps.indices {
+                if plan.steps[i].status == .pending,
+                   let cmd = plan.steps[i].command?.lowercased(),
                    cmd.hasPrefix("browse:") || cmd.hasPrefix("browser:") || cmd.hasPrefix("open http") {
-                    self.session.planSteps[i].status = .approved
+                    plan.steps[i].status = .approved
                 }
             }
 
@@ -444,16 +466,16 @@ final class ExecutionCoordinator {
             if let researchSession = workflow.activeSession {
                 for entry in researchSession.logEntries {
                     let sessionStepIndex = index + entry.stepIndex
-                    guard sessionStepIndex < self.session.planSteps.count else { continue }
+                    guard sessionStepIndex < plan.steps.count else { continue }
                     switch entry.status {
                     case .succeeded:
-                        self.session.planSteps[sessionStepIndex].status = .succeeded
-                        self.session.planSteps[sessionStepIndex].output = entry.output
+                        plan.steps[sessionStepIndex].status = .succeeded
+                        plan.steps[sessionStepIndex].output = entry.output
                     case .failed:
-                        self.session.planSteps[sessionStepIndex].status = .failed
-                        self.session.planSteps[sessionStepIndex].output = entry.output
+                        plan.steps[sessionStepIndex].status = .failed
+                        plan.steps[sessionStepIndex].output = entry.output
                     case .skipped:
-                        self.session.planSteps[sessionStepIndex].status = .skipped
+                        plan.steps[sessionStepIndex].status = .skipped
                     case .running:
                         break
                     }
@@ -520,8 +542,8 @@ final class ExecutionCoordinator {
     // MARK: - Peer Delegation
 
     private func executePeerDelegation(step: AgentPlanStep, index: Int) {
-        guard let command = step.command else { return }
-        session.planSteps[index].status = .running
+        guard let plan = session.plan, let command = step.command else { return }
+        plan.steps[index].status = .running
 
         executionTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -534,12 +556,12 @@ final class ExecutionCoordinator {
             let sent = TerminalControlBridge.shared.routeToNearestAgentPaneOrActive(text: message)
 
             if sent {
-                self.session.planSteps[index].status = .succeeded
-                self.session.planSteps[index].output = "Delegated to peer agent"
+                plan.steps[index].status = .succeeded
+                plan.steps[index].output = "Delegated to peer agent"
                 self.session.addArtifact(AgentArtifact(kind: .peerMessage, value: message))
             } else {
-                self.session.planSteps[index].status = .failed
-                self.session.planSteps[index].output = "No peer agent available"
+                plan.steps[index].status = .failed
+                plan.steps[index].output = "No peer agent available"
             }
 
             self.executeNextStep()
@@ -570,7 +592,7 @@ final class ExecutionCoordinator {
     }
 
     private func currentRunningStepIndex() -> Int? {
-        session.planSteps.firstIndex(where: { $0.status == .running })
+        session.plan?.steps.firstIndex(where: { $0.status == .running })
     }
 
     // MARK: - Step Watchdog
@@ -583,14 +605,14 @@ final class ExecutionCoordinator {
     private func scheduleStepWatchdog(index: Int) {
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: Self.stepWatchdogTimeout * 1_000_000_000)
-            guard let self else { return }
-            guard index < self.session.planSteps.count,
-                  self.session.planSteps[index].status == .running
+            guard let self, let plan = self.session.plan else { return }
+            guard index < plan.steps.count,
+                  plan.steps[index].status == .running
             else { return }
 
             logger.warning("ExecutionCoordinator: step \(index + 1) watchdog fired — no command-finished callback received")
-            self.session.planSteps[index].status = .failed
-            self.session.planSteps[index].output = "Timed out waiting for command completion (shell integration may be unavailable)"
+            plan.steps[index].status = .failed
+            plan.steps[index].output = "Timed out waiting for command completion (shell integration may be unavailable)"
             self.executeNextStep()
         }
     }

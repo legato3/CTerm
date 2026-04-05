@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct AgentProgressStrip: View {
-    let session: AgentSessionState
+    let session: AgentSession
     let onStop: () -> Void
     let onApprove: (() -> Void)?
 
@@ -37,7 +37,7 @@ struct AgentProgressStrip: View {
             Spacer()
 
             // Progress bar
-            if !session.planSteps.isEmpty && session.phase.isActive {
+            if !(session.plan?.steps.isEmpty ?? true) && session.phase.isActive {
                 ProgressView(value: session.progress)
                     .progressViewStyle(.linear)
                     .frame(width: 60)

@@ -22,8 +22,8 @@ enum PlanBuilder {
     // MARK: - Public API
 
     /// Build a plan for the given session state. Mutates the session in place.
-    static func buildPlan(for session: AgentSessionState, pwd: String?) async {
-        session.transitionTo(.planning)
+    static func buildPlan(for session: AgentSession, pwd: String?) async {
+        session.transition(to: .thinking)
 
         guard let intent = session.classifiedIntent else {
             session.fail(message: "Cannot build plan: intent not classified")
@@ -68,9 +68,9 @@ enum PlanBuilder {
             for i in session.planSteps.indices {
                 session.planSteps[i].status = .approved
             }
-            session.transitionTo(.executing)
+            session.transition(to: .running)
         } else {
-            session.transitionTo(.awaitingApproval)
+            session.transition(to: .awaitingApproval)
         }
 
         logger.info("PlanBuilder: generated \(steps.count) step(s) for intent \(intent.rawValue)")

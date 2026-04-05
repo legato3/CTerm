@@ -77,6 +77,8 @@ struct QueuedTask: Identifiable, Sendable, Codable {
     var createdAt: Date
     var startedAt: Date?
     var completedAt: Date?
+    /// Id of the AgentSession that tracks this task's lifecycle in the unified registry.
+    var sessionID: UUID?
 
     init(prompt: String, targetPeerName: String? = nil, model: TaskModel = .auto) {
         self.id = UUID()
@@ -121,7 +123,16 @@ final class TaskQueueStore {
     // MARK: - Mutations (UI + MCP)
 
     func enqueue(_ prompt: String, targetPeerName: String? = nil, model: TaskModel? = nil, at position: Int? = nil) {
-        let task = QueuedTask(prompt: prompt, targetPeerName: targetPeerName, model: model ?? defaultModel)
+        var task = QueuedTask(prompt: prompt, targetPeerName: targetPeerName, model: model ?? defaultModel)
+        let session = AgentSessionRouter.shared.start(
+            AgentSessionRequest(
+                intent: prompt,
+                kind: .queued,
+                backend: .ollama,
+                tabID: nil
+            )
+        )
+        task.sessionID = session.id
         if let pos = position, pos < tasks.count {
             tasks.insert(task, at: pos)
         } else {
@@ -141,6 +152,20 @@ final class TaskQueueStore {
         guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
         if tasks[idx].status == .running { engine.abortRunning() }
         tasks[idx].status = .cancelled
+        syncSessionPhase(for: tasks[idx])
+    }
+
+    /// Maps a QueuedTask's status onto its unified AgentSession's phase.
+    func syncSessionPhase(for task: QueuedTask) {
+        guard let sid = task.sessionID,
+              let session = AgentSessionRegistry.shared.session(id: sid) else { return }
+        switch task.status {
+        case .pending:   session.transition(to: .idle)
+        case .running:   session.transition(to: .running)
+        case .completed: session.transition(to: .completed)
+        case .failed:    session.transition(to: .failed)
+        case .cancelled: session.transition(to: .cancelled)
+        }
     }
 
     func clearPending() {
@@ -234,6 +259,7 @@ final class TaskQueueEngine {
     func abortRunning() {
         if let idx = store?.tasks.firstIndex(where: { $0.status == .running }) {
             store?.tasks[idx].status = .cancelled
+            if let task = store?.tasks[idx] { store?.syncSessionPhase(for: task) }
         }
         runStartedAt = nil
     }
@@ -245,6 +271,7 @@ final class TaskQueueEngine {
         store.tasks[idx].status = .completed
         store.tasks[idx].completedAt = .now
         store.tasks[idx].resultSnippet = result
+        store.syncSessionPhase(for: store.tasks[idx])
         SessionAuditLogger.log(type: .taskCompleted, detail: String(completedPrompt.prefix(120)))
         runStartedAt = nil
         logger.info("Task \(store.tasks[idx].id) completed")
@@ -346,9 +373,11 @@ final class TaskQueueEngine {
             store.tasks[index].status = .running
             store.tasks[index].startedAt = .now
             runStartedAt = .now
+            store.syncSessionPhase(for: store.tasks[index])
             logger.info("Injected task \(task.id) into pane matching '\(targetName)'")
         } else {
             store.tasks[index].status = .failed
+            store.syncSessionPhase(for: store.tasks[index])
             logger.warning("Failed to inject task \(task.id) — no matching pane for '\(targetName)'")
         }
     }

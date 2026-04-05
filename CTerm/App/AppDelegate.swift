@@ -431,8 +431,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func buildSnapshot() -> SessionSnapshot {
-        SessionSnapshot(
-            windows: windowControllers.map { $0.windowSnapshot() }
+        let active = AgentSessionRegistry.shared.all.map { $0.persistenceSnapshot() }
+        return SessionSnapshot(
+            windows: windowControllers.map { $0.windowSnapshot() },
+            agentSessions: active.isEmpty ? nil : active
         )
     }
 
@@ -459,6 +461,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         var restoredAny = false
+
+        // Rehydrate active agent sessions back into the registry BEFORE tabs
+        // restore, so tab UI that references session ids finds them immediately.
+        if let sessionSnaps = snapshot.agentSessions {
+            for snap in sessionSnaps {
+                let session = AgentSession(snapshot: snap)
+                AgentSessionRegistry.shared.register(session)
+            }
+            logger.info("Restored \(sessionSnaps.count) agent session(s)")
+        }
 
         for windowSnap in snapshot.windows {
             if restoreWindow(windowSnap) {
