@@ -171,6 +171,15 @@ struct ComposeAssistantEntry: Identifiable, Sendable {
         return trimmed
     }
 
+    /// User-visible prompt with any injected context envelope stripped out.
+    var displayPrompt: String {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let contextRange = trimmed.range(of: "\n\n<cterm_agent_context>") {
+            return String(trimmed[..<contextRange.lowerBound])
+        }
+        return trimmed
+    }
+
     var primaryText: String {
         if let errorMessage, !errorMessage.isEmpty {
             return errorMessage

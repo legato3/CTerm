@@ -108,6 +108,17 @@ struct OllamaAgentSession: Identifiable, Sendable {
         status == .awaitingApproval && pendingCommand?.isEmpty == false
     }
 
+    /// The user-visible goal text, with any injected context envelope stripped out.
+    var displayGoal: String {
+        let trimmed = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Strip the <cterm_agent_context>…</cterm_agent_context> block appended by
+        // AgentPromptContextBuilder so the sidebar shows only the user's original text.
+        if let contextRange = trimmed.range(of: "\n\n<cterm_agent_context>") {
+            return String(trimmed[..<contextRange.lowerBound])
+        }
+        return trimmed
+    }
+
     var latestPlanText: String? {
         if let pendingMessage, !pendingMessage.isEmpty {
             return pendingMessage

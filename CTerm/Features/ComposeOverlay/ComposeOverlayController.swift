@@ -199,12 +199,25 @@ final class ComposeOverlayController {
               session.status == .runningCommand
         else { return }
 
+        // Accept the finished block if it matches the tracked block ID, OR if no
+        // specific block was tracked (lastCommandBlockID is nil). Also accept if the
+        // tracked block ID is no longer present in the tab (already cleaned up), so
+        // we don't get permanently stuck in .runningCommand.
         if let lastCommandBlockID = session.lastCommandBlockID,
            lastCommandBlockID != commandBlockID {
-            return
+            // Only skip if the tracked block still exists and is still running.
+            // If it's gone or finished, fall through so the loop can continue.
+            if let trackedBlock = activeTab.commandBlock(id: lastCommandBlockID),
+               trackedBlock.status == .running {
+                return
+            }
         }
 
-        guard let block = activeTab.commandBlock(id: commandBlockID) else { return }
+        guard let block = activeTab.commandBlock(id: commandBlockID) else {
+            // Block not found — still advance the loop so status doesn't get stuck.
+            planNextAgentStep(for: activeTab)
+            return
+        }
         activeTab.recordOllamaAgentObservation(observationText(for: block))
         onStateChanged?()
 

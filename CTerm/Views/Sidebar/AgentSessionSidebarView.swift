@@ -414,7 +414,7 @@ private struct AgentSessionSidebarCard: View {
                 Text("Goal")
                     .font(.system(size: 9, weight: .medium, design: .rounded))
                     .foregroundStyle(.tertiary)
-                Text(session.goal)
+                Text(session.displayGoal)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -588,7 +588,7 @@ private struct AgentHistoryEntryCard: View {
                     .foregroundStyle(.quaternary)
             }
 
-            Text(entry.prompt)
+            Text(entry.displayPrompt)
                 .font(.system(size: 10, design: .rounded))
                 .foregroundStyle(.tertiary)
                 .lineLimit(2)
