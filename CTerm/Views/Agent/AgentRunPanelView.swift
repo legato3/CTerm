@@ -38,6 +38,10 @@ struct AgentRunPanelView: View {
                     onSkipStep: onSkipStep
                 )
             }
+            if !recentInlineEvents.isEmpty {
+                Divider()
+                activityTranscript
+            }
             if session.phase == .awaitingApproval, let command = session.pendingCommand {
                 Divider()
                 approvalBlock(command: command)
@@ -218,6 +222,42 @@ struct AgentRunPanelView: View {
             .value
         if let artifactText, !artifactText.isEmpty { return artifactText }
         return session.inlineSteps.first(where: { $0.kind == .observation })?.text
+    }
+
+    private var recentInlineEvents: [InlineAgentStep] {
+        Array(session.inlineSteps.prefix(8).reversed())
+    }
+
+    private var activityTranscriptTitle: String {
+        recentInlineEvents.contains(where: { $0.kind == .observation || $0.kind == .command })
+            ? "Session Output"
+            : "Session Log"
+    }
+
+    private var activityTranscript: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "text.alignleft")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(activityTranscriptTitle)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(recentInlineEvents.count) event\(recentInlineEvents.count == 1 ? "" : "s")")
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(recentInlineEvents) { step in
+                        InlineAgentTranscriptRow(step: step)
+                    }
+                }
+            }
+            .frame(maxHeight: 220)
+        }
     }
 
     // MARK: - Approval block
@@ -532,5 +572,83 @@ struct AgentRunPanelView: View {
                 .tint(.red)
             }
         }
+    }
+}
+
+private struct InlineAgentTranscriptRow: View {
+    let step: InlineAgentStep
+
+    private var tint: Color {
+        switch step.kind {
+        case .goal: return .purple
+        case .plan: return .blue
+        case .command: return .primary
+        case .observation: return .secondary
+        case .summary: return .green
+        case .error: return .red
+        }
+    }
+
+    private var surfaceFill: Color {
+        switch step.kind {
+        case .command:
+            return Color.accentColor.opacity(0.08)
+        case .observation:
+            return Color.black.opacity(0.18)
+        case .summary:
+            return Color.green.opacity(0.08)
+        case .error:
+            return Color.red.opacity(0.08)
+        case .goal, .plan:
+            return Color.white.opacity(0.04)
+        }
+    }
+
+    private var displayText: String {
+        if let command = step.command, !command.isEmpty {
+            return step.kind == .command ? "$ \(command)" : command
+        }
+        return step.text
+    }
+
+    private var displayFont: Font {
+        switch step.kind {
+        case .command, .observation:
+            return .system(size: 11, design: .monospaced)
+        case .goal:
+            return .system(size: 11, weight: .medium, design: .rounded)
+        case .plan, .summary, .error:
+            return .system(size: 11, design: .rounded)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Text(step.kind.title)
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(tint)
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+
+                Text(step.createdAt.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+
+                Spacer(minLength: 0)
+            }
+
+            Text(displayText)
+                .font(displayFont)
+                .foregroundStyle(step.kind == .error ? .red : .primary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(9)
+        .background(surfaceFill, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(tint.opacity(0.12), lineWidth: 1)
+        )
     }
 }

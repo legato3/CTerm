@@ -11,7 +11,7 @@ import Foundation
 @MainActor
 extension Tab {
 
-    func startOllamaAgent(goal: String, backend: AgentPlanningBackend) {
+    func startOllamaAgent(goal: String, rawPrompt: String, backend: AgentPlanningBackend) {
         let backendValue: AgentBackend = (backend == .claudeSubscription) ? .claudeSubscription : .ollama
         let session = AgentSessionRouter.shared.start(
             AgentSessionRequest(
@@ -19,8 +19,10 @@ extension Tab {
                 kind: .inline,
                 backend: backendValue,
                 tabID: id,
-                preEnrichedPrompt: goal
-            )
+                pwd: pwd,
+                preEnrichedPrompt: rawPrompt
+            ),
+            activeTab: self
         )
         session.inlineSteps = [InlineAgentStep(kind: .goal, text: goal)]
         session.transition(to: .thinking)

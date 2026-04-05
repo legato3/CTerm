@@ -77,4 +77,27 @@ struct AgentSessionRegressionTests {
 
         #expect(registry.active.isEmpty)
     }
+
+    @Test("Inline sessions keep the visible goal separate from the enriched raw prompt")
+    func inlineSessionSeparatesGoalFromRawPrompt() {
+        let registry = AgentSessionRegistry.shared
+        registry._resetForTesting()
+        defer { registry._resetForTesting() }
+
+        let tab = Tab(title: "Session", pwd: "/tmp")
+        let rawPrompt = """
+        whats the time
+
+        <cterm_project_context>
+        cwd: /tmp
+        </cterm_project_context>
+        """
+
+        tab.startOllamaAgent(goal: "whats the time", rawPrompt: rawPrompt, backend: .ollama)
+
+        let session = try #require(tab.ollamaAgentSession)
+        #expect(session.intent == "whats the time")
+        #expect(session.displayGoal == "whats the time")
+        #expect(session.rawPrompt == rawPrompt)
+    }
 }

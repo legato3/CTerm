@@ -125,22 +125,20 @@ final class ComposeOverlayController {
                 sendEnterKey: sendEnterKey
             )
         case .ollamaAgent:
-            let enrichedGoal = AgentPromptContextBuilder.buildPrompt(goal: trimmed, activeTab: activeTab)
             activeTab?.clearAttachedBlocks()
             if routedFromShellDetection { markAutoRouteHintSeen() }
             return startAgent(
-                goal: enrichedGoal,
+                goal: trimmed,
                 backend: .ollama,
                 activeTab: activeTab,
                 focusedController: focusedController,
                 sendEnterKey: sendEnterKey
             )
         case .claudeAgent:
-            let enriched = AgentPromptContextBuilder.buildPrompt(goal: trimmed, activeTab: activeTab)
             activeTab?.clearAttachedBlocks()
             if routedFromShellDetection { markAutoRouteHintSeen() }
             return startAgent(
-                goal: enriched,
+                goal: trimmed,
                 backend: .claudeSubscription,
                 activeTab: activeTab,
                 focusedController: focusedController,
@@ -582,7 +580,8 @@ final class ComposeOverlayController {
         // Store for auto-dispatch of safe commands.
         agentTargetController = focusedController
         agentSendEnterKey = sendEnterKey
-        activeTab.startOllamaAgent(goal: goal, backend: backend)
+        let rawPrompt = AgentPromptContextBuilder.buildPrompt(goal: goal, activeTab: activeTab)
+        activeTab.startOllamaAgent(goal: goal, rawPrompt: rawPrompt, backend: backend)
         assistantState.setDraftText("")
         onStateChanged?()
         planNextAgentStep(for: activeTab)

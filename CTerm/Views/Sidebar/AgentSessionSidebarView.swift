@@ -2,8 +2,9 @@ import SwiftUI
 
 // MARK: - AgentSessionSidebarView
 
-/// Warp-style agent panel: shows mode, auto-accept toggle, active session status,
-/// conversation history, plan steps, and quick actions.
+/// Sidebar companion for the agent UI. Keeps the left rail focused on session
+/// navigation and concise log context while the run panel near the terminal
+/// owns the detailed output stream.
 struct AgentSessionSidebarView: View {
     @Bindable var assistant: ComposeAssistantState
     let agentSession: AgentSession?
@@ -17,7 +18,7 @@ struct AgentSessionSidebarView: View {
     @State private var selectedTab: AgentPanelTab = .session
 
     enum AgentPanelTab: String, CaseIterable {
-        case session = "Session"
+        case session = "Log"
         case history = "History"
         case changes = "Changes"
     }
@@ -376,6 +377,10 @@ private struct AgentSessionSidebarCard: View {
     let onApprove: () -> Void
     let onStop: () -> Void
 
+    private var recentEvents: [InlineAgentStep] {
+        Array(session.steps.prefix(10))
+    }
+
     private var statusTint: Color {
         switch session.status {
         case .planning: return .secondary
@@ -390,12 +395,19 @@ private struct AgentSessionSidebarCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Text("Current Session")
+                Text("Session Log")
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
                     .background(Capsule().fill(Color.white.opacity(0.08)))
+
+                Text(session.backend.displayName)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.purple)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Color.purple.opacity(0.12)))
 
                 Spacer()
 
@@ -409,22 +421,47 @@ private struct AgentSessionSidebarCard: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Goal")
+                Text("Task")
                     .font(.system(size: 9, weight: .medium, design: .rounded))
                     .foregroundStyle(.tertiary)
                 Text(session.displayGoal)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundStyle(.primary)
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if !session.steps.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(session.steps.prefix(8).enumerated()), id: \.element.id) { index, step in
-                        AgentSessionStepRow(
-                            step: step,
-                            isLast: index == session.steps.prefix(8).count - 1
-                        )
+            if let latestPlanText = session.latestPlanText,
+               !latestPlanText.isEmpty,
+               session.phase == .thinking {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Latest agent note")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                    Text(latestPlanText)
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(9)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+
+            if !recentEvents.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Recent events")
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(.tertiary)
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(recentEvents.enumerated()), id: \.element.id) { index, step in
+                            AgentSessionLogRow(
+                                step: step,
+                                isLast: index == recentEvents.count - 1
+                            )
+                        }
                     }
                 }
             }
@@ -433,13 +470,14 @@ private struct AgentSessionSidebarCard: View {
                !pendingCommand.isEmpty,
                session.canApprove {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("Proposed Command", systemImage: "terminal")
+                    Label("Awaiting approval", systemImage: "terminal")
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
                         .foregroundStyle(.orange)
 
                     Text(pendingCommand)
                         .font(.system(size: 11, design: .monospaced))
                         .textSelection(.enabled)
+                        .lineLimit(3)
                         .padding(9)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
@@ -475,9 +513,9 @@ private struct AgentSessionSidebarCard: View {
     }
 }
 
-// MARK: - AgentSessionStepRow
+// MARK: - AgentSessionLogRow
 
-private struct AgentSessionStepRow: View {
+private struct AgentSessionLogRow: View {
     let step: OllamaAgentStep
     let isLast: Bool
 
@@ -503,6 +541,13 @@ private struct AgentSessionStepRow: View {
         }
     }
 
+    private var bodyText: String {
+        if let command = step.command, !command.isEmpty {
+            return command
+        }
+        return step.text.replacingOccurrences(of: "\n", with: " ")
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             VStack(spacing: 0) {
@@ -522,25 +567,31 @@ private struct AgentSessionStepRow: View {
             .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(step.kind.title)
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .foregroundStyle(tint.opacity(0.85))
-                    .textCase(.uppercase)
-                    .tracking(0.5)
+                HStack(spacing: 6) {
+                    Text(step.kind.title)
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(tint.opacity(0.85))
+                        .textCase(.uppercase)
+                        .tracking(0.5)
 
-                if let command = step.command, !command.isEmpty {
-                    Text(command)
-                        .font(.system(size: 11, design: .monospaced))
-                        .textSelection(.enabled)
-                        .foregroundStyle(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Text(step.createdAt.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
                 }
 
-                if !step.text.isEmpty, step.text != step.command {
-                    Text(step.text)
-                        .font(.system(size: 10, design: .rounded))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                Text(bodyText)
+                    .font(step.command == nil
+                          ? .system(size: 10, design: .rounded)
+                          : .system(size: 11, design: .monospaced))
+                    .foregroundStyle(step.kind == .error ? .red : .secondary)
+                    .lineLimit(step.kind == .observation ? 3 : 2)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if step.kind == .observation && step.text.contains("\n") {
+                    Text("Output continues in the terminal run panel")
+                        .font(.system(size: 9, design: .rounded))
+                        .foregroundStyle(.tertiary)
                 }
             }
             .padding(.bottom, 8)
@@ -598,23 +649,11 @@ private struct AgentHistoryEntryCard: View {
                           : .system(size: 11, design: .rounded))
                     .foregroundStyle(entry.status == .failed ? .red : .primary)
                     .textSelection(.enabled)
+                    .lineLimit(5)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
-            }
-
-            if let contextSnippet = entry.contextSnippet, !contextSnippet.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Context")
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
-                        .foregroundStyle(.tertiary)
-                    Text(contextSnippet)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .lineLimit(6)
-                }
             }
 
             if entry.canInsert || entry.canRun || entry.canExplain || entry.canFix {
