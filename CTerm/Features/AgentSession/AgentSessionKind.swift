@@ -23,7 +23,7 @@ enum AgentSessionKind: String, Sendable, Codable {
 }
 
 /// Which backend drives planning and execution for this session.
-enum AgentBackend: Sendable, Codable, Equatable {
+enum AgentBackend: Sendable, Codable, Equatable, Hashable {
     case ollama
     case claudeSubscription
     case peer(name: String)

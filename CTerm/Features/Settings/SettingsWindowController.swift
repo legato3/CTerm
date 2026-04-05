@@ -31,6 +31,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
     private let copyOnSelectCheckbox = NSButton(checkboxWithTitle: "Enabled", target: nil, action: nil)
     private let mouseHideCheckbox = NSButton(checkboxWithTitle: "Enabled", target: nil, action: nil)
     private let focusFollowsMouseCheckbox = NSButton(checkboxWithTitle: "Enabled", target: nil, action: nil)
+    private let nlModeHashTriggerCheckbox = NSButton(checkboxWithTitle: "Enabled", target: nil, action: nil)
     private let cursorStylePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let ollamaEndpointField = NSTextField()
     private let ollamaModelField = NSTextField()
@@ -293,6 +294,11 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
         focusFollowsMouseCheckbox.action = #selector(focusFollowsMouseDidChange(_:))
         root.addArrangedSubview(row(label: "Focus follows mouse", control: focusFollowsMouseCheckbox))
 
+        // NL-mode `#` prefix trigger (Warp parity)
+        nlModeHashTriggerCheckbox.target = self
+        nlModeHashTriggerCheckbox.action = #selector(nlModeHashTriggerDidChange(_:))
+        root.addArrangedSubview(row(label: "# opens agent compose", control: nlModeHashTriggerCheckbox))
+
         let resetButton = NSButton(title: "Reset to Ghostty Defaults", target: self, action: #selector(resetTerminalSettings(_:)))
         resetButton.bezelStyle = .rounded
         root.addArrangedSubview(resetButton)
@@ -409,6 +415,28 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
         profilesHost.heightAnchor.constraint(equalToConstant: 480).isActive = true
         profilesHost.widthAnchor.constraint(greaterThanOrEqualToConstant: 560).isActive = true
         root.addArrangedSubview(profilesHost)
+
+        // --- Model Routing Section ---
+        let routingDivider = NSBox()
+        routingDivider.boxType = .separator
+        routingDivider.translatesAutoresizingMaskIntoConstraints = false
+        routingDivider.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        root.addArrangedSubview(routingDivider)
+
+        let routingTitle = NSTextField(labelWithString: "Model Routing")
+        routingTitle.font = .systemFont(ofSize: 20, weight: .semibold)
+        root.addArrangedSubview(routingTitle)
+
+        let routingSubtitle = NSTextField(wrappingLabelWithString: "Pick which backend (Ollama or Claude) drives each step role in multi-step agent sessions. Inline compose sessions keep the backend you pick explicitly.")
+        routingSubtitle.textColor = .secondaryLabelColor
+        routingSubtitle.font = .systemFont(ofSize: 13)
+        root.addArrangedSubview(routingSubtitle)
+
+        let routingHost = NSHostingView(rootView: ModelRoutingSettingsView())
+        routingHost.translatesAutoresizingMaskIntoConstraints = false
+        routingHost.heightAnchor.constraint(equalToConstant: 260).isActive = true
+        routingHost.widthAnchor.constraint(greaterThanOrEqualToConstant: 560).isActive = true
+        root.addArrangedSubview(routingHost)
 
         // --- Scrolling Section ---
         let scrollingDivider = NSBox()
@@ -561,6 +589,10 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
         } else {
             focusFollowsMouseCheckbox.state = config.getBool("focus-follows-mouse") ? .on : .off
         }
+
+        // NL-mode `#` prefix — opt-out, defaults to on (registered in AppDelegate).
+        nlModeHashTriggerCheckbox.state =
+            UserDefaults.standard.bool(forKey: AppStorageKeys.nlModeHashTriggerEnabled) ? .on : .off
     }
 
     private func applyTerminalOverride(_ key: String, value: String) {
@@ -622,6 +654,13 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate, NSTextFiel
 
     @objc private func focusFollowsMouseDidChange(_ sender: Any?) {
         applyTerminalOverride("focus-follows-mouse", value: focusFollowsMouseCheckbox.state == .on ? "true" : "false")
+    }
+
+    @objc private func nlModeHashTriggerDidChange(_ sender: Any?) {
+        UserDefaults.standard.set(
+            nlModeHashTriggerCheckbox.state == .on,
+            forKey: AppStorageKeys.nlModeHashTriggerEnabled
+        )
     }
 
     @objc private func resetTerminalSettings(_ sender: Any?) {

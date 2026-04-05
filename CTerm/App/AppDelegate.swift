@@ -30,6 +30,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.register(defaults: [
             AppStorageKeys.activeAIEnabled: true,
             AppStorageKeys.nextCommandEnabled: true,
+            AppStorageKeys.nlModeHashTriggerEnabled: true,
         ])
 
         // Add CLI to PATH for terminals launched within CTerm

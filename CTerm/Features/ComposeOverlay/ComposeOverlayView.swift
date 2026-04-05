@@ -47,6 +47,9 @@ class ComposeOverlayView: NSView {
     /// When set, arrow-up/down, Enter, and Esc are intercepted while the
     /// `@block` mention popover is visible and routed through the coordinator.
     var mentionCoordinator: BlockMentionPopoverCoordinator?
+    /// When set, arrow-up/down, Enter, and Esc are intercepted while the
+    /// slash-command popover is visible and routed through the coordinator.
+    var slashCoordinator: SlashPopoverCoordinator?
     var placeholderText: String = "Type here..." {
         didSet { placeholderLabel.stringValue = placeholderText }
     }
@@ -162,6 +165,10 @@ class ComposeOverlayView: NSView {
         // Escape dismiss — but defer to the mention popover when it's up so
         // Esc dismisses the popover, not the whole compose overlay.
         if event.keyCode == 53 {
+            if let coord = slashCoordinator, coord.isShowing {
+                coord.onDismiss?()
+                return true
+            }
             if let coord = mentionCoordinator, coord.isShowing {
                 coord.onDismiss?()
                 return true
@@ -228,7 +235,28 @@ extension ComposeOverlayView: NSTextViewDelegate {
     }
 
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        // Intercept navigation keys for the @block mention popover first.
+        // Intercept navigation keys for the slash-command popover first.
+        if let coord = slashCoordinator, coord.isShowing {
+            switch commandSelector {
+            case #selector(NSResponder.moveDown(_:)):
+                coord.moveDown()
+                return true
+            case #selector(NSResponder.moveUp(_:)):
+                coord.moveUp()
+                return true
+            case #selector(NSResponder.insertNewline(_:)),
+                 #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+                coord.onSelect?(coord.selectedIndex)
+                return true
+            case #selector(NSResponder.cancelOperation(_:)):
+                coord.onDismiss?()
+                return true
+            default:
+                break
+            }
+        }
+
+        // Intercept navigation keys for the @block mention popover next.
         if let coord = mentionCoordinator, coord.isShowing {
             switch commandSelector {
             case #selector(NSResponder.moveDown(_:)):

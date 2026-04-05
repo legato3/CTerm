@@ -21,6 +21,11 @@ struct AgentProfile: Identifiable, Codable, Hashable, Sendable {
     var blockedCategories: Set<AgentActionCategory>
     var maxRiskTier: RiskTier
     var isBuiltIn: Bool
+    /// Optional hard-override backend for the ModelRouter. When non-nil,
+    /// every step routed through ModelRouter.pick(...) for a session using
+    /// this profile returns this backend regardless of the active preset.
+    /// Nil (default) means "follow the routing preset".
+    var preferredBackend: AgentBackend?
 
     init(
         id: UUID = UUID(),
@@ -31,7 +36,8 @@ struct AgentProfile: Identifiable, Codable, Hashable, Sendable {
         autoApproveCategories: Set<AgentActionCategory>,
         blockedCategories: Set<AgentActionCategory>,
         maxRiskTier: RiskTier,
-        isBuiltIn: Bool
+        isBuiltIn: Bool,
+        preferredBackend: AgentBackend? = nil
     ) {
         self.id = id
         self.name = name
@@ -42,6 +48,7 @@ struct AgentProfile: Identifiable, Codable, Hashable, Sendable {
         self.blockedCategories = blockedCategories
         self.maxRiskTier = maxRiskTier
         self.isBuiltIn = isBuiltIn
+        self.preferredBackend = preferredBackend
     }
 }
 

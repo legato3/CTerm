@@ -26,4 +26,7 @@ enum AppStorageKeys {
     static let agentInputBarEnabled = "agentInputBarEnabled"
     static let memoryToastsEnabled = "memoryToastsEnabled"
     static let agentLoopEnabled = "agentLoopEnabled"
+    /// When true (default), typing `#` in an unfocused terminal opens the
+    /// compose overlay in forced agent mode (Warp-style NL prefix).
+    static let nlModeHashTriggerEnabled = "cterm.nlModeHashTriggerEnabled"
 }

@@ -569,4 +569,9 @@ extension Notification.Name {
     /// Posted when any agent sends a message with topic "review-request"
     static let ctermIPCReviewRequested = Notification.Name("com.cterm.ipc.reviewRequested")
     static let smoothScrollSettingChanged = Notification.Name("com.cterm.smoothScrollSettingChanged")
+    /// Posted by `SurfaceView` when the user types a plain `#` in a terminal
+    /// surface. `object` is the `NSWindow?` containing the surface so the
+    /// owning window controller can filter its own events. No userInfo —
+    /// the active tab of the key window is always the target.
+    static let nlModeHashPressed = Notification.Name("com.cterm.nlModeHashPressed")
 }

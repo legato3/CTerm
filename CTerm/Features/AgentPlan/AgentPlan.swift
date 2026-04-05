@@ -23,6 +23,9 @@ struct AgentPlanStep: Identifiable, Sendable {
     /// Pre-computed hint: will ApprovalGate prompt the user when this step
     /// reaches dispatch? Used by the run panel to flag risky rows up front.
     var willAsk: Bool
+    /// Backend assigned by the ModelRouter based on this step's role and the
+    /// active routing preset. Nil means "use the session's backend" (legacy).
+    var backendHint: AgentBackend?
 
     enum StepStatus: String, Sendable {
         case pending
@@ -62,13 +65,14 @@ struct AgentPlanStep: Identifiable, Sendable {
         }
     }
 
-    init(title: String, command: String? = nil, kind: StepKind? = nil, willAsk: Bool = false) {
+    init(title: String, command: String? = nil, kind: StepKind? = nil, willAsk: Bool = false, backendHint: AgentBackend? = nil) {
         self.id = UUID()
         self.title = title
         self.command = command
         self.status = .pending
         self.kind = kind ?? StepKind.infer(from: command)
         self.willAsk = willAsk
+        self.backendHint = backendHint
     }
 }
 

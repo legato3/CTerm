@@ -37,6 +37,15 @@ final class AgentSession: Identifiable {
     /// grant + trust-mode behavior).
     var profileID: UUID?
 
+    /// Convenience: the hard-override backend declared on this session's
+    /// active profile, if any. Nil when the session has no profile or the
+    /// profile doesn't override routing. Consumed by `ModelRouter.pick` via
+    /// its `profileBackend:` parameter.
+    var profileBackend: AgentBackend? {
+        guard let id = profileID else { return nil }
+        return AgentProfileStore.shared.profile(id: id)?.preferredBackend
+    }
+
     // MARK: - State (mutable, observable)
 
     private(set) var phase: AgentPhase {

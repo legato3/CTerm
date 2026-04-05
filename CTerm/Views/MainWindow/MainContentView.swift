@@ -433,6 +433,9 @@ private struct ComposeCommandBarView: View {
     @State private var showMentionPopover: Bool = false
     @State private var mentionFilter: String = ""
     @State private var mentionCoordinator = BlockMentionPopoverCoordinator()
+    @State private var showSlashPopover: Bool = false
+    @State private var slashFilter: String = ""
+    @State private var slashCoordinator = SlashPopoverCoordinator()
 
     private var currentOllamaSuggestionBehavior: OllamaSuggestionBehavior {
         OllamaSuggestionBehavior(rawValue: ollamaSuggestionBehavior) ?? .defaultValue
@@ -516,6 +519,19 @@ private struct ComposeCommandBarView: View {
             contextHintBar
             HStack(alignment: .bottom, spacing: 8) {
                 modeSelectorButton
+                if assistant.isForcedAgentMode {
+                    HStack(spacing: 3) {
+                        Image(systemName: "number.circle.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("# triggered")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                    }
+                    .foregroundStyle(.tint)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(.tint.opacity(0.12), in: Capsule())
+                    .help("Compose opened via # prefix — locked to agent mode")
+                    .transition(.opacity)
+                }
                 AgentProfilePickerView()
                     .padding(.bottom, 3)
                 ZStack(alignment: .bottomLeading) {
@@ -534,6 +550,16 @@ private struct ComposeCommandBarView: View {
                                 }
                             )
                         }
+                        .popover(isPresented: $showSlashPopover, arrowEdge: .top) {
+                            SlashCommandPopoverView(
+                                commands: filteredSlashCommands,
+                                coordinator: slashCoordinator,
+                                onSelect: { cmd in
+                                    selectSlashCommand(cmd)
+                                },
+                                onDismiss: { dismissSlashPopover() }
+                            )
+                        }
                     ComposeOverlayContainerView(
                         text: Binding(get: { assistant.draftText }, set: { assistant.setDraftText($0) }),
                         onSend: onSend,
@@ -542,7 +568,8 @@ private struct ComposeCommandBarView: View {
                         onTabComplete: loadLatestSuggestionFromKeyboard,
                         placeholderText: composePlaceholderText,
                         actions: windowActions,
-                        mentionCoordinator: mentionCoordinator
+                        mentionCoordinator: mentionCoordinator,
+                        slashCoordinator: slashCoordinator
                     )
                     .frame(minHeight: 36, maxHeight: 96)
 
@@ -632,6 +659,7 @@ private struct ComposeCommandBarView: View {
         }
         .onChange(of: assistant.draftText) { _, newValue in
             updateMentionPopover(for: newValue)
+            updateSlashPopover(for: newValue)
         }
     }
 
@@ -708,6 +736,60 @@ private struct ComposeCommandBarView: View {
         assistant.setDraftText(text)
         onAttachBlock?(block.id)
         dismissMentionPopover()
+    }
+
+    // MARK: - Slash Command Picker
+
+    private var filteredSlashCommands: [SlashCommand] {
+        SlashCommandRegistry.matching(query: slashFilter)
+    }
+
+    private func updateSlashPopover(for text: String) {
+        // Strict: only trigger when `/` is at char 0.
+        guard text.hasPrefix("/") else {
+            dismissSlashPopover()
+            return
+        }
+        // If the user has typed past the command name (space after it), the
+        // popover is no longer useful — they're filling in args now.
+        let afterSlash = text.dropFirst()
+        if afterSlash.contains(where: { $0.isWhitespace }) {
+            dismissSlashPopover()
+            return
+        }
+        slashFilter = String(afterSlash)
+        let commands = filteredSlashCommands
+        showSlashPopover = true
+        slashCoordinator.resetSelection(itemCount: commands.count)
+        slashCoordinator.isShowing = true
+        slashCoordinator.onSelect = { index in
+            let list = filteredSlashCommands
+            guard index >= 0, index < list.count else { return }
+            selectSlashCommand(list[index])
+        }
+        slashCoordinator.onDismiss = { dismissSlashPopover() }
+    }
+
+    private func dismissSlashPopover() {
+        showSlashPopover = false
+        slashFilter = ""
+        slashCoordinator.isShowing = false
+        slashCoordinator.itemCount = 0
+        slashCoordinator.selectedIndex = 0
+    }
+
+    private func selectSlashCommand(_ cmd: SlashCommand) {
+        if cmd.requiresArg {
+            // Insert the command signature stub and let the user fill in
+            // the argument; defer dispatch until they press Return.
+            assistant.setDraftText("/" + cmd.name + " ")
+            dismissSlashPopover()
+        } else {
+            // No args → dispatch immediately via the normal send path.
+            assistant.setDraftText("/" + cmd.name)
+            dismissSlashPopover()
+            _ = onSend?("/" + cmd.name)
+        }
     }
 
     // MARK: - Context Hint Bar (Warp-style message bar)

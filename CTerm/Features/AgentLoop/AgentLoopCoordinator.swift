@@ -47,18 +47,28 @@ final class AgentLoopCoordinator {
         }
 
         let enrichedIntent = AgentPromptContextBuilder.buildPrompt(goal: intent, activeTab: activeTab)
+        // Route the planning backend through ModelRouter. The profile is
+        // captured on the session after start(), so fold in the active
+        // profile's preferredBackend as a hard-override up-front.
+        let activeProfileBackend = AgentProfileStore.shared.activeProfile.preferredBackend
+        let planningBackendAgent = ModelRouter.shared.pick(
+            role: .planning,
+            profileBackend: activeProfileBackend,
+            fallback: .ollama
+        )
         let session = AgentSessionRouter.shared.start(
             AgentSessionRequest(
                 intent: intent,
                 kind: .multiStep,
-                backend: .ollama,
+                backend: planningBackendAgent,
                 tabID: tabID,
                 preEnrichedPrompt: enrichedIntent
             ),
             activeTab: activeTab
         )
         // multiStep sessions expose a plan for explicit step tracking.
-        session.plan = AgentPlan(goal: enrichedIntent, backend: .ollama)
+        let planningBackendLegacy = planningBackendAgent.planningBackend ?? .ollama
+        session.plan = AgentPlan(goal: enrichedIntent, backend: planningBackendLegacy)
         activeSession = session
         streamingPreview = nil
 

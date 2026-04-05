@@ -359,6 +359,22 @@ class SurfaceView: NSView {
             return
         }
 
+        // NL-mode `#` prefix (Warp parity): intercept a plain `#` and open the
+        // compose overlay in forced agent mode. Opt-out via UserDefaults.
+        // Narrow, early-return; any future change here must not break the
+        // normal keystroke path below.
+        if UserDefaults.standard.bool(forKey: AppStorageKeys.nlModeHashTriggerEnabled),
+           SurfaceKeyInterceptor.shouldInterceptHash(
+               event: event,
+               hasMarkedText: hasMarkedText()
+           ) {
+            NotificationCenter.default.post(
+                name: .nlModeHashPressed,
+                object: self.window
+            )
+            return
+        }
+
         // Selection-edit: Delete/Backspace removes selected text.
         if !event.isARepeat,
            !hasMarkedText(),

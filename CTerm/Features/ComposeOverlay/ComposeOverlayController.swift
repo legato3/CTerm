@@ -84,7 +84,36 @@ final class ComposeOverlayController {
         guard windowSession.showComposeOverlay else { return }
         windowSession.showComposeOverlay = false
         targetSurfaceID = nil
+        assistantState.isForcedAgentMode = false
         onDismiss?()
+    }
+
+    /// Opens the compose overlay in forced-agent mode (triggered by the `#`
+    /// NL-prefix in a terminal surface). Locks `mode` to the user's last-used
+    /// agent backend and raises the `isForcedAgentMode` flag so the UI can
+    /// render the "# triggered" indicator. The flag auto-clears on send or
+    /// dismiss.
+    func openForcedAgentMode(
+        windowSession: WindowSession,
+        focusedControllerID: UUID?,
+        prefilledText: String? = nil
+    ) {
+        guard let activeTab = windowSession.activeGroup?.activeTab,
+              case .terminal = activeTab.content else { return }
+
+        targetSurfaceID = focusedControllerID
+
+        let agentMode = assistantState.lastAgentMode.startsAgentSession
+            ? assistantState.lastAgentMode
+            : .claudeAgent
+        assistantState.mode = agentMode
+        assistantState.isModeLocked = true
+        assistantState.isForcedAgentMode = true
+        if let prefilledText {
+            assistantState.draftText = prefilledText
+        }
+
+        windowSession.showComposeOverlay = true
     }
 
     // MARK: - Text Dispatch
@@ -98,6 +127,24 @@ final class ComposeOverlayController {
         let raw = text
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
+
+        // Forced-agent-mode (# prefix) is a one-shot lock: once the user
+        // sends, release it so later messages can be routed normally.
+        assistantState.isForcedAgentMode = false
+
+        // Slash-command dispatch: if the draft begins with `/` and resolves to
+        // a known built-in command, always route to the agent regardless of
+        // the current compose mode.
+        if SlashParser.isSlashPrefix(trimmed),
+           let invocation = SlashParser.parse(trimmed) {
+            activeTab?.clearAttachedBlocks()
+            return dispatchSlash(
+                invocation,
+                activeTab: activeTab,
+                focusedController: focusedController,
+                sendEnterKey: sendEnterKey
+            )
+        }
 
         // Smart routing: when the user hasn't locked a mode, detect their
         // intent from the draft text and route accordingly. Shell commands
@@ -629,7 +676,8 @@ final class ComposeOverlayController {
         backend: AgentPlanningBackend,
         activeTab: Tab?,
         focusedController: GhosttySurfaceController?,
-        sendEnterKey: @escaping (GhosttySurfaceController) -> Void
+        sendEnterKey: @escaping (GhosttySurfaceController) -> Void,
+        triggeredBy: String? = nil
     ) -> Bool {
         guard let activeTab else { return false }
         cancelAgentTask(for: activeTab.id)
@@ -637,11 +685,38 @@ final class ComposeOverlayController {
         agentTargetController = focusedController
         agentSendEnterKey = sendEnterKey
         let rawPrompt = AgentPromptContextBuilder.buildPrompt(goal: goal, activeTab: activeTab)
-        activeTab.startOllamaAgent(goal: goal, rawPrompt: rawPrompt, backend: backend)
+        activeTab.startOllamaAgent(goal: goal, rawPrompt: rawPrompt, backend: backend, triggeredBy: triggeredBy)
         assistantState.setDraftText("")
         onStateChanged?()
         planNextAgentStep(for: activeTab)
         return true
+    }
+
+    // MARK: - Slash Commands
+
+    /// Dispatches a slash command invocation to the agent backend, bypassing
+    /// the compose-mode selector. Always starts an agent session.
+    func dispatchSlash(
+        _ invocation: SlashCommandInvocation,
+        activeTab: Tab?,
+        focusedController: GhosttySurfaceController?,
+        sendEnterKey: @escaping (GhosttySurfaceController) -> Void
+    ) -> Bool {
+        let rendered = invocation.renderedPrompt
+        // Pick the user's preferred agent backend from last-agent-mode; fall
+        // back to Claude if it isn't an agent-capable mode.
+        let mode = assistantState.lastAgentMode.startsAgentSession
+            ? assistantState.lastAgentMode
+            : .claudeAgent
+        let backend: AgentPlanningBackend = (mode == .ollamaAgent) ? .ollama : .claudeSubscription
+        return startAgent(
+            goal: rendered,
+            backend: backend,
+            activeTab: activeTab,
+            focusedController: focusedController,
+            sendEnterKey: sendEnterKey,
+            triggeredBy: "slash:/\(invocation.command.name)"
+        )
     }
 
     private func planNextAgentStep(for activeTab: Tab) {

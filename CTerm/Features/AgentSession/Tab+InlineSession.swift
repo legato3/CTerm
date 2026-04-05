@@ -11,7 +11,12 @@ import Foundation
 @MainActor
 extension Tab {
 
-    func startOllamaAgent(goal: String, rawPrompt: String, backend: AgentPlanningBackend) {
+    func startOllamaAgent(
+        goal: String,
+        rawPrompt: String,
+        backend: AgentPlanningBackend,
+        triggeredBy: String? = nil
+    ) {
         let backendValue: AgentBackend = (backend == .claudeSubscription) ? .claudeSubscription : .ollama
         let session = AgentSessionRouter.shared.start(
             AgentSessionRequest(
@@ -20,7 +25,8 @@ extension Tab {
                 backend: backendValue,
                 tabID: id,
                 pwd: pwd,
-                preEnrichedPrompt: rawPrompt
+                preEnrichedPrompt: rawPrompt,
+                triggeredBy: triggeredBy
             ),
             activeTab: self
         )

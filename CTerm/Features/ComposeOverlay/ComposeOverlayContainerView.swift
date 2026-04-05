@@ -20,6 +20,10 @@ struct ComposeOverlayContainerView: NSViewRepresentable {
     /// its `isShowing` flag is true, arrow keys, Enter, and Esc are routed to
     /// it instead of the text view / overlay default handlers.
     var mentionCoordinator: BlockMentionPopoverCoordinator?
+    /// Optional coordinator for the slash-command popover. When supplied and
+    /// its `isShowing` flag is true, arrow keys, Enter, and Esc are routed
+    /// to it instead of the text view / overlay default handlers.
+    var slashCoordinator: SlashPopoverCoordinator?
 
     func makeNSView(context: Context) -> ComposeOverlayView {
         let view = ComposeOverlayView()
@@ -33,6 +37,7 @@ struct ComposeOverlayContainerView: NSViewRepresentable {
         view.onTabComplete = onTabComplete
         view.placeholderText = placeholderText
         view.mentionCoordinator = mentionCoordinator
+        view.slashCoordinator = slashCoordinator
         // Register focus callback so FocusManager can redirect here.
         actions?.onFocusComposeTextField = { [weak view] in
             view?.focusTextView()
@@ -52,6 +57,7 @@ struct ComposeOverlayContainerView: NSViewRepresentable {
         nsView.onTabComplete = onTabComplete
         nsView.placeholderText = placeholderText
         nsView.mentionCoordinator = mentionCoordinator
+        nsView.slashCoordinator = slashCoordinator
         // Keep focus callback up to date.
         actions?.onFocusComposeTextField = { [weak nsView] in
             nsView?.focusTextView()

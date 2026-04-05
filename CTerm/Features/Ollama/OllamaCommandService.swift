@@ -334,6 +334,12 @@ final class ComposeAssistantState {
     /// resets this after acknowledging.
     var showAutoRouteHint: Bool = false
 
+    /// Transient: set to `true` when the overlay was opened via the `#`
+    /// NL-mode prefix. While set, the mode is locked to an agent backend and
+    /// the compose bar shows a "# triggered" indicator. Cleared on send or
+    /// dismiss so subsequent opens behave normally.
+    var isForcedAgentMode: Bool = false
+
     init() {
         let raw = UserDefaults.standard.string(forKey: AppStorageKeys.composeAssistantMode) ?? ComposeAssistantMode.shell.rawValue
         let resolvedMode = ComposeAssistantMode(rawValue: raw) ?? .shell

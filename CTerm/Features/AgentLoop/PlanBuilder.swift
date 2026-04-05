@@ -60,7 +60,10 @@ enum PlanBuilder {
 
         // Tag willAsk per step by running a lightweight gate simulation.
         // Kind is inferred by AgentPlanStep's initializer from the command prefix.
-        session.planSteps = assessWillAsk(steps, pwd: pwd)
+        let gated = assessWillAsk(steps, pwd: pwd)
+        // Assign per-step backend hints from the ModelRouter based on each
+        // step's kind → role mapping + the session's profile override.
+        session.planSteps = assignBackendHints(gated, profileBackend: session.profileBackend)
         session.approvalRequirement = intent.defaultApproval
 
         if steps.isEmpty {
@@ -279,6 +282,38 @@ enum PlanBuilder {
             }
         }
         return steps
+    }
+
+    // MARK: - Backend Hint Assignment
+
+    /// Maps each step's kind to a StepRole and consults the ModelRouter
+    /// to stamp an AgentBackend on the step. Peer steps are left without a
+    /// hint since their backend is fixed by the delegation contract.
+    @MainActor
+    private static func assignBackendHints(
+        _ steps: [AgentPlanStep],
+        profileBackend: AgentBackend?
+    ) -> [AgentPlanStep] {
+        steps.map { step in
+            var s = step
+            if let role = role(for: step.kind) {
+                s.backendHint = ModelRouter.shared.pick(
+                    role: role,
+                    profileBackend: profileBackend,
+                    fallback: .ollama
+                )
+            }
+            return s
+        }
+    }
+
+    private static func role(for kind: StepKind) -> StepRole? {
+        switch kind {
+        case .shell:   return .coding
+        case .browser: return .browsing
+        case .peer:    return nil
+        case .manual:  return .explaining
+        }
     }
 
     // MARK: - Will-Ask Pre-Assessment

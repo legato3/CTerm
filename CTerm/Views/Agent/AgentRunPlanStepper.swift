@@ -60,6 +60,9 @@ struct AgentRunPlanStepper: View {
                 .foregroundStyle(color(for: step.status))
                 .frame(width: 14)
             kindBadge(step.kind)
+            if let hint = step.backendHint {
+                backendBadge(hint)
+            }
             Text(step.title)
                 .font(.system(size: 11))
                 .foregroundStyle(step.status == .running ? .primary : .secondary)
@@ -89,6 +92,12 @@ struct AgentRunPlanStepper: View {
         .padding(.vertical, 1)
         .foregroundStyle(tint(for: kind))
         .background(tint(for: kind).opacity(0.12), in: Capsule())
+    }
+
+    private func backendBadge(_ backend: AgentBackend) -> some View {
+        Text(backend.displayName.lowercased())
+            .font(.system(size: 8, weight: .medium, design: .rounded))
+            .foregroundStyle(.tertiary)
     }
 
     private func perStepButtons(_ step: AgentPlanStep) -> some View {

@@ -967,6 +967,17 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
         composeController.toggle(windowSession: windowSession, focusedControllerID: focusedController?.id)
     }
 
+    @objc private func handleNLModeHashPressed(_ notification: Notification) {
+        // Only react if the keystroke came from a surface inside this window.
+        guard let sourceWindow = notification.object as? NSWindow,
+              sourceWindow === self.window else { return }
+        composeController.openForcedAgentMode(
+            windowSession: windowSession,
+            focusedControllerID: focusedController?.id,
+            prefilledText: nil
+        )
+    }
+
     private func retargetComposeOverlayIfNeeded() {
         composeController.retargetIfNeeded(windowSession: windowSession, focusedControllerID: focusedController?.id)
     }
@@ -1212,6 +1223,8 @@ class CTermWindowController: NSWindowController, NSWindowDelegate {
                            name: .ghosttyInitialSize, object: nil)
         center.addObserver(self, selector: #selector(handleSizeLimitNotification(_:)),
                            name: .ghosttySizeLimit, object: nil)
+        center.addObserver(self, selector: #selector(handleNLModeHashPressed(_:)),
+                           name: .nlModeHashPressed, object: nil)
     }
 
     // MARK: - Notification Handlers
