@@ -56,49 +56,54 @@ enum AgentActionCategory: String, Codable, CaseIterable, Sendable {
     case networkAccess  = "networkAccess"
     case gitOperations  = "gitOperations"
     case deleteFiles    = "deleteFiles"
+    case browserAutomation = "browserAutomation"
 
     var displayName: String {
         switch self {
-        case .readFiles:     return "Read files"
-        case .writeFiles:    return "Write / edit files"
-        case .runCommands:   return "Run shell commands"
-        case .networkAccess: return "Network access"
-        case .gitOperations: return "Git operations"
-        case .deleteFiles:   return "Delete files"
+        case .readFiles:           return "Read files"
+        case .writeFiles:          return "Write / edit files"
+        case .runCommands:         return "Run shell commands"
+        case .networkAccess:       return "Network access"
+        case .gitOperations:       return "Git operations"
+        case .deleteFiles:         return "Delete files"
+        case .browserAutomation:   return "Browser automation"
         }
     }
 
     var description: String {
         switch self {
-        case .readFiles:     return "cat, ls, grep, find, head, tail, etc."
-        case .writeFiles:    return "Write, create, or modify source files"
-        case .runCommands:   return "Execute arbitrary shell commands"
-        case .networkAccess: return "curl, wget, npm install, etc."
-        case .gitOperations: return "git commit, push, branch, merge, etc."
-        case .deleteFiles:   return "rm, rmdir, trash, etc."
+        case .readFiles:           return "cat, ls, grep, find, head, tail, etc."
+        case .writeFiles:          return "Write, create, or modify source files"
+        case .runCommands:         return "Execute arbitrary shell commands"
+        case .networkAccess:       return "curl, wget, npm install, etc."
+        case .gitOperations:       return "git commit, push, branch, merge, etc."
+        case .deleteFiles:         return "rm, rmdir, trash, etc."
+        case .browserAutomation:   return "Navigate, click, fill forms, extract text"
         }
     }
 
     var icon: String {
         switch self {
-        case .readFiles:     return "doc.text"
-        case .writeFiles:    return "pencil"
-        case .runCommands:   return "terminal"
-        case .networkAccess: return "network"
-        case .gitOperations: return "arrow.triangle.branch"
-        case .deleteFiles:   return "trash"
+        case .readFiles:           return "doc.text"
+        case .writeFiles:          return "pencil"
+        case .runCommands:         return "terminal"
+        case .networkAccess:       return "network"
+        case .gitOperations:       return "arrow.triangle.branch"
+        case .deleteFiles:         return "trash"
+        case .browserAutomation:   return "globe"
         }
     }
 
     /// Default autonomy level for this category.
     var defaultLevel: AgentAutonomyLevel {
         switch self {
-        case .readFiles:     return .alwaysAllow
-        case .writeFiles:    return .agentDecides
-        case .runCommands:   return .agentDecides
-        case .networkAccess: return .alwaysAsk
-        case .gitOperations: return .alwaysAsk
-        case .deleteFiles:   return .alwaysAsk
+        case .readFiles:           return .alwaysAllow
+        case .writeFiles:          return .agentDecides
+        case .runCommands:         return .agentDecides
+        case .networkAccess:       return .alwaysAsk
+        case .gitOperations:       return .alwaysAsk
+        case .deleteFiles:         return .alwaysAsk
+        case .browserAutomation:   return .agentDecides
         }
     }
 }
@@ -133,21 +138,23 @@ struct AgentPermissionProfile: Codable, Identifiable, Sendable {
     static let balanced = AgentPermissionProfile(name: "Balanced", levels: [:])
 
     static let yolo = AgentPermissionProfile(name: "YOLO", levels: [
-        .readFiles:     .alwaysAllow,
-        .writeFiles:    .alwaysAllow,
-        .runCommands:   .alwaysAllow,
-        .networkAccess: .alwaysAllow,
-        .gitOperations: .alwaysAllow,
-        .deleteFiles:   .alwaysAsk,
+        .readFiles:         .alwaysAllow,
+        .writeFiles:        .alwaysAllow,
+        .runCommands:       .alwaysAllow,
+        .networkAccess:     .alwaysAllow,
+        .gitOperations:     .alwaysAllow,
+        .deleteFiles:       .alwaysAsk,
+        .browserAutomation: .alwaysAllow,
     ])
 
     static let cautious = AgentPermissionProfile(name: "Cautious", levels: [
-        .readFiles:     .alwaysAllow,
-        .writeFiles:    .alwaysAsk,
-        .runCommands:   .alwaysAsk,
-        .networkAccess: .never,
-        .gitOperations: .alwaysAsk,
-        .deleteFiles:   .never,
+        .readFiles:         .alwaysAllow,
+        .writeFiles:        .alwaysAsk,
+        .runCommands:       .alwaysAsk,
+        .networkAccess:     .never,
+        .gitOperations:     .alwaysAsk,
+        .deleteFiles:       .never,
+        .browserAutomation: .alwaysAsk,
     ])
 }
 

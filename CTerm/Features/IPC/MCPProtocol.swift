@@ -518,6 +518,55 @@ struct MCPRouter: Sendable {
                 inputSchema: schema(properties: [:])
             ),
             MCPTool(
+                name: "delegate_task",
+                description: "Delegate a sub-task to a specific peer agent with a formal contract. The target peer receives the task via IPC messaging with instructions to call report_result when done. Supports timeout, retry, expected output format validation, and grouping for aggregation. Use this instead of raw send_message when you need structured task ownership and result tracking.",
+                inputSchema: schema(
+                    properties: [
+                        "from": prop("string", "Your peer ID (the delegating agent)"),
+                        "target_peer": prop("string", "Name of the peer to delegate to (e.g. 'implementer', 'reviewer')"),
+                        "prompt": prop("string", "The task description / instructions for the target peer"),
+                        "expected_format": prop("string", "Expected output format: freeText, json, diff, testResults, reviewNotes. Default: freeText"),
+                        "timeout": prop("number", "Timeout in seconds. Default: 300 (5 minutes)"),
+                        "max_retries": prop("number", "Max retry attempts on failure/timeout. Default: 1"),
+                        "group_id": prop("string", "Optional group UUID — delegations in the same group are aggregated into a combined result when all complete"),
+                    ],
+                    required: ["from", "target_peer", "prompt"]
+                )
+            ),
+            MCPTool(
+                name: "report_result",
+                description: "Report the result of a delegated task. Call this when you finish a task that was delegated to you via delegate_task. The result is validated against the expected format specified in the contract.",
+                inputSchema: schema(
+                    properties: [
+                        "task_id": prop("string", "The delegation task ID (from the [DELEGATION task_id=...] message you received)"),
+                        "peer_name": prop("string", "Your peer name"),
+                        "content": prop("string", "The result content"),
+                    ],
+                    required: ["task_id", "peer_name", "content"]
+                )
+            ),
+            MCPTool(
+                name: "get_delegations",
+                description: "List delegation contracts. Optionally filter by owner peer ID, target peer name, or group ID. Shows status, elapsed time, and any errors.",
+                inputSchema: schema(
+                    properties: [
+                        "owner_peer_id": prop("string", "Filter by delegating peer's ID"),
+                        "target_peer": prop("string", "Filter by target peer name"),
+                        "group_id": prop("string", "Filter by group ID"),
+                    ]
+                )
+            ),
+            MCPTool(
+                name: "get_aggregated_result",
+                description: "Get the combined result of all delegations in a group. Returns individual results from each peer plus a summary. Only meaningful after all delegations in the group have completed.",
+                inputSchema: schema(
+                    properties: [
+                        "group_id": prop("string", "The group UUID to aggregate"),
+                    ],
+                    required: ["group_id"]
+                )
+            ),
+            MCPTool(
                 name: "report_file_change",
                 description: "Report that you modified a file. Call this after each file edit so CTerm can track changes in the File Changes sidebar. The path can be relative (to work_dir) or absolute.",
                 inputSchema: schema(
@@ -724,6 +773,12 @@ struct MCPRouter: Sendable {
     - get_queue — inspect queue status (pending/running/completed)
     - clear_queue — cancel all pending tasks
 
+    ### Delegation (structured multi-agent task ownership)
+    - delegate_task — assign a sub-task to a specific peer with a formal contract (timeout, retry, expected output format, grouping)
+    - report_result — called by the target peer when the delegated task is done; result is validated against expected format
+    - get_delegations — list delegation contracts with status, elapsed time, errors; filter by owner, target, or group
+    - get_aggregated_result — combine results from all delegations in a group into one response
+
     ### Persistent memory (survives across sessions, scoped to git repo)
     - remember — store a key/value fact (architecture decisions, conventions, warnings, commands)
     - recall — search memories by keyword
@@ -751,6 +806,11 @@ struct MCPRouter: Sendable {
     **Orchestrator**: register as "orchestrator", call get_project_context, use queue_task to assign work to implementer/reviewer agents, poll receive_messages for results, broadcast completion.
     **Implementer**: register, receive task via queue or message, do the work, call report_file_change for each edit, call complete_task when done, send_message result back to orchestrator.
     **Reviewer**: register, receive review-request messages, read context, send_message findings back.
+
+    ### Delegation workflow (structured task ownership)
+    **Planner/Orchestrator**: use delegate_task to assign sub-tasks to specific peers with expected output formats and timeouts. Use a group_id to fan out multiple tasks and get_aggregated_result to collect all results. Monitor with get_delegations.
+    **Worker (coder/reviewer/browser)**: receive delegation via IPC message, do the work, call report_result with the task_id and your output. The system validates your result format and notifies the delegator.
+    **Failure handling**: if a peer times out or disappears, the delegation auto-retries (up to max_retries). The delegator gets a status update message. Use get_delegations to check for failed/timed-out tasks.
 
     ## Messaging tips
     - send_message 'to' accepts peer name — no UUID lookup needed

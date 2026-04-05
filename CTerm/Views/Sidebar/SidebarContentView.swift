@@ -81,6 +81,7 @@ struct SidebarContentView: View {
                         }
                     }
                 railButton(mode: .taskQueue, icon: "checklist", help: "Task Queue")
+                railButton(mode: .delegations, icon: "arrow.triangle.branch", help: "Delegations")
                 railButton(mode: .agentMemory, icon: "brain.head.profile", help: "Agent Memory")
                 railButton(mode: .agentPermissions, icon: "lock.shield", help: "Agent Permissions")
 
@@ -219,6 +220,9 @@ struct SidebarContentView: View {
                 .padding(.top, 4)
         case .taskQueue:
             TaskQueueView()
+                .padding(.top, 4)
+        case .delegations:
+            DelegationDashboardView()
                 .padding(.top, 4)
         case .agentMemory:
             AgentMemoryView()

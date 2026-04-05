@@ -20,6 +20,7 @@ enum IntentCategory: String, Sendable, CaseIterable {
     case fixError         // "fix this error", "debug this failure"
     case runWorkflow      // "set up CI", "refactor module X", multi-step tasks
     case delegateToPeer   // "ask the reviewer to…", "tell the implementer…"
+    case browserResearch  // "look up the docs for…", "check the release notes…"
 
     var label: String {
         switch self {
@@ -30,6 +31,7 @@ enum IntentCategory: String, Sendable, CaseIterable {
         case .fixError:        return "Fix Error"
         case .runWorkflow:     return "Run Workflow"
         case .delegateToPeer:  return "Delegate to Peer"
+        case .browserResearch: return "Browser Research"
         }
     }
 
@@ -38,7 +40,7 @@ enum IntentCategory: String, Sendable, CaseIterable {
         switch self {
         case .explain, .generateCommand, .inspectRepo:
             return false
-        case .executeCommand, .fixError, .runWorkflow, .delegateToPeer:
+        case .executeCommand, .fixError, .runWorkflow, .delegateToPeer, .browserResearch:
             return true
         }
     }
@@ -53,6 +55,8 @@ enum IntentCategory: String, Sendable, CaseIterable {
         case .fixError, .runWorkflow:
             return .planLevel
         case .delegateToPeer:
+            return .planLevel
+        case .browserResearch:
             return .planLevel
         }
     }
@@ -100,6 +104,15 @@ enum IntentRouter {
         "orchestrator", "implementer", "reviewer", "send to",
     ]
 
+    private static let browserResearchKeywords: Set<String> = [
+        "look up", "check the docs", "release notes", "documentation",
+        "browse", "open the page", "search the web", "api docs",
+        "check the website", "read the page", "scrape", "inspect the site",
+        "dashboard", "web form", "package docs", "changelog",
+        "what version", "latest release", "npm page", "github page",
+        "pypi", "crates.io", "docs.rs", "mdn", "stack overflow",
+    ]
+
     // MARK: - Classification
 
     /// Classify a user intent using fast keyword matching.
@@ -110,6 +123,11 @@ enum IntentRouter {
         // Check for shell error context — strong signal for fixError
         if lower.contains("<latest_shell_error>") || lower.contains("fix this error") {
             return (.fixError, 0.95)
+        }
+
+        // Check for browser research signals
+        if browserResearchKeywords.contains(where: { lower.contains($0) }) {
+            return (.browserResearch, 0.85)
         }
 
         // Check for peer delegation signals
@@ -125,6 +143,7 @@ enum IntentRouter {
             (.inspectRepo,     score(lower, against: inspectKeywords)),
             (.fixError,        score(lower, against: fixKeywords)),
             (.runWorkflow,     score(lower, against: workflowKeywords)),
+            (.browserResearch, score(lower, against: browserResearchKeywords)),
         ]
 
         let best = scores.max(by: { $0.1 < $1.1 })!
@@ -144,7 +163,7 @@ enum IntentRouter {
     static func classifyWithLLM(_ input: String, pwd: String?) async -> IntentCategory {
         let prompt = """
         Classify this user request into exactly one category. Respond with only the category name.
-        Categories: explain, generateCommand, executeCommand, inspectRepo, fixError, runWorkflow, delegateToPeer
+        Categories: explain, generateCommand, executeCommand, inspectRepo, fixError, runWorkflow, delegateToPeer, browserResearch
 
         Request: \(input.prefix(500))
 

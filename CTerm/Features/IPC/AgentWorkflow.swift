@@ -58,12 +58,16 @@ struct AgentWorkflow: Identifiable, Sendable {
 
         let roleContext: String
         switch roleName.lowercased() {
-        case "orchestrator":
-            roleContext = "You are the ORCHESTRATOR. Your job is to plan the work, break it into concrete tasks, and delegate to your teammates."
-        case "implementer":
-            roleContext = "You are the IMPLEMENTER. Your job is to write and edit code as directed by the orchestrator."
+        case "orchestrator", "planner":
+            roleContext = "You are the \(roleName.uppercased()). Your job is to plan the work, break it into concrete tasks, and delegate to your teammates using delegate_task. Use group_id to fan out parallel tasks and get_aggregated_result to collect results."
+        case "implementer", "coder":
+            roleContext = "You are the \(roleName.uppercased()). Your job is to write and edit code as directed. When you receive a delegation, do the work and call report_result with the task_id when done."
         case "reviewer":
-            roleContext = "You are the REVIEWER. Your job is to review code and give structured feedback when asked."
+            roleContext = "You are the REVIEWER. Your job is to review code and give structured feedback. When you receive a delegation, review the code and call report_result with your findings."
+        case "researcher":
+            roleContext = "You are the RESEARCHER. Your job is to browse documentation, search for solutions, and gather context. When you receive a delegation, research the topic and call report_result with your findings."
+        case "tester":
+            roleContext = "You are the TESTER. Your job is to run tests, analyze failures, and report results. When you receive a delegation, run the relevant tests and call report_result with pass/fail results."
         default:
             roleContext = "You are the \(roleName.uppercased()) agent."
         }
@@ -125,6 +129,18 @@ struct AgentWorkflow: Identifiable, Sendable {
                 AgentRole(name: "orchestrator", description: "Plans and delegates tasks"),
                 AgentRole(name: "implementer", description: "Writes and edits code"),
                 AgentRole(name: "reviewer", description: "Reviews and gives feedback"),
+            ]
+        ),
+        AgentWorkflow(
+            name: "Full Squad",
+            icon: "person.3.sequence",
+            description: "Planner, coder, reviewer, browser research, and test runner",
+            roles: [
+                AgentRole(name: "planner", description: "Breaks down goals into delegated sub-tasks"),
+                AgentRole(name: "coder", description: "Implements code changes"),
+                AgentRole(name: "reviewer", description: "Reviews code and gives structured feedback"),
+                AgentRole(name: "researcher", description: "Browses docs and gathers context"),
+                AgentRole(name: "tester", description: "Runs tests and reports results"),
             ]
         ),
     ]

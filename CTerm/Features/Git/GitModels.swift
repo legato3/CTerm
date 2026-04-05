@@ -15,6 +15,7 @@ enum SidebarMode: Sendable {
     case context
     case fileChanges
     case taskQueue
+    case delegations
     case agentMemory
     case testRunner
     case triggers

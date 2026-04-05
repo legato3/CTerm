@@ -310,6 +310,18 @@ final class CTermMCPServer {
         case "report_file_change":
             return await handleReportFileChange(id: id, arguments: arguments)
 
+        case "delegate_task":
+            return await handleDelegateTask(id: id, arguments: arguments)
+
+        case "report_result":
+            return await handleReportResult(id: id, arguments: arguments)
+
+        case "get_delegations":
+            return await handleGetDelegations(id: id, arguments: arguments)
+
+        case "get_aggregated_result":
+            return await handleGetAggregatedResult(id: id, arguments: arguments)
+
         case "queue_task":
             return handleQueueTask(id: id, arguments: arguments)
 
@@ -778,6 +790,148 @@ final class CTermMCPServer {
     private func handleClearQueue(id: JSONRPCId) -> (statusCode: Int, body: Data?) {
         TaskQueueStore.shared.clearPending()
         return toolSuccess(id: id, text: "{\"cleared\":true}")
+    }
+
+    // MARK: - Delegation Handlers
+
+    private func handleDelegateTask(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) async -> (statusCode: Int, body: Data?) {
+        guard let fromStr = arguments?["from"]?.stringValue,
+              let fromUUID = UUID(uuidString: fromStr) else {
+            return toolError(id: id, text: "Missing or invalid 'from' peer ID")
+        }
+        guard let targetPeer = arguments?["target_peer"]?.stringValue, !targetPeer.isEmpty else {
+            return toolError(id: id, text: "Missing 'target_peer'")
+        }
+        guard let prompt = arguments?["prompt"]?.stringValue, !prompt.isEmpty else {
+            return toolError(id: id, text: "Missing 'prompt'")
+        }
+
+        let formatStr = arguments?["expected_format"]?.stringValue ?? "freeText"
+        let expectedFormat = ExpectedOutputFormat(rawValue: formatStr) ?? .freeText
+        let timeout = (arguments?["timeout"]?.rawValue as? Double) ?? 300
+        let maxRetries = (arguments?["max_retries"]?.rawValue as? Int) ?? 1
+        let groupID = arguments?["group_id"]?.stringValue.flatMap { UUID(uuidString: $0) }
+
+        let contract = await DelegationCoordinator.shared.createContract(
+            ownerPeerID: fromUUID,
+            targetPeerName: targetPeer,
+            prompt: prompt,
+            expectedFormat: expectedFormat,
+            timeoutSeconds: timeout,
+            maxRetries: maxRetries,
+            groupID: groupID
+        )
+
+        let result: [String: Any] = [
+            "task_id": contract.id.uuidString,
+            "status": contract.status.rawValue,
+            "target_peer": contract.targetPeerName,
+            "timeout_seconds": Int(timeout),
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: result),
+              let json = String(data: data, encoding: .utf8) else {
+            return toolSuccess(id: id, text: "{\"task_id\":\"\(contract.id.uuidString)\"}")
+        }
+        return toolSuccess(id: id, text: json)
+    }
+
+    private func handleReportResult(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) async -> (statusCode: Int, body: Data?) {
+        guard let taskIDStr = arguments?["task_id"]?.stringValue,
+              let taskID = UUID(uuidString: taskIDStr) else {
+            return toolError(id: id, text: "Missing or invalid 'task_id'")
+        }
+        guard let peerName = arguments?["peer_name"]?.stringValue else {
+            return toolError(id: id, text: "Missing 'peer_name'")
+        }
+        guard let content = arguments?["content"]?.stringValue else {
+            return toolError(id: id, text: "Missing 'content'")
+        }
+
+        let (accepted, error) = await DelegationCoordinator.shared.reportResult(
+            taskID: taskID,
+            peerName: peerName,
+            content: content
+        )
+
+        if accepted {
+            return toolSuccess(id: id, text: "{\"accepted\":true}")
+        } else {
+            return toolError(id: id, text: error ?? "Result not accepted")
+        }
+    }
+
+    private func handleGetDelegations(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) async -> (statusCode: Int, body: Data?) {
+        let contracts: [DelegationContract]
+
+        if let ownerStr = arguments?["owner_peer_id"]?.stringValue,
+           let ownerID = UUID(uuidString: ownerStr) {
+            contracts = await DelegationCoordinator.shared.contractsForOwner(ownerID)
+        } else if let targetPeer = arguments?["target_peer"]?.stringValue {
+            contracts = await DelegationCoordinator.shared.contractsForTarget(targetPeer)
+        } else if let groupStr = arguments?["group_id"]?.stringValue,
+                  let groupID = UUID(uuidString: groupStr) {
+            let agg = await DelegationCoordinator.shared.aggregatedResult(groupID: groupID)
+            contracts = agg.contracts
+        } else {
+            contracts = await DelegationCoordinator.shared.allContracts()
+        }
+
+        let items: [[String: Any]] = contracts.map { c in
+            var d: [String: Any] = [
+                "task_id": c.id.uuidString,
+                "target_peer": c.targetPeerName,
+                "status": c.status.rawValue,
+                "prompt": String(c.prompt.prefix(200)),
+                "elapsed_seconds": Int(c.elapsedSeconds),
+                "expected_format": c.expectedFormat.rawValue,
+            ]
+            if let error = c.lastError { d["error"] = error }
+            if let result = c.result { d["has_result"] = true; d["result_valid"] = result.isValid }
+            if let groupID = c.groupID { d["group_id"] = groupID.uuidString }
+            return d
+        }
+
+        let json = (try? JSONSerialization.data(withJSONObject: ["delegations": items])).flatMap {
+            String(data: $0, encoding: .utf8)
+        } ?? "{\"delegations\":[]}"
+        return toolSuccess(id: id, text: json)
+    }
+
+    private func handleGetAggregatedResult(
+        id: JSONRPCId,
+        arguments: [String: AnyCodable]?
+    ) async -> (statusCode: Int, body: Data?) {
+        guard let groupStr = arguments?["group_id"]?.stringValue,
+              let groupID = UUID(uuidString: groupStr) else {
+            return toolError(id: id, text: "Missing or invalid 'group_id'")
+        }
+
+        let agg = await DelegationCoordinator.shared.aggregatedResult(groupID: groupID)
+
+        let result: [String: Any] = [
+            "group_id": groupID.uuidString,
+            "total": agg.contracts.count,
+            "completed": agg.completedResults.count,
+            "failed": agg.failedContracts.count,
+            "is_complete": agg.isComplete,
+            "summary": agg.summary,
+            "combined_output": String(agg.combinedOutput.prefix(8000)),
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: result),
+              let json = String(data: data, encoding: .utf8) else {
+            return toolError(id: id, text: "Failed to serialize aggregated result")
+        }
+        return toolSuccess(id: id, text: json)
     }
 
     private func handleGetLastError(id: JSONRPCId, arguments: [String: AnyCodable]?) -> (statusCode: Int, body: Data?) {
